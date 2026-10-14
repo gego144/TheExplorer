@@ -1,16 +1,19 @@
-.PHONY: app run install clean
+.PHONY: app run install clean test
 
 app:
 	./scripts/build-app.sh
 
-run: app
-	open build/TheExplorer.app
+# Installs to /Applications and opens that copy, so the app you use has one stable home.
+run: install
+	open /Applications/TheExplorer.app
 
-# Copies the app to /Applications so it has a stable home for Full Disk Access.
 install: app
 	rm -rf /Applications/TheExplorer.app
 	cp -R build/TheExplorer.app /Applications/
 	@echo "Installed /Applications/TheExplorer.app"
+
+test:
+	swift test
 
 clean:
 	rm -rf .build build

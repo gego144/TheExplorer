@@ -8,6 +8,13 @@ enum Destination: Hashable {
     case storage
 }
 
+enum NewItemKind {
+    case folder
+    case file
+
+    var title: String { self == .folder ? "New Folder" : "New File" }
+}
+
 enum SidebarItem: Hashable {
     case recents
     case storage
@@ -61,12 +68,16 @@ final class BrowserModel {
     }
 
     var renaming: FileItem?
+    /// Set to show the name prompt for a new folder or file in the current folder.
+    var creating: NewItemKind?
     /// Bumped to ask the window to focus the search field.
     var searchFocusRequest = 0
 
     let search = SearchModel()
     let recents = RecentsModel()
     @ObservationIgnored private var started = false
+    @ObservationIgnored private var pendingSelection: Set<String>?
+    @ObservationIgnored private var listingFailed = false
     @ObservationIgnored private var loadTask: Task<Void, Never>?
     @ObservationIgnored private lazy var watcher = DirectoryWatcher { [weak self] in self?.reload(keepSelection: true) }
 
@@ -172,6 +183,7 @@ final class BrowserModel {
             currentURL = url
             items = []
             selection = []
+            pendingSelection = nil
             UserDefaults.standard.set(url.path, forKey: "lastPath")
         }
         reload(selecting: select.map { [$0.standardizedFileURL] })
@@ -229,6 +241,8 @@ final class BrowserModel {
 
     func reload(keepSelection: Bool = false, selecting: [URL]? = nil) {
         let url = currentURL
+        // Survives being superseded (e.g. the folder watcher reloading right after a drop).
+        if let selecting { pendingSelection = Set(selecting.map(\.standardizedFileURL.path)) }
         let previousSelection = selection
         loadTask?.cancel()
         isLoading = true
@@ -248,17 +262,22 @@ final class BrowserModel {
             switch result {
             case .success(let items):
                 self.items = items
-                self.loadError = nil
-                let present = Set(items.map(\.url))
-                if let selecting {
-                    self.selection = Set(selecting).intersection(present)
+                // Only clear errors from listing; errors from actions (trash, drops…) stay visible.
+                if self.listingFailed {
+                    self.loadError = nil
+                    self.listingFailed = false
+                }
+                if let pending = self.pendingSelection {
+                    self.selection = Set(items.filter { pending.contains($0.path) }.map(\.url))
+                    self.pendingSelection = nil
                 } else if keepSelection {
-                    self.selection = previousSelection.intersection(present)
+                    self.selection = previousSelection.intersection(Set(items.map(\.url)))
                 }
                 FolderSizeStore.shared.request(items.filter(\.isFolder).map(\.path))
             case .failure(let error):
                 self.items = []
                 self.loadError = Self.describe(error, for: url)
+                self.listingFailed = true
             }
             self.watcher.watch(url)
         }
@@ -324,16 +343,36 @@ final class BrowserModel {
         reload(keepSelection: true)
     }
 
-    func createFolder() {
-        var name = "untitled folder"
+    /// Suggests a name that doesn't clash with anything in the current folder.
+    func suggestedName(for kind: NewItemKind) -> String {
+        let (stem, ext) = kind == .folder ? ("untitled folder", "") : ("untitled", ".txt")
+        var name = stem + ext
         var counter = 2
         while FileManager.default.fileExists(atPath: currentURL.appendingPathComponent(name).path) {
-            name = "untitled folder \(counter)"
+            name = "\(stem) \(counter)\(ext)"
             counter += 1
         }
+        return name
+    }
+
+    func create(_ kind: NewItemKind, named raw: String) {
+        let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, !name.contains("/") else {
+            loadError = "“\(raw)” isn't a valid name."
+            return
+        }
         let url = currentURL.appendingPathComponent(name)
+        guard !FileManager.default.fileExists(atPath: url.path) else {
+            loadError = "An item named “\(name)” already exists here."
+            return
+        }
         do {
-            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
+            switch kind {
+            case .folder:
+                try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
+            case .file:
+                try Data().write(to: url, options: .withoutOverwriting)
+            }
             reload(selecting: [url])
         } catch {
             loadError = error.localizedDescription
@@ -351,6 +390,44 @@ final class BrowserModel {
             loadError = error.localizedDescription
         }
     }
+
+    /// Shown in the status bar while a drop is being moved/copied.
+    private(set) var transferStatus: String?
+
+    /// Moves (or copies, across volumes or with ⌥) dropped items into `folder`.
+    /// Returns false when nothing could be dropped there, so the drop is rejected.
+    @discardableResult
+    func receiveDrop(_ urls: [URL], into folder: URL) -> Bool {
+        let folder = folder.standardizedFileURL
+        let sources = FileTransfer.validSources(urls, into: folder)
+        guard !sources.isEmpty else { return false }
+        let optionHeld = NSEvent.modifierFlags.contains(.option)
+        let copying = sources.contains { FileTransfer.mode(for: $0, into: folder, optionHeld: optionHeld) == .copy }
+        let noun = sources.count == 1 ? "“\(sources[0].lastPathComponent)”" : "\(sources.count) items"
+        transferStatus = "\(copying ? "Copying" : "Moving") \(noun) to “\(folder.lastPathComponent)”…"
+
+        Task {
+            let outcome = await Task.detached(priority: .userInitiated) {
+                FileTransfer.perform(sources, into: folder, optionHeld: optionHeld)
+            }.value
+            transferStatus = nil
+            if !outcome.failures.isEmpty {
+                loadError = "Some items couldn't be \(copying ? "copied" : "moved"): " + outcome.failures.joined(separator: "; ")
+            }
+            // Sizes changed for the destination and (for moves) every source folder.
+            let touched = Set([folder.path] + sources.map { $0.deletingLastPathComponent().path })
+            touched.forEach(FolderSizeStore.shared.invalidate)
+            FolderSizeStore.shared.request(Array(touched), force: true)
+            if folder == currentURL {
+                reload(selecting: outcome.placed)
+            } else {
+                reload(keepSelection: true)
+            }
+        }
+        return true
+    }
+
+    var canCreateItems: Bool { destination == .folder && !isSearching }
 
     func dismissError() { loadError = nil }
 }

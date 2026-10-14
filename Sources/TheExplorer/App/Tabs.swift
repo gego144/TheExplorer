@@ -37,7 +37,9 @@ enum Tabs {
     private static let sessionKey = "savedTabGroups"
 
     static func open(_ url: URL, with openWindow: OpenWindowAction) {
-        let host = NSApp.keyWindow.flatMap { $0.tabbingIdentifier == tabbingIdentifier ? $0 : nil }
+        // Prefer the window that asked; fall back to the frontmost browser window (e.g. app inactive).
+        let candidates = [NSApp.keyWindow, NSApp.mainWindow].compactMap { $0 } + NSApp.orderedWindows
+        let host = candidates.first { $0.tabbingIdentifier == tabbingIdentifier && $0.isVisible }
         open(path: url.standardizedFileURL.path, host: host, activate: true, using: openWindow)
     }
 

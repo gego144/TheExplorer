@@ -29,7 +29,13 @@ struct ContentView: View {
         .quickLookPreview($model.previewURL)
         .alert("Rename", isPresented: Binding(get: { model.renaming != nil }, set: { if !$0 { model.renaming = nil } }),
                presenting: model.renaming) { item in
-            RenameField(item: item, model: model)
+            NamePrompt(initialName: item.name, confirmTitle: "Rename") { model.rename(item, to: $0) }
+        }
+        .alert(model.creating?.title ?? "", isPresented: Binding(get: { model.creating != nil }, set: { if !$0 { model.creating = nil } }),
+               presenting: model.creating) { kind in
+            NamePrompt(initialName: model.suggestedName(for: kind), confirmTitle: "Create") { model.create(kind, named: $0) }
+        } message: { kind in
+            Text("In “\(FileManager.default.displayName(atPath: model.currentURL.path))”")
         }
         .focusedSceneValue(\.browser, model)
     }
@@ -85,7 +91,8 @@ struct ContentView: View {
                     Toggle("Folders First", isOn: $model.foldersFirst)
                     Toggle("Show Hidden Files", isOn: $model.showHidden)
                     Divider()
-                    Button("New Folder") { model.createFolder() }
+                    Button("New Folder…") { model.creating = .folder }
+                    Button("New File…") { model.creating = .file }
                     Button("Recalculate Folder Sizes") { model.recalculateSizes() }
                     Button("Open in Terminal") { FileActions.openInTerminal(model.currentURL) }
                 } label: {
@@ -128,20 +135,20 @@ struct ContentView: View {
     }
 }
 
-private struct RenameField: View {
-    let item: FileItem
-    let model: BrowserModel
+private struct NamePrompt: View {
+    let confirmTitle: String
+    let onConfirm: (String) -> Void
     @State private var name: String
 
-    init(item: FileItem, model: BrowserModel) {
-        self.item = item
-        self.model = model
-        _name = State(initialValue: item.name)
+    init(initialName: String, confirmTitle: String, onConfirm: @escaping (String) -> Void) {
+        self.confirmTitle = confirmTitle
+        self.onConfirm = onConfirm
+        _name = State(initialValue: initialName)
     }
 
     var body: some View {
         TextField("Name", text: $name)
-        Button("Rename") { model.rename(item, to: name) }
+        Button(confirmTitle) { onConfirm(name) }
             .keyboardShortcut(.defaultAction)
         Button("Cancel", role: .cancel) {}
     }

@@ -56,6 +56,13 @@ final class StorageModel {
 
     init() {
         refreshVolume()
+        // Re-check after you come back from System Settings, so the banner reflects a new grant.
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated {
+                let shared = StorageModel.shared
+                shared.hasFullDiskAccess = StorageModel.checkFullDiskAccess()
+            }
+        }
     }
 
     /// Breadcrumb from the scan root down to the focused folder.

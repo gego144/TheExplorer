@@ -18,7 +18,9 @@ Written in SwiftUI. Spotlight powers search across the whole Mac, and a parallel
 - **Recents.** The newest files and folders in your home folder, by date created, modified or added, over the last 24 hours to 90 days. Grouped by day, updated live, with an option to hide clutter.
 - **Favorites.** Pin files or folders to the sidebar with ⌘D or by dragging them in, and drag to reorder.
 - **Inspector.** Size, size on disk, item count, created, modified and last-opened dates, and the full path for whatever is selected.
-- **The basics.** Quick Look (Space), drag and drop out of the app, rename, new folder, Move to Trash, copy path, reveal in Finder, open in Terminal, and eject for removable drives.
+- **Drag and drop.** Drag items between tabs, windows, or from Finder. Drop onto empty space to put them in the folder you're viewing, onto a folder row to put them inside it, or onto a path bar segment to send them up the tree. Like Finder, it moves within a disk and copies across disks; hold ⌥ to copy. If an item with the same name already exists, both are kept ("name 2") and nothing is overwritten.
+- **Right-click anywhere.** Right-click empty space in a folder to create a new folder or file (you're asked for the name), open that folder in Terminal, copy its path, or favorite it. Right-click an item for open, open in new tab, Quick Look, rename, copy path, Terminal and more.
+- **The basics.** Quick Look (Space), drag and drop out of the app, Move to Trash, reveal in Finder, and eject for removable drives.
 
 ## Requirements
 
@@ -28,23 +30,36 @@ Written in SwiftUI. Spotlight powers search across the whole Mac, and a parallel
 ## Build and run
 
 ```sh
-make run        # build a release .app into build/ and open it
-make install    # copy it to /Applications
+make run        # build, install to /Applications, and open it
+make install    # build and install without opening
+make test       # run the test suite
 make clean
 ```
 
-`make app` runs `scripts/build-app.sh`, which builds with SwiftPM and wraps the binary in an app bundle. Set `CONFIG=debug` for a debug build. To work on the code in Xcode, run `open Package.swift`.
+`make app` runs `scripts/build-app.sh`, which builds with SwiftPM and wraps the binary in an app bundle in `build/`. A debug build (`CONFIG=debug ./scripts/build-app.sh`) goes to `build/debug/` instead, so it never replaces the copy you use. To work on the code in Xcode, run `open Package.swift`.
 
-## Permissions
+## Permissions and signing
 
-- **Full Disk Access.** Without it, protected folders (Mail, Messages, other apps' data) are skipped and storage totals come out low. Grant it in System Settings › Privacy & Security › Full Disk Access; the Storage view has a button that takes you there.
-- **Code signing.** By default the app is ad-hoc signed. macOS ties privacy permissions to the signature, so every rebuild loses Full Disk Access. To keep it, build with a stable identity:
+macOS remembers privacy permissions (Desktop, Documents, Downloads, Full Disk Access…) per app, identified by its code signature. An ad-hoc signature changes on every build, which makes macOS ask for permissions again after every rebuild. To avoid that, the build script signs with a stable identity:
 
-  ```sh
-  SIGN_IDENTITY="Apple Development: Your Name (TEAMID)" make install
-  ```
+1. `SIGN_IDENTITY`, if you set it (for example an Apple Development certificate).
+2. Otherwise, a self-signed certificate called **TheExplorer Local Signing**, if it's in your keychain.
+3. Otherwise, ad-hoc, with a warning.
 
-  You can list your identities with `security find-identity -v -p codesigning`.
+To create the local certificate on a new Mac:
+
+```sh
+WORK=$(mktemp -d) && cd "$WORK"
+printf '[req]\ndistinguished_name=dn\nx509_extensions=ext\nprompt=no\n[dn]\nCN=TheExplorer Local Signing\n[ext]\nbasicConstraints=critical,CA:false\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=critical,codeSigning\n' > cert.cnf
+/usr/bin/openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 3650 -config cert.cnf
+/usr/bin/openssl pkcs12 -export -inkey key.pem -in cert.pem -name "TheExplorer Local Signing" -out id.p12 -passout pass:temp
+security import id.p12 -k ~/Library/Keychains/login.keychain-db -P temp -T /usr/bin/codesign
+cd - && rm -rf "$WORK"
+```
+
+It shows as "not trusted" in Keychain Access. That's expected for a self-signed certificate and doesn't stop it signing. To remove it, delete it in Keychain Access.
+
+Grant **Full Disk Access** (System Settings › Privacy & Security › Full Disk Access) so the storage scan can include protected folders like Mail and Messages. The Storage view has a button that opens the right pane.
 
 ## Keyboard shortcuts
 
@@ -61,7 +76,8 @@ make clean
 | Add to or remove from Favorites | ⌘D |
 | Show in enclosing folder / Reveal in Finder | ⌘R / ⌥⌘R |
 | Copy path | ⌥⌘C |
-| New folder / Rename | ⇧⌘N / ⇧⌘↩ |
+| New folder / New file / Rename | ⇧⌘N / ⌥⌘N / ⇧⌘↩ |
+| Open current folder in Terminal | ⌃⌘T |
 | Move to Trash | ⌘⌫ |
 | Inspector / Hidden files | ⌘I / ⇧⌘. |
 | Refresh | ⇧⌘R |
@@ -85,9 +101,15 @@ Debug builds can drive themselves through a scripted set of scenes and save a sc
 
 ```sh
 CONFIG=debug ./scripts/build-app.sh
-open -n --env EXPLORER_SNAPSHOT_DIR=/tmp/shots --env EXPLORER_SNAPSHOT_QUIT=1 \
+open -g -n --env EXPLORER_SNAPSHOT_DIR=/tmp/shots --env EXPLORER_SNAPSHOT_QUIT=1 \
     --env "EXPLORER_SCENES=folder:~/Dev;newtab:~/Downloads;recents;search:swift;searchmac:swift;storage:~/Dev" \
-    build/TheExplorer.app
+    build/debug/TheExplorer.app
 ```
 
-Scenes are separated by `;`. The available scenes are `folder:<path>`, `select:<path>`, `newtab:<path>`, `plus`, `recents`, `search:<text>`, `searchmac:<text>`, `scope:mac|folder`, `storage[:<path>]` and `wait:<seconds>`. Launch with `open`; running the binary directly can leave the app without a window.
+Scenes are separated by `;`. The available scenes are `folder:<path>`, `select:<path>`, `newtab:<path>`, `plus`, `recents`, `search:<text>`, `searchmac:<text>`, `scope:mac|folder`, `create:folder|file`, `drop:<source>><folder>`, `storage[:<path>]` and `wait:<seconds>`. Launch with `open -g` so the app never takes focus; running the binary directly can leave the app without a window. To run fully hidden and just read the log, add `-j` and `--env EXPLORER_NO_CAPTURE=1`.
+
+## Tests
+
+```sh
+make test
+```

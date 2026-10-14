@@ -134,8 +134,11 @@ struct FileContextMenu: View {
             }
             Button(urls.count == 1 ? "Copy Path" : "Copy Paths") { FileActions.copyPaths(urls) }
             Button("Reveal in Finder") { FileActions.revealInFinder(urls) }
-            if let single, (try? single.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
-                Button("Open in Terminal") { FileActions.openInTerminal(single) }
+            if let single {
+                let isFolder = FileItem(url: single)?.isFolder == true
+                Button(isFolder ? "Open in Terminal" : "Open Enclosing Folder in Terminal") {
+                    FileActions.openInTerminal(isFolder ? single : single.deletingLastPathComponent())
+                }
             }
             if let single, let item = FileItem(url: single), model.destination == .folder, !model.isSearching {
                 Button("Rename…") { model.renaming = item }

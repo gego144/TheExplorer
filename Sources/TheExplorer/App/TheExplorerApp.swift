@@ -72,8 +72,14 @@ struct ExplorerCommands: Commands {
             .keyboardShortcut(.downArrow, modifiers: [.command, .option])
             .disabled(!(model?.activeSelection.contains { FileItem(url: $0)?.isFolder == true } ?? false))
             Divider()
-            Button("New Folder") { model?.createFolder() }
+            Button("New Folder…") { model?.creating = .folder }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
+                .disabled(!(model?.canCreateItems ?? false))
+            Button("New File…") { model?.creating = .file }
+                .keyboardShortcut("n", modifiers: [.command, .option])
+                .disabled(!(model?.canCreateItems ?? false))
+            Button("Open in Terminal") { model.map { FileActions.openInTerminal($0.currentURL) } }
+                .keyboardShortcut("t", modifiers: [.command, .control])
                 .disabled(model?.destination != .folder)
         }
 

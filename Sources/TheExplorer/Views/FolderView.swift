@@ -62,11 +62,28 @@ struct FolderView: View {
                 .defaultVisibility(.hidden)
             } rows: {
                 ForEach(rows) { row in
-                    TableRow(row).draggable(row.item.url)
+                    if row.item.isFolder {
+                        // Dropping onto a folder row puts the items inside that folder.
+                        TableRow(row)
+                            .draggable(row.item.url)
+                            .dropDestination(for: URL.self) { urls in
+                                model.receiveDrop(urls, into: row.item.url)
+                            }
+                    } else {
+                        TableRow(row).draggable(row.item.url)
+                    }
                 }
             }
+            // Dropping anywhere else (empty space, file rows) puts items in the folder being viewed.
+            .dropDestination(for: URL.self) { urls, _ in
+                model.receiveDrop(urls, into: model.currentURL)
+            }
             .contextMenu(forSelectionType: URL.self) { urls in
-                FileContextMenu(urls: urls, model: model)
+                if urls.isEmpty {
+                    FolderBackgroundMenu(model: model)
+                } else {
+                    FileContextMenu(urls: urls, model: model)
+                }
             } primaryAction: { urls in
                 let folders = model.items.filter { urls.contains($0.url) && $0.isFolder }
                 if NSEvent.modifierFlags.contains(.command), !folders.isEmpty {
@@ -86,10 +103,33 @@ struct FolderView: View {
                         systemImage: "folder",
                         description: Text(model.items.isEmpty ? "This folder has no items." : "Hidden files or the current filter are hiding everything here.")
                     )
+                    // Let right-clicks reach the table so the folder menu still works when empty.
+                    .allowsHitTesting(false)
                 }
             }
             StatusBar(model: model, rows: rows)
         }
+    }
+}
+
+/// Menu for right-clicking empty space: acts on the folder being viewed.
+private struct FolderBackgroundMenu: View {
+    let model: BrowserModel
+
+    var body: some View {
+        let folder = model.currentURL
+        Button("New Folder…") { model.creating = .folder }
+        Button("New File…") { model.creating = .file }
+        Divider()
+        Button("Open in Terminal") { FileActions.openInTerminal(folder) }
+        Button("Copy Path") { FileActions.copyPaths([folder]) }
+        Button("Reveal in Finder") { FileActions.revealInFinder([folder]) }
+        Button(FavoritesStore.shared.contains(folder) ? "Remove from Favorites" : "Add to Favorites") {
+            FavoritesStore.shared.toggle(folder)
+        }
+        Divider()
+        Button(model.showHidden ? "Hide Hidden Files" : "Show Hidden Files") { model.showHidden.toggle() }
+        Button("Refresh") { model.reload(keepSelection: true) }
     }
 }
 
@@ -139,7 +179,7 @@ struct PathBar: View {
                                     Image(systemName: "chevron.compact.right")
                                         .foregroundStyle(.tertiary)
                                 }
-                                PathSegment(url: url, isCurrent: index == trail.count - 1) {
+                                PathSegment(url: url, isCurrent: index == trail.count - 1, onDrop: { model.receiveDrop($0, into: url) }) {
                                     model.navigate(to: url, select: index + 1 < trail.count ? trail[index + 1] : nil)
                                 }
                             }
@@ -187,8 +227,10 @@ struct PathBar: View {
 private struct PathSegment: View {
     let url: URL
     let isCurrent: Bool
+    let onDrop: ([URL]) -> Bool
     let action: () -> Void
     @State private var hovering = false
+    @State private var dropTargeted = false
 
     var body: some View {
         Button(action: action) {
@@ -202,11 +244,14 @@ private struct PathSegment: View {
             }
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
-            .background(hovering ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear), in: .rect(cornerRadius: 5))
+            .background(dropTargeted ? AnyShapeStyle(.tint.opacity(0.3)) : hovering ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear),
+                        in: .rect(cornerRadius: 5))
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+        .dropDestination(for: URL.self) { urls, _ in onDrop(urls) } isTargeted: { dropTargeted = $0 }
         .contextMenu {
+            Button("Open in Terminal") { FileActions.openInTerminal(url) }
             Button("Copy Path") { FileActions.copyPaths([url]) }
             Button("Reveal in Finder") { FileActions.revealInFinder([url]) }
             Button(FavoritesStore.shared.contains(url) ? "Remove from Favorites" : "Add to Favorites") {
@@ -236,7 +281,10 @@ private struct StatusBar: View {
                 Text("· \(selected.count.formatted()) selected" + (selectedBytes > 0 ? " (\(Format.bytes(selectedBytes)))" : ""))
             }
             Spacer()
-            if model.isLoading {
+            if let status = model.transferStatus {
+                ProgressView().controlSize(.small)
+                Text(status).lineLimit(1).truncationMode(.middle)
+            } else if model.isLoading {
                 ProgressView().controlSize(.small)
             }
             if let available = availableSpace {

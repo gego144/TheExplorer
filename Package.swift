@@ -9,6 +9,12 @@ let package = Package(
             name: "TheExplorer",
             path: "Sources/TheExplorer",
             swiftSettings: [.swiftLanguageMode(.v5)]
-        )
+        ),
+        .testTarget(
+            name: "TheExplorerTests",
+            dependencies: ["TheExplorer"],
+            path: "Tests/TheExplorerTests",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
     ]
 )
