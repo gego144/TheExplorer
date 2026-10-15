@@ -91,7 +91,10 @@ private struct WorkspaceWindow: View {
 }
 
 struct ExplorerCommands: Commands {
-    @FocusedValue(\.workspace) private var workspace
+    @FocusedValue(\.workspace) private var focusedWorkspace
+    /// The focused window's workspace. Scripted debug runs stay in the background, where no
+    /// window counts as focused, so they fall back to the first window.
+    private var workspace: Workspace? { focusedWorkspace ?? Session.scriptedWorkspace }
 
     private var model: BrowserModel? { workspace?.selected }
 

@@ -81,6 +81,23 @@ enum DebugSnapshots {
                 if let key = SortKey(rawValue: argument) { model.sort = SortSpec(key: key, ascending: key == .name) }
             case "scope": model.searchScope = argument == "mac" ? .mac : .folder
             case "wait": wait = Double(argument) ?? 2
+            // Real input, delivered to this window only (see InputDriver).
+            case "key": InputDriver.press(parts[1])
+            case "type": await InputDriver.type(parts.count > 1 ? parts[1] : "")
+            case "click", "dblclick", "cmdclick", "chevron":
+                // click:<row name>; chevron clicks the folder arrow instead of the name.
+                if let (url, frame) = RowGeometry.frame(named: parts.count > 1 ? parts[1] : "") {
+                    let depth = CGFloat(RowGeometry.depths[url] ?? 0)
+                    let x = parts[0] == "chevron" ? frame.minX + 15 + depth * 16 : frame.minX + 80 + depth * 16
+                    await InputDriver.click(at: CGPoint(x: x, y: frame.midY), count: parts[0] == "dblclick" ? 2 : 1,
+                                            flags: parts[0] == "cmdclick" ? .command : [])
+                } else {
+                    log("\(scene): no row on screen with that name")
+                }
+            case "scroll":
+                let report = await InputDriver.scroll(points: Double(argument).map { CGFloat($0) })
+                log("\(scene) scroll: \(report)")
+                wait = 0.5
             default: break
             }
             let began = Date()
@@ -94,7 +111,7 @@ enum DebugSnapshots {
             log("\(scene) timing: first content \(firstContent.map { String(format: "%.2fs", $0) } ?? "never"), worst main-thread stall \(HangWatchdog.worst)ms, stalls>100ms \(HangWatchdog.stalls) · recents=\(shown.recents.rows.count) new=\(shown.newFiles.rows.count) total=\(shown.newFiles.totalCount.map(String.init) ?? "nil") more=\(shown.newFiles.hasMore) gathering=\(shown.newFiles.isGathering) hits=\(shown.search.hits.count)")
             let names = shown.rows.prefix(40).map { "\($0.item.name)@\(RelativeTime.short($0.item.modified))" }.joined(separator: ",")
             let selected = shown.selection.map(\.lastPathComponent).sorted().joined(separator: ",")
-            log("\(scene) -> tabs=\(workspace.tabs.count) url=\(shown.currentURL.path) items=[\(names)] selected=[\(selected)] error=\(shown.loadError ?? "none") windows=\(NSApp.windows.filter { $0.isVisible && $0.canBecomeMain }.map(\.title))")
+            log("\(scene) -> tabs=\(workspace.tabs.count) view=\(shown.destination) search=\"\(shown.searchText)\" expanded=\(shown.expanded.map(\.lastPathComponent).sorted()) firstResponder=\(InputDriver.window?.firstResponder.map { String(describing: type(of: $0)) } ?? "nil") key=\(InputDriver.window?.isKeyWindow ?? false) active=\(NSApp.isActive) url=\(shown.currentURL.path) items=[\(names)] selected=[\(selected)] error=\(shown.loadError ?? "none") windows=\(NSApp.windows.filter { $0.isVisible && $0.canBecomeMain }.map(\.title))")
             if env["EXPLORER_NO_CAPTURE"] == nil { capture(to: "\(dir)/\(index)-\(parts[0]).png") }
         }
         if env["EXPLORER_SNAPSHOT_QUIT"] != nil { NSApp.terminate(nil) }

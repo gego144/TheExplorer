@@ -75,7 +75,7 @@ enum RecentsRange: Int, CaseIterable, Identifiable {
 @MainActor
 @Observable
 final class RecentsModel {
-    static let pageSize = 1500
+    nonisolated static let pageSize = 1500
     static let lastUsedDateAttribute = "kMDItemLastUsedDate"
 
     let mode: RecentsMode
@@ -174,7 +174,7 @@ final class RecentsModel {
             let unchanged = last.matches(snapshot)
             DispatchQueue.main.async {
                 guard let self, self.generation == generation else { return }
-                self.isGathering = gathering
+                if self.isGathering != gathering { self.isGathering = gathering }
                 self.loadingMore = false
                 guard !unchanged else { return }
                 self.rows = snapshot.rows
@@ -183,6 +183,12 @@ final class RecentsModel {
                 if !self.selection.isEmpty {
                     self.selection.formIntersection(snapshot.rows.map(\.id))
                 }
+            }
+            // While you scroll through this page, get the next one ready: crossing a block of
+            // dependency-folder files means resolving tens of thousands of paths the first time.
+            if snapshot.hasMore && !last.warmed {
+                last.warmed = true
+                filter.warm(results, from: snapshot.walked, wanted: filter.pageSize)
             }
         }
     }
@@ -195,6 +201,8 @@ private final class LastSnapshot: @unchecked Sendable {
     private var total: Int?
     private var hasMore = false
     private var published = false
+    /// Whether this handler already prepared the page after its own.
+    var warmed = false
 
     func matches(_ snapshot: RecentsFilter.Snapshot) -> Bool {
         let ids = snapshot.rows.map(\.id)
@@ -225,12 +233,15 @@ private struct RecentsFilter: Sendable {
     let documentsOnly: Bool
     let hideNoise: Bool
     let limit: Int
+    let pageSize = RecentsModel.pageSize
     let groups: Groups
 
     struct Snapshot: Sendable {
         let rows: [ListRow]
         let total: Int?
         let hasMore: Bool
+        /// Where the walk stopped: the next page starts after this index.
+        var walked = 0
     }
 
     /// Walks results newest first. Dates and types are free to read, so filtering on them costs
@@ -244,13 +255,13 @@ private struct RecentsFilter: Sendable {
             if documentsOnly && !Self.isDocument(results.contentType(at: index)) { continue }
             if kept.count >= limit {
                 // With the noise filter, counting the rest would mean resolving every path.
-                if hideNoise { return Snapshot(rows: grouped(kept), total: nil, hasMore: true) }
+                if hideNoise { return Snapshot(rows: grouped(kept), total: nil, hasMore: true, walked: index) }
                 matching += 1
                 continue
             }
+            if hideNoise && results.isNoisy(at: index) { continue }
             guard let date: Date = results.value(attribute, at: index),
                   let path = results.path(at: index) else { continue }
-            if hideNoise && PathNoise.isNoisy(path) { continue }
             guard let item = results.item(at: index) else { continue }
             matching += 1
             kept.append(ListRow(
@@ -261,6 +272,22 @@ private struct RecentsFilter: Sendable {
             ))
         }
         return Snapshot(rows: grouped(kept), total: matching, hasMore: matching > kept.count)
+    }
+
+    /// Resolves the clutter check for results past the loaded pages until `wanted` more items
+    /// pass the filters, so loading the next page only reads memoized answers.
+    func warm(_ results: SpotlightQuery.Results, from start: Int, wanted: Int) {
+        guard hideNoise else { return }
+        var found = 0
+        var index = start
+        while index < results.count && found < wanted {
+            if kind.matches(isFolder: results.isFolder(at: index)),
+               !documentsOnly || Self.isDocument(results.contentType(at: index)),
+               !results.isNoisy(at: index) {
+                found += 1
+            }
+            index += 1
+        }
     }
 
     /// Documents, images, media, archives: what Finder's Recents lists.

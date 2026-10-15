@@ -130,6 +130,11 @@ enum Session {
         #endif
     }
 
+    /// For scripted debug runs only: the first window, standing in for the focused one.
+    static var scriptedWorkspace: Workspace? {
+        isScripted ? live.first?.workspace : nil
+    }
+
     static func save() {
         guard !isScripted else { return }
         let states = live.compactMap(\.workspace).map(\.state)

@@ -87,12 +87,16 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
                     LazyVStack(spacing: 1, pinnedViews: [.sectionHeaders]) {
                         Section {
                             ForEach(rows) { row in
-                                if let group = row.group {
-                                    GroupHeader(title: group)
+                                // Exactly one view per row (header included) keeps the lazy
+                                // stack's scrolling cost independent of the row count.
+                                VStack(spacing: 1) {
+                                    if let group = row.group {
+                                        GroupHeader(title: group)
+                                    }
+                                    rowView(row, maxSize: maxSize)
+                                        .padding(.horizontal, Column.gutter)
                                 }
-                                rowView(row, maxSize: maxSize)
-                                    .padding(.horizontal, Column.gutter)
-                                    .id(row.id)
+                                .id(row.id)
                             }
                             if let onReachEnd, !rows.isEmpty {
                                 // Lazy, so this only appears (and fires) once you scroll to the end.
@@ -170,7 +174,7 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
         .onAppear {
             // Lists appear mid-typing (search results replace the folder after the first
             // character); never pull focus out of a text field you're typing in.
-            if !(NSApp.keyWindow?.firstResponder is NSText) { focused = true }
+            if !NSApp.windows.contains(where: { $0.isVisible && $0.firstResponder is NSText }) { focused = true }
         }
     }
 
@@ -242,6 +246,9 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
             })
             .draggable(row.item.url)
             .modifier(FolderDropModifier(row: row, onDropInto: onDropInto, dropTarget: $dropTarget))
+            #if DEBUG
+            .debugRowFrame(row)
+            #endif
             .contextMenu {
                 rowMenu(selection.contains(row.id) ? selection : [row.id])
             }

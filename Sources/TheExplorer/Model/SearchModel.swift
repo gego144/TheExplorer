@@ -221,7 +221,7 @@ final class SearchModel {
 
 /// Heuristics for paths people rarely mean when they search or browse recents.
 enum PathNoise {
-    static let noisyComponents: Set<String> = [
+    static let noisyComponents: Set<Substring> = [
         "node_modules", ".git", "DerivedData", ".build", "Pods", "__pycache__", ".venv", "venv",
         ".cache", ".Trash", ".npm", ".gradle", ".next", ".turbo", "Caches", "site-packages",
     ]
@@ -241,7 +241,7 @@ enum PathNoise {
         let checked = inICloud ? path.dropFirst(iCloudPrefix.count).drop { $0 != "/" } : path[...]
         let components = checked.split(separator: "/").dropLast()
         for component in components {
-            if component.hasPrefix(".") || noisyComponents.contains(String(component)) { return true }
+            if component.hasPrefix(".") || noisyComponents.contains(component) { return true }
             if let dot = component.lastIndex(of: "."),
                packageExtensions.contains(component[component.index(after: dot)...].lowercased()) {
                 return true
