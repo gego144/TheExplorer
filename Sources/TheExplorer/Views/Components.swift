@@ -1,107 +1,10 @@
 import SwiftUI
 
-/// Icon + name, with folders made unmistakable: medium weight and a trailing chevron.
-struct FileNameLabel: View {
-    let item: FileItem
-    var iconSize: CGFloat = 16
-    var showChevron = true
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(nsImage: Icons.icon(for: item))
-                .resizable()
-                .frame(width: iconSize, height: iconSize)
-                .overlay(alignment: .bottomLeading) {
-                    if item.isSymlink {
-                        Image(systemName: "arrow.turn.up.right")
-                            .font(.system(size: iconSize * 0.4, weight: .bold))
-                            .padding(1)
-                            .background(.background, in: .rect(cornerRadius: 2))
-                    }
-                }
-            Text(item.name)
-                .fontWeight(item.isFolder ? .medium : .regular)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            if item.isFolder && showChevron {
-                Spacer(minLength: 4)
-                Image(systemName: "chevron.right")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .opacity(item.isHidden ? 0.55 : 1)
-    }
-}
-
-/// "Folder" gets an accent-tinted badge; files show their type.
-struct KindLabel: View {
-    let item: FileItem
-
-    var body: some View {
-        if item.isFolder {
-            Label("Folder", systemImage: "folder.fill")
-                .labelStyle(.titleAndIcon)
-                .foregroundStyle(.tint)
-                .font(.callout)
-        } else {
-            Text(item.kindDescription)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-        }
-    }
-}
-
-/// Size text with a small proportional bar so the heavy hitters jump out.
-struct SizeLabel: View {
-    let bytes: Int64?
-    var isCalculating = false
-    var isPartial = false
-    /// Largest size among siblings; drives the bar length. 0 hides the bar.
-    var maxBytes: Int64 = 0
-
-    var body: some View {
-        HStack(spacing: 6) {
-            if maxBytes > 0 {
-                SizeBar(fraction: bytes.map { Double($0) / Double(maxBytes) } ?? 0)
-                    .frame(width: 36, height: 5)
-            }
-            Spacer(minLength: 0)
-            if let bytes {
-                Text((isPartial ? "≥ " : "") + Format.bytes(bytes))
-                    .monospacedDigit()
-                    .help(isPartial ? "Some subfolders couldn't be read, so this is a minimum." : "")
-            } else if isCalculating {
-                ProgressView().controlSize(.mini)
-            } else {
-                Text("—").foregroundStyle(.tertiary)
-            }
-        }
-    }
-}
-
-struct SizeBar: View {
-    let fraction: Double
-    var tint: Color = .accentColor
-
-    var body: some View {
-        GeometryReader { proxy in
-            ZStack(alignment: .leading) {
-                Capsule().fill(.quaternary)
-                Capsule()
-                    .fill(tint.gradient)
-                    .frame(width: max(fraction > 0 ? 2 : 0, proxy.size.width * min(1, fraction)))
-            }
-        }
-    }
-}
-
 /// The right-click menu shared by every list of files.
 struct FileContextMenu: View {
     let urls: Set<URL>
     let model: BrowserModel
-    var onTrash: ((Set<URL>) -> Void)?
-    @Environment(\.openWindow) private var openWindow
+    @Environment(\.openTab) private var openTab
 
     private var favorites: FavoritesStore { .shared }
 
@@ -112,7 +15,7 @@ struct FileContextMenu: View {
             let folders = urls.filter { FileItem(url: $0)?.isFolder == true }
             if !folders.isEmpty {
                 Button(folders.count == 1 ? "Open in New Tab" : "Open \(folders.count) Folders in New Tabs") {
-                    folders.sorted { $0.path < $1.path }.forEach { Tabs.open($0, with: openWindow) }
+                    folders.sorted { $0.path < $1.path }.forEach(openTab)
                 }
             }
             if let single, let item = FileItem(url: single) {
@@ -126,11 +29,11 @@ struct FileContextMenu: View {
             Button("Quick Look") { model.quickLook(urls) }
             Divider()
             if let single {
-                Button(favorites.contains(single) ? "Remove from Favorites" : "Add to Favorites") {
+                Button(favorites.contains(single) ? "Unpin" : "Pin to Sidebar") {
                     favorites.toggle(single)
                 }
             } else {
-                Button("Add to Favorites") { urls.forEach { favorites.add($0) } }
+                Button("Pin to Sidebar") { urls.forEach { favorites.add($0) } }
             }
             Button(urls.count == 1 ? "Copy Path" : "Copy Paths") { FileActions.copyPaths(urls) }
             Button("Reveal in Finder") { FileActions.revealInFinder(urls) }
@@ -144,9 +47,7 @@ struct FileContextMenu: View {
                 Button("Rename…") { model.renaming = item }
             }
             Divider()
-            Button("Move to Trash", role: .destructive) {
-                if let onTrash { onTrash(urls) } else { model.trash(urls) }
-            }
+            Button("Move to Trash", role: .destructive) { model.trash(urls) }
         }
     }
 
@@ -163,16 +64,51 @@ struct FileContextMenu: View {
     }
 }
 
-/// Small horizontal rule-style header used above content panes.
+/// Bar at the top of a pane (search, recents, storage) holding its controls.
 struct PaneHeader<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        HStack(spacing: 12) { content }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(.bar)
-            .overlay(alignment: .bottom) { Divider() }
+        HStack(spacing: 10) { content }
+            .font(.system(size: 12))
+            .padding(.horizontal, 12)
+            .frame(height: 40)
+            .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
+    }
+}
+
+/// A one-line notice with an optional action.
+struct Banner: View {
+    let symbol: String
+    let tint: Color
+    let text: String
+    var actionTitle: String?
+    var action: (() -> Void)?
+    var onDismiss: (() -> Void)?
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: symbol).foregroundStyle(tint)
+            Text(text)
+                .font(.system(size: 11.5))
+                .foregroundStyle(Theme.text)
+                .lineLimit(3)
+            Spacer()
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+                    .buttonStyle(SubtleButtonStyle())
+            }
+            if let onDismiss {
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.textTertiary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(tint.opacity(0.08))
+        .overlay(alignment: .bottom) { Rectangle().fill(tint.opacity(0.25)).frame(height: 1) }
     }
 }
 
@@ -181,22 +117,37 @@ struct ErrorBanner: View {
     let onDismiss: () -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
-            Text(message).font(.callout).lineLimit(3)
-            Spacer()
-            if message.contains("Full Disk Access") {
-                Button("Open Settings") { StorageModel.openFullDiskAccessSettings() }
-            }
-            Button {
-                onDismiss()
-            } label: {
-                Image(systemName: "xmark")
-            }
-            .buttonStyle(.borderless)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(.yellow.opacity(0.12))
+        let needsAccess = message.contains("Full Disk Access")
+        Banner(symbol: "exclamationmark.triangle.fill", tint: Theme.danger, text: message,
+               actionTitle: needsAccess ? "Open Settings" : nil,
+               action: needsAccess ? { StorageModel.openFullDiskAccessSettings() } : nil,
+               onDismiss: onDismiss)
+    }
+}
+
+/// Filled mint button for the one primary action in a view.
+struct AccentButtonStyle: ButtonStyle {
+    var large = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: large ? 13 : 11.5, weight: .semibold))
+            .foregroundStyle(Theme.background)
+            .padding(.horizontal, large ? 16 : 11)
+            .padding(.vertical, large ? 7 : 4)
+            .background(Theme.accent.opacity(configuration.isPressed ? 0.75 : 1), in: .rect(cornerRadius: 7))
+    }
+}
+
+/// Quiet raised button for secondary actions.
+struct SubtleButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 11.5, weight: .medium))
+            .foregroundStyle(Theme.text)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(configuration.isPressed ? Theme.hover : Theme.raised, in: .rect(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Theme.fieldBorder))
     }
 }

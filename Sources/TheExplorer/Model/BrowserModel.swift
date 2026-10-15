@@ -15,24 +15,43 @@ enum NewItemKind {
     var title: String { self == .folder ? "New Folder" : "New File" }
 }
 
-enum SidebarItem: Hashable {
-    case recents
-    case storage
-    case favorite(String)
-    case location(URL)
+enum SortKey: String, CaseIterable {
+    case name, kind, size, modified, created
+}
+
+struct SortSpec: Equatable {
+    var key: SortKey
+    var ascending: Bool
+
+    /// The default everywhere: most recently changed first.
+    static let byChanged = SortSpec(key: .modified, ascending: false)
+
+    /// Clicking the active column flips direction; a new column starts in its natural order.
+    func toggled(to key: SortKey) -> SortSpec {
+        if key == self.key { return SortSpec(key: key, ascending: !ascending) }
+        return SortSpec(key: key, ascending: key == .name || key == .kind)
+    }
+}
+
+/// Asks the command bar to start editing, optionally pre-filled (e.g. with the current path).
+struct OmniboxRequest: Equatable {
+    let id = UUID()
+    var text: String
 }
 
 /// A row in the folder table: the item plus its (possibly still-computing) size.
 struct FileRow: Identifiable {
     let item: FileItem
     let folderSize: FolderSize?
+    /// Size supplied by the caller (e.g. search results), overriding the computed one.
+    var sizeOverride: Int64? = nil
 
     var id: URL { item.url }
     var name: String { item.name }
     var kind: String { item.kindDescription }
     var modified: Date { item.modified ?? .distantPast }
     var created: Date { item.created ?? .distantPast }
-    var displaySize: Int64? { item.isFolder ? folderSize?.bytes : item.fileSize }
+    var displaySize: Int64? { sizeOverride ?? (item.isFolder ? folderSize?.bytes : item.fileSize) }
     /// Unknown sizes sort below everything.
     var sortSize: Int64 { displaySize ?? -1 }
     var fileCount: Int { folderSize?.files ?? -1 }
@@ -41,7 +60,7 @@ struct FileRow: Identifiable {
 /// Everything one window needs: where we are, history, what's selected, and how it's shown.
 @MainActor
 @Observable
-final class BrowserModel {
+final class BrowserModel: Identifiable {
     var destination: Destination = .folder
     private(set) var currentURL: URL
     private(set) var items: [FileItem] = []
@@ -51,11 +70,9 @@ final class BrowserModel {
     private(set) var forwardStack: [URL] = []
 
     var selection: Set<URL> = []
-    var sortOrder: [KeyPathComparator<FileRow>] = [KeyPathComparator(\FileRow.name, comparator: .localizedStandard)]
+    var sort: SortSpec = .byChanged
     var kindFilter: KindFilter = .all
     var previewURL: URL?
-    var showInspector = true
-    var isEditingPath = false
 
     var searchText = ""
     var searchScope: SearchScope = .folder
@@ -70,8 +87,10 @@ final class BrowserModel {
     var renaming: FileItem?
     /// Set to show the name prompt for a new folder or file in the current folder.
     var creating: NewItemKind?
-    /// Bumped to ask the window to focus the search field.
-    var searchFocusRequest = 0
+    /// Set to put the cursor in the path/search bar.
+    var omniboxRequest: OmniboxRequest?
+    /// Bumped to move keyboard focus back to the file list.
+    var listFocusRequest = 0
 
     let search = SearchModel()
     let recents = RecentsModel()
@@ -106,13 +125,28 @@ final class BrowserModel {
         var rows = items
             .filter { (showHidden || !$0.isHidden) && kindFilter.matches(isFolder: $0.isFolder) }
             .map { FileRow(item: $0, folderSize: $0.isFolder ? sizes.size(for: $0.path) : nil) }
-        rows.sort(using: sortOrder)
+        rows.sort(by: Self.comparator(for: sort))
         if foldersFirst {
             let folders = rows.filter(\.item.isFolder)
             let files = rows.filter { !$0.item.isFolder }
             rows = folders + files
         }
         return rows
+    }
+
+    static func comparator(for sort: SortSpec) -> (FileRow, FileRow) -> Bool {
+        { lhs, rhs in
+            let order: ComparisonResult
+            switch sort.key {
+            case .name: order = lhs.name.localizedStandardCompare(rhs.name)
+            case .kind: order = TypeChip.style(for: lhs.item).label.compare(TypeChip.style(for: rhs.item).label)
+            case .size: order = lhs.sortSize == rhs.sortSize ? .orderedSame : (lhs.sortSize < rhs.sortSize ? .orderedAscending : .orderedDescending)
+            case .modified: order = lhs.modified.compare(rhs.modified)
+            case .created: order = lhs.created.compare(rhs.created)
+            }
+            if order == .orderedSame { return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending }
+            return sort.ascending ? order == .orderedAscending : order == .orderedDescending
+        }
     }
 
     var selectedItems: [FileItem] {
@@ -142,27 +176,6 @@ final class BrowserModel {
     }
 
     var canGoUp: Bool { destination == .folder && !currentURL.isRoot }
-
-    var sidebarSelection: SidebarItem? {
-        get {
-            switch destination {
-            case .recents: return .recents
-            case .storage: return .storage
-            case .folder:
-                if FavoritesStore.shared.contains(currentURL) { return .favorite(currentURL.path) }
-                return .location(currentURL.standardizedFileURL)
-            }
-        }
-        set {
-            switch newValue {
-            case .recents: show(.recents)
-            case .storage: show(.storage)
-            case .location(let url): navigate(to: url)
-            case .favorite(let path): openFavorite(path)
-            case nil: break
-            }
-        }
-    }
 
     // MARK: - Navigation
 

@@ -6,10 +6,9 @@ struct StorageView: View {
 
     private var storage: StorageModel { .shared }
 
-    enum Tab: String, CaseIterable, Identifiable {
-        case breakdown = "Breakdown"
-        case largest = "Largest Files"
-        var id: String { rawValue }
+    enum Tab: Hashable {
+        case breakdown
+        case largest
     }
 
     var body: some View {
@@ -17,33 +16,40 @@ struct StorageView: View {
 
         VStack(spacing: 0) {
             PaneHeader {
-                Picker("Scan", selection: $storage.target) {
-                    Text(ScanTarget.home.label).tag(ScanTarget.home)
-                    Text(ScanTarget.mac.label).tag(ScanTarget.mac)
-                    if case .custom = storage.target {
-                        Text(storage.target.label).tag(storage.target)
+                Menu {
+                    Picker("Scan", selection: $storage.target) {
+                        Text(ScanTarget.home.label).tag(ScanTarget.home)
+                        Text(ScanTarget.mac.label).tag(ScanTarget.mac)
+                        if case .custom = storage.target {
+                            Text(storage.target.label).tag(storage.target)
+                        }
+                        if model.currentURL != .home && !model.currentURL.isRoot {
+                            Text("Current Folder (\(FileManager.default.displayName(atPath: model.currentURL.path)))")
+                                .tag(ScanTarget.custom(model.currentURL))
+                        }
                     }
-                    if model.currentURL != .home && !model.currentURL.isRoot {
-                        Text("Current Folder (\(FileManager.default.displayName(atPath: model.currentURL.path)))")
-                            .tag(ScanTarget.custom(model.currentURL))
-                    }
+                    .pickerStyle(.inline)
+                    Divider()
+                    Button("Choose Folder…", action: chooseFolder)
+                } label: {
+                    MenuLabel(title: storage.target.label)
                 }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
                 .fixedSize()
-                Button("Choose…", action: chooseFolder)
                 if storage.isScanning {
-                    Button("Stop", role: .cancel) { storage.cancel() }
+                    Button("Stop") { storage.cancel() }
+                        .buttonStyle(SubtleButtonStyle())
                 } else {
                     Button(storage.result == nil ? "Scan" : "Rescan") { storage.scan() }
+                        .buttonStyle(AccentButtonStyle())
                         .keyboardShortcut(.defaultAction)
                 }
                 Spacer()
                 if storage.result != nil && !storage.isScanning {
-                    Picker("View", selection: $tab) {
-                        ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .fixedSize()
+                    Segmented(selection: $tab, options: [(.breakdown, "Breakdown"), (.largest, "Largest Files")])
+                        .fixedSize()
                 }
             }
             .onChange(of: storage.target) { storage.refreshVolume() }
@@ -51,11 +57,11 @@ struct StorageView: View {
             if let volume = storage.volume {
                 VolumeSummary(volume: volume, scanned: storage.result?.root)
             }
-
             if !storage.hasFullDiskAccess {
-                FullDiskAccessBanner()
+                Banner(symbol: "lock.shield", tint: Theme.warning,
+                       text: "Without Full Disk Access, protected folders (Mail, Messages, other apps' data) are skipped and sizes come out low.",
+                       actionTitle: "Grant Access…", action: { StorageModel.openFullDiskAccessSettings() })
             }
-
             if let message = storage.errorMessage {
                 ErrorBanner(message: message) { storage.errorMessage = nil }
             }
@@ -68,15 +74,21 @@ struct StorageView: View {
                 case .largest: LargestFilesView(model: model, files: result.largestFiles)
                 }
             } else {
-                ContentUnavailableView {
-                    Label("See What's Using Space", systemImage: "chart.pie")
-                } description: {
-                    Text("Scan your home folder, your entire Mac, or any folder to get a breakdown of exactly where the space is going.")
-                } actions: {
+                VStack(spacing: 12) {
+                    Image(systemName: "chart.pie.fill")
+                        .font(.system(size: 34))
+                        .foregroundStyle(Theme.accent)
+                    Text("See what's using space")
+                        .font(.system(size: 17, weight: .semibold))
+                    Text("Scan your home folder, the whole Mac, or any folder for a breakdown of where the space goes.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 360)
                     Button("Scan \(storage.target.label)") { storage.scan() }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
+                        .buttonStyle(AccentButtonStyle(large: true))
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .confirmationDialog(
@@ -112,41 +124,41 @@ private struct VolumeSummary: View {
     let scanned: SizeNode?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(volume.name).font(.headline)
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(volume.name).font(.system(size: 13, weight: .semibold))
                 Text("\(Format.bytes(volume.used)) used of \(Format.bytes(volume.total))")
-                    .foregroundStyle(.secondary)
+                    .font(Theme.mono)
+                    .foregroundStyle(Theme.textSecondary)
                 Spacer()
-                Text("\(Format.bytes(volume.available)) available")
-                    .fontWeight(.medium)
+                Text("\(Format.bytes(volume.available)) free")
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Theme.accent)
             }
             GeometryReader { proxy in
                 let width = proxy.size.width
                 let usedFraction = Double(volume.used) / Double(max(volume.total, 1))
                 let scannedFraction = scanned.map { min(Double($0.size) / Double(max(volume.total, 1)), usedFraction) } ?? 0
                 ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 4).fill(.quaternary)
-                    RoundedRectangle(cornerRadius: 4).fill(Color.secondary.opacity(0.45))
-                        .frame(width: width * usedFraction)
-                    RoundedRectangle(cornerRadius: 4).fill(Color.accentColor.gradient)
-                        .frame(width: width * scannedFraction)
+                    Capsule().fill(Theme.border)
+                    Capsule().fill(Theme.textTertiary.opacity(0.7)).frame(width: width * usedFraction)
+                    Capsule().fill(Theme.accent).frame(width: width * scannedFraction)
                 }
             }
-            .frame(height: 10)
+            .frame(height: 8)
             if let scanned {
                 HStack(spacing: 14) {
-                    LegendDot(color: .accentColor, text: "\(scanned.name): \(Format.bytes(scanned.size))")
-                    LegendDot(color: .secondary.opacity(0.45), text: "Everything else used: \(Format.bytes(max(0, volume.used - scanned.size)))")
-                    LegendDot(color: .gray.opacity(0.25), text: "Free")
+                    LegendDot(color: Theme.accent, text: "\(scanned.name) \(Format.bytes(scanned.size))")
+                    LegendDot(color: Theme.textTertiary.opacity(0.7), text: "everything else \(Format.bytes(max(0, volume.used - scanned.size)))")
+                    LegendDot(color: Theme.border, text: "free")
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(Theme.monoSmall)
+                .foregroundStyle(Theme.textSecondary)
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .overlay(alignment: .bottom) { Divider() }
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
     }
 }
 
@@ -155,25 +167,10 @@ private struct LegendDot: View {
     let text: String
 
     var body: some View {
-        HStack(spacing: 4) {
-            Circle().fill(color).frame(width: 7, height: 7)
+        HStack(spacing: 5) {
+            RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 7, height: 7)
             Text(text)
         }
-    }
-}
-
-private struct FullDiskAccessBanner: View {
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "lock.shield").foregroundStyle(.orange)
-            Text("Without Full Disk Access, protected folders (Mail, Messages, other apps' data) are skipped and sizes will be low.")
-                .font(.callout)
-            Spacer()
-            Button("Grant Access…") { StorageModel.openFullDiskAccessSettings() }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 7)
-        .background(.orange.opacity(0.1))
     }
 }
 
@@ -181,23 +178,22 @@ private struct ScanProgressView: View {
     let storage: StorageModel
 
     var body: some View {
-        VStack(spacing: 14) {
-            ProgressView().controlSize(.large)
-            Text("Scanning \(storage.target.label)…").font(.title3.weight(.medium))
+        VStack(spacing: 12) {
+            ProgressView().controlSize(.regular).tint(Theme.accent)
+            Text("Scanning \(storage.target.label)…").font(.system(size: 15, weight: .semibold))
             Text("\(storage.progressFiles.formatted()) files · \(Format.bytes(storage.progressBytes))")
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
+                .font(Theme.mono)
+                .foregroundStyle(Theme.accent)
             Text(Format.path(storage.progressPath))
-                .font(.caption.monospaced())
-                .foregroundStyle(.tertiary)
+                .font(Theme.monoSmall)
+                .foregroundStyle(Theme.textTertiary)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .frame(maxWidth: 520)
             if let start = storage.scanStarted {
                 Text(timerInterval: start...Date.distantFuture, countsDown: false)
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .monospacedDigit()
+                    .font(Theme.monoSmall)
+                    .foregroundStyle(Theme.textTertiary)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -216,70 +212,56 @@ private struct BreakdownView: View {
         let children = focus.children.filter { $0.size > 0 || $0.kind == .folder }
 
         VStack(spacing: 0) {
-            HStack(spacing: 4) {
-                Button {
-                    storage.focusParent()
-                } label: {
-                    Image(systemName: "chevron.left")
-                }
-                .buttonStyle(.borderless)
-                .disabled(focus.parent == nil)
-                .help("Up one level (⌘↑)")
-
+            HStack(spacing: 6) {
+                IconButton(systemImage: "chevron.left", help: "Up one level (⌘↑)") { storage.focusParent() }
+                    .disabled(focus.parent == nil)
                 ForEach(Array(storage.focusTrail.enumerated()), id: \.element.id) { index, node in
-                    if index > 0 {
-                        Image(systemName: "chevron.compact.right").foregroundStyle(.tertiary)
+                    if index > 0 { Text("/").foregroundStyle(Theme.textTertiary) }
+                    Button { storage.drill(into: node) } label: {
+                        Text(node.name)
+                            .font(.system(size: 12, weight: node === focus ? .semibold : .regular))
+                            .foregroundStyle(node === focus ? Theme.accent : Theme.textSecondary)
                     }
-                    Button(node.name) { storage.drill(into: node) }
-                        .buttonStyle(.plain)
-                        .fontWeight(node === focus ? .semibold : .regular)
+                    .buttonStyle(.plain)
                 }
                 Spacer()
                 Text("\(Format.bytes(focus.size)) · \(focus.fileCount.formatted()) files")
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+                    .font(Theme.mono)
+                    .foregroundStyle(Theme.textSecondary)
                 if result.unreadableFolders > 0 {
                     Label("\(result.unreadableFolders.formatted()) unreadable", systemImage: "lock.fill")
-                        .foregroundStyle(.orange)
+                        .font(Theme.mono)
+                        .foregroundStyle(Theme.warning)
                         .help("Some folders couldn't be read, so totals are a minimum. Grant Full Disk Access for complete results.")
                 }
             }
             .padding(.horizontal, 12)
-            .frame(height: 30)
+            .frame(height: 38)
 
             VSplitView {
                 TreemapView(nodes: children, total: focus.size, selection: $storage.selection) { node in
                     storage.drill(into: node)
                 }
                 .frame(minHeight: 160, idealHeight: 280)
-                .padding(8)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 8)
 
-                List(selection: $storage.selection) {
-                    ForEach(children) { node in
-                        StorageRow(node: node, parentSize: focus.size)
-                            .tag(node.id)
+                ScrollView {
+                    LazyVStack(spacing: 1) {
+                        ForEach(children) { node in
+                            StorageRow(node: node, parentSize: focus.size, isSelected: storage.selection == node.id)
+                                .onTapGesture { storage.selection = node.id }
+                                .simultaneousGesture(TapGesture(count: 2).onEnded {
+                                    if node.isFolder { storage.drill(into: node) }
+                                    else if node.kind == .file { NSWorkspace.shared.open(node.url) }
+                                })
+                                .contextMenu { StorageContextMenu(node: node, model: model, storage: storage) }
+                        }
                     }
+                    .padding(8)
                 }
-                .listStyle(.inset)
-                .alternatingRowBackgrounds()
+                .scrollContentBackground(.hidden)
                 .frame(minHeight: 160)
-                .contextMenu(forSelectionType: SizeNode.ID.self) { ids in
-                    if let id = ids.first, let node = children.first(where: { $0.id == id }) {
-                        StorageContextMenu(node: node, model: model, storage: storage)
-                    }
-                } primaryAction: { ids in
-                    guard let id = ids.first, let node = children.first(where: { $0.id == id }) else { return }
-                    if node.isFolder {
-                        storage.drill(into: node)
-                    } else if node.kind == .file {
-                        NSWorkspace.shared.open(node.url)
-                    }
-                }
-                .onKeyPress(.space) {
-                    guard let id = storage.selection, let node = children.first(where: { $0.id == id }), node.kind != .otherFiles else { return .ignored }
-                    model.quickLook([node.url])
-                    return .handled
-                }
             }
         }
     }
@@ -288,54 +270,48 @@ private struct BreakdownView: View {
 private struct StorageRow: View {
     let node: SizeNode
     let parentSize: Int64
+    let isSelected: Bool
+    @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 10) {
-            icon
-                .frame(width: 20, height: 20)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 8, weight: .heavy))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 10)
+                .opacity(node.isFolder ? 1 : 0)
             Text(node.name)
-                .fontWeight(node.isFolder ? .medium : .regular)
-                .foregroundStyle(node.kind == .otherFiles ? .secondary : .primary)
+                .font(.system(size: 12.5, weight: node.isFolder ? .semibold : .regular))
+                .foregroundStyle(node.kind == .otherFiles ? Theme.textSecondary : Theme.text)
                 .lineLimit(1)
                 .truncationMode(.middle)
             if !node.isReadable {
                 Image(systemName: "lock.fill")
-                    .foregroundStyle(.orange)
+                    .font(.system(size: 9))
+                    .foregroundStyle(Theme.warning)
                     .help("Couldn't read this folder")
-            }
-            if node.isFolder {
-                Image(systemName: "chevron.right")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.tertiary)
             }
             Spacer(minLength: 12)
             if node.isFolder {
                 Text("\(node.fileCount.formatted()) files")
-                    .font(.callout)
-                    .foregroundStyle(.tertiary)
-                    .monospacedDigit()
+                    .font(Theme.monoSmall)
+                    .foregroundStyle(Theme.textTertiary)
             }
-            SizeBar(fraction: parentSize > 0 ? Double(node.size) / Double(parentSize) : 0,
-                    tint: node.isFolder ? .accentColor : .gray)
-                .frame(width: 120, height: 7)
+            HeatBar(fraction: parentSize > 0 ? Double(node.size) / Double(parentSize) : 0, height: 4)
+                .frame(width: 130)
             Text(Format.percent(node.size, of: parentSize))
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-                .frame(width: 48, alignment: .trailing)
+                .font(Theme.mono)
+                .foregroundStyle(Theme.textSecondary)
+                .frame(width: 46, alignment: .trailing)
             Text(Format.bytes(node.size))
-                .fontWeight(.medium)
-                .monospacedDigit()
-                .frame(width: 80, alignment: .trailing)
+                .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
+                .frame(width: 78, alignment: .trailing)
         }
-        .padding(.vertical, 2)
-    }
-
-    @ViewBuilder private var icon: some View {
-        if node.kind == .otherFiles {
-            Image(systemName: "doc.on.doc").foregroundStyle(.secondary)
-        } else {
-            Image(nsImage: Icons.icon(forPath: node.path)).resizable()
-        }
+        .padding(.horizontal, 8)
+        .frame(height: 30)
+        .background(isSelected ? Theme.accentSoft : (hovering ? Theme.hover : .clear), in: .rect(cornerRadius: 6))
+        .contentShape(.rect)
+        .onHover { hovering = $0 }
     }
 }
 
@@ -343,21 +319,21 @@ private struct StorageContextMenu: View {
     let node: SizeNode
     let model: BrowserModel
     let storage: StorageModel
-    @Environment(\.openWindow) private var openWindow
+    @Environment(\.openTab) private var openTab
 
     var body: some View {
         if node.kind != .otherFiles {
             if node.isFolder {
                 Button("Break Down") { storage.drill(into: node) }
                 Button("Open in Browser") { model.navigate(to: node.url) }
-                Button("Open in New Tab") { Tabs.open(node.url, with: openWindow) }
+                Button("Open in New Tab") { openTab(node.url) }
             } else {
                 Button("Open") { NSWorkspace.shared.open(node.url) }
                 Button("Show in Enclosing Folder") { model.reveal(node.url) }
             }
             Button("Quick Look") { model.quickLook([node.url]) }
             Divider()
-            Button("Add to Favorites") { FavoritesStore.shared.add(node.url) }
+            Button("Pin to Sidebar") { FavoritesStore.shared.add(node.url) }
             Button("Copy Path") { FileActions.copyPaths([node.url]) }
             Button("Reveal in Finder") { FileActions.revealInFinder([node.url]) }
             Divider()
@@ -373,39 +349,23 @@ private struct StorageContextMenu: View {
 private struct LargestFilesView: View {
     let model: BrowserModel
     let files: [LargeFile]
-    @State private var selection: Set<LargeFile.ID> = []
+    @State private var selection: Set<URL> = []
+    @Environment(\.openTab) private var openTab
 
     var body: some View {
-        let maxSize = files.first?.size ?? 0
-        Table(files, selection: $selection) {
-            TableColumn("Name") { file in
-                HStack(spacing: 6) {
-                    Image(nsImage: Icons.icon(forPath: file.path)).resizable().frame(width: 16, height: 16)
-                    Text(file.name).lineLimit(1).truncationMode(.middle)
-                }
-            }
-            .width(min: 180, ideal: 260)
-            TableColumn("Location") { file in
-                Text(Format.path((file.path as NSString).deletingLastPathComponent))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.head)
-                    .help(file.path)
-            }
-            .width(min: 160, ideal: 360)
-            TableColumn("Size") { file in
-                SizeLabel(bytes: file.size, maxBytes: maxSize)
-            }
-            .width(min: 110, ideal: 140)
+        let rows = files.compactMap { file -> ListRow? in
+            guard let item = FileItem(url: file.url) else { return nil }
+            return ListRow(item: item, size: file.size, date: item.modified, location: file.url.deletingLastPathComponent().path)
         }
-        .contextMenu(forSelectionType: String.self) { ids in
-            FileContextMenu(urls: Set(ids.map { URL(fileURLWithPath: $0) }), model: model)
-        } primaryAction: { ids in
-            ids.forEach { NSWorkspace.shared.open(URL(fileURLWithPath: $0)) }
-        }
-        .onKeyPress(.space) {
-            model.quickLook(Set(selection.map { URL(fileURLWithPath: $0) }))
-            return .handled
-        }
+        FileListView(
+            rows: rows,
+            selection: $selection,
+            showLocation: true,
+            empty: EmptyState(symbol: "doc", title: "No files found"),
+            onOpen: { urls, _ in urls.forEach { NSWorkspace.shared.open($0) } },
+            onQuickLook: { model.quickLook($0) },
+            rowMenu: { FileContextMenu(urls: $0, model: model) },
+            backgroundMenu: { EmptyView() }
+        )
     }
 }

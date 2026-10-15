@@ -5,72 +5,113 @@ struct TheExplorerApp: App {
     @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
 
     var body: some Scene {
-        // Each window is a browser; windows group into native tabs (⌘T).
-        WindowGroup(for: TabSeed.self) { $seed in
-            BrowserWindow(seed: $seed)
+        // Each window holds its own tabs (drawn by the app, not macOS window tabs).
+        WindowGroup(for: WindowState.self) { $state in
+            WorkspaceWindow(state: $state)
         }
+        .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1280, height: 800)
         .commands { ExplorerCommands() }
     }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // The app draws its own tabs; turn off macOS window tabbing and its menu items.
+        NSWindow.allowsAutomaticWindowTabbing = false
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Safety net: if macOS thought it restored windows but none came back (e.g. state saved by
+        // an older build), open a fresh one instead of sitting there with no window.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            guard !NSApp.windows.contains(where: { $0.isVisible && $0.canBecomeMain }) else { return }
+            Self.openNewWindow()
+        }
+    }
+
+    /// The app saves and restores its own tabs (see Session), so skip macOS's window restoration;
+    /// stale restoration data can otherwise stop SwiftUI from opening the first window.
+    func application(_ app: NSApplication, shouldRestoreSecureApplicationState coder: NSCoder) -> Bool {
+        false
+    }
+
+    func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
+        true
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
-        MainActor.assumeIsolated { Tabs.saveSession() }
+        MainActor.assumeIsolated { Session.save() }
+    }
+
+    /// Triggers File › New Window, the only way to open a SwiftUI window from outside a view.
+    private static func openNewWindow() {
+        let items = NSApp.mainMenu?.items.compactMap(\.submenu).flatMap(\.items) ?? []
+        guard let item = items.first(where: { $0.keyEquivalent == "n" && $0.keyEquivalentModifierMask == .command }),
+              let action = item.action else { return }
+        NSApp.sendAction(action, to: item.target, from: item)
     }
 }
 
-private struct BrowserWindow: View {
-    @Binding var seed: TabSeed?
+private struct WorkspaceWindow: View {
+    @Binding var state: WindowState?
+    @State private var workspace: Workspace
+    /// Other saved windows to reopen; only the first window of a launch gets these.
+    @State private var pendingWindows: [WindowState]
     @Environment(\.openWindow) private var openWindow
-    @State private var model: BrowserModel
-    /// Opened without a value (app launch or ⌘N) rather than as a tab or by system restoration.
-    @State private var startedFresh: Bool
 
-    init(seed: Binding<TabSeed?>) {
-        _seed = seed
-        _model = State(initialValue: BrowserModel(url: seed.wrappedValue?.url))
-        _startedFresh = State(initialValue: seed.wrappedValue == nil)
+    init(state: Binding<WindowState?>) {
+        _state = state
+        if let existing = state.wrappedValue {
+            Session.markRestored()
+            _workspace = State(initialValue: Workspace(state: existing))
+            _pendingWindows = State(initialValue: [])
+        } else {
+            let saved = Session.takeSavedWindows()
+            _workspace = State(initialValue: Workspace(state: saved.first))
+            _pendingWindows = State(initialValue: Array(saved.dropFirst()))
+        }
     }
 
     var body: some View {
-        ContentView(model: model)
-            .frame(minWidth: 760, minHeight: 440)
-            .background(WindowAccessor { window in
-                Tabs.configure(window, seedID: seed?.id, startedFresh: startedFresh, model: model, openWindow: openWindow)
-            })
+        WorkspaceView(workspace: workspace)
+            .frame(minWidth: 820, minHeight: 460)
             .onAppear {
-                model.start()
-                if seed == nil { seed = TabSeed(path: model.currentURL.path) }
+                workspace.start()
+                pendingWindows.forEach { openWindow(value: $0) }
+                pendingWindows = []
+                state = workspace.state
             }
-            .onChange(of: model.currentURL) {
-                // Keep the restorable value current so this tab reopens here next launch.
-                seed?.path = model.currentURL.path
-            }
+            .onChange(of: workspace.state.paths) { state = workspace.state }
+            .onChange(of: workspace.state.selected) { state = workspace.state }
             #if DEBUG
-            .task { await DebugSnapshots.runIfRequested(model: model, openWindow: openWindow) }
+            .task { await DebugSnapshots.runIfRequested(workspace: workspace) }
             #endif
     }
 }
 
 struct ExplorerCommands: Commands {
-    @FocusedValue(\.browser) private var model
-    @Environment(\.openWindow) private var openWindow
+    @FocusedValue(\.workspace) private var workspace
+
+    private var model: BrowserModel? { workspace?.selected }
 
     var body: some Commands {
         CommandGroup(after: .newItem) {
-            Button("New Tab") {
-                Tabs.open(model?.currentURL ?? .home, with: openWindow)
-            }
-            .keyboardShortcut("t")
+            Button("New Tab") { workspace?.newTab() }
+                .keyboardShortcut("t")
             Button("Open in New Tab") {
-                guard let model else { return }
-                for url in model.activeSelection where FileItem(url: url)?.isFolder == true {
-                    Tabs.open(url, with: openWindow)
+                guard let workspace, let model else { return }
+                for url in model.activeSelection.sorted(by: { $0.path < $1.path }) where FileItem(url: url)?.isFolder == true {
+                    workspace.newTab(url, select: false)
                 }
             }
             .keyboardShortcut(.downArrow, modifiers: [.command, .option])
             .disabled(!(model?.activeSelection.contains { FileItem(url: $0)?.isFolder == true } ?? false))
+            Button("Close Tab") {
+                guard let workspace else { return }
+                if !workspace.close(workspace.selected) { NSApp.keyWindow?.performClose(nil) }
+            }
+            .keyboardShortcut("w")
             Divider()
             Button("New Folder…") { model?.creating = .folder }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
@@ -87,8 +128,10 @@ struct ExplorerCommands: Commands {
             Divider()
             Button("Copy Path") { model.map { FileActions.copyPaths(pathTargets($0)) } }
                 .keyboardShortcut("c", modifiers: [.command, .option])
-            Button("Find") { model?.searchFocusRequest += 1 }
+            Button("Search") { model?.omniboxRequest = OmniboxRequest(text: "") }
                 .keyboardShortcut("f")
+            Button("Command Bar") { model?.omniboxRequest = OmniboxRequest(text: "") }
+                .keyboardShortcut("k")
         }
 
         CommandMenu("Item") {
@@ -105,7 +148,7 @@ struct ExplorerCommands: Commands {
             Button("Reveal in Finder") { model.map { FileActions.revealInFinder(pathTargets($0)) } }
                 .keyboardShortcut("r", modifiers: [.command, .option])
             Divider()
-            Button("Add to / Remove from Favorites") {
+            Button("Pin / Unpin") {
                 guard let model else { return }
                 let targets = pathTargets(model)
                 let store = FavoritesStore.shared
@@ -142,7 +185,9 @@ struct ExplorerCommands: Commands {
         }
 
         CommandGroup(after: .sidebar) {
-            Button("Show Inspector") { model?.showInspector.toggle() }
+            Button(Prefs.shared.showSidebar ? "Hide Sidebar" : "Show Sidebar") { Prefs.shared.showSidebar.toggle() }
+                .keyboardShortcut("s", modifiers: [.command, .option])
+            Button(Prefs.shared.showInspector ? "Hide Inspector" : "Show Inspector") { Prefs.shared.showInspector.toggle() }
                 .keyboardShortcut("i")
             Button(model?.showHidden == true ? "Hide Hidden Files" : "Show Hidden Files") { model?.showHidden.toggle() }
                 .keyboardShortcut(".", modifiers: [.command, .shift])
@@ -187,16 +232,25 @@ struct ExplorerCommands: Commands {
             Button("Applications") { model?.navigate(to: URL(fileURLWithPath: "/Applications")) }
                 .keyboardShortcut("a", modifiers: [.command, .shift])
             Divider()
-            Button("Go to Path…") {
-                model?.show(.folder)
-                model?.isEditingPath = true
+            Button("Go to Path…") { goToPath() }
+                .keyboardShortcut("l")
+            Button("Go to Folder…") { goToPath() }
+                .keyboardShortcut("g", modifiers: [.command, .shift])
+        }
+
+        CommandGroup(before: .windowArrangement) {
+            Button("Next Tab") { workspace?.selectNext() }
+                .keyboardShortcut(.tab, modifiers: .control)
+            Button("Previous Tab") { workspace?.selectPrevious() }
+                .keyboardShortcut(.tab, modifiers: [.control, .shift])
+            ForEach(1..<10) { number in
+                Button(number == 9 ? "Last Tab" : "Tab \(number)") {
+                    guard let workspace else { return }
+                    workspace.select(number == 9 ? workspace.tabs.count - 1 : number - 1)
+                }
+                .keyboardShortcut(KeyEquivalent(Character("\(number)")))
             }
-            .keyboardShortcut("l")
-            Button("Go to Folder…") {
-                model?.show(.folder)
-                model?.isEditingPath = true
-            }
-            .keyboardShortcut("g", modifiers: [.command, .shift])
+            Divider()
         }
     }
 
@@ -204,6 +258,13 @@ struct ExplorerCommands: Commands {
         if let url = FileManager.default.urls(for: directory, in: .userDomainMask).first {
             model?.navigate(to: url)
         }
+    }
+
+    /// Opens the command bar pre-filled with the current folder's path, ready to edit.
+    private func goToPath() {
+        guard let model else { return }
+        if model.destination != .folder { model.show(.folder) }
+        model.omniboxRequest = OmniboxRequest(text: Format.path(model.currentURL.path) + "/")
     }
 
     /// The selection, or the current folder when nothing is selected.

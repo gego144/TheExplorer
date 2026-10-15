@@ -1,5 +1,6 @@
 #!/bin/zsh
-# Builds TheExplorer.app: release into build/, debug (CONFIG=debug) into build/debug/.
+# Builds TheExplorer.app: release into build/, debug (CONFIG=debug) into build/debug/
+# with a separate bundle identifier (com.gego.TheExplorer.debug).
 #
 # Signing: macOS keys privacy permissions (Full Disk Access, Desktop, Documents…) to the
 # app's signature. Ad-hoc signatures change on every build, so permissions would reset each
@@ -34,6 +35,12 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/TheExplorer"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+if [[ "$CONFIG" != "release" ]]; then
+    # Debug builds get their own identity, so test runs never touch the installed app's settings,
+    # saved tabs or privacy permissions.
+    /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.gego.TheExplorer.debug" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleName TheExplorer Debug" "$APP/Contents/Info.plist"
+fi
 if [[ -f Resources/AppIcon.icns ]]; then
     cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
     /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string AppIcon" "$APP/Contents/Info.plist"

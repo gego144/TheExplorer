@@ -1,29 +1,65 @@
+import QuickLookThumbnailing
 import SwiftUI
 
-/// Details for whatever is selected — or the current folder when nothing is.
+/// Floating card with details for whatever is selected, or the current folder when nothing is.
 struct InspectorView: View {
     let model: BrowserModel
 
+    /// Whether there's anything to show; the column collapses otherwise.
+    static func hasContent(_ model: BrowserModel) -> Bool {
+        !model.activeSelection.isEmpty || (model.destination == .folder && !model.isSearching)
+    }
+
     var body: some View {
         let urls = model.activeSelection
+        let focusURL = urls.first ?? (model.destination == .folder && !model.isSearching ? model.currentURL : nil)
         ScrollView {
-            Group {
-                if urls.count > 1 {
-                    MultipleSelectionSummary(urls: urls)
-                } else if let url = urls.first ?? (model.destination == .folder && !model.isSearching ? model.currentURL : nil),
-                          let item = FileItem(url: url) {
-                    ItemDetails(item: item, model: model, isCurrentFolder: urls.isEmpty)
-                        .id(url)
-                } else {
-                    Text("No Selection")
-                        .foregroundStyle(.tertiary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 40)
-                }
+            // Nothing to describe means no card at all, rather than an empty box.
+            if urls.count > 1 {
+                MultipleSelectionSummary(urls: urls).panel(padding: 14)
+            } else if let focusURL, let item = FileItem(url: focusURL) {
+                ItemDetails(item: item, model: model, isCurrentFolder: urls.isEmpty)
+                    .id(focusURL)
+                    .panel(padding: 14)
             }
-            .padding(16)
         }
-        .inspectorColumnWidth(min: 240, ideal: 280, max: 400)
+        .scrollContentBackground(.hidden)
+        .scrollIndicators(.never)
+    }
+}
+
+/// Quick Look thumbnail for files (real previews for images, PDFs, videos…); a mint glyph for folders.
+struct ItemPreview: View {
+    let item: FileItem
+    var side: CGFloat = 52
+    @State private var thumbnail: NSImage?
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 10).fill(item.isFolder ? Theme.accentSoft : Theme.raised)
+            if item.isFolder {
+                Image(systemName: "folder.fill")
+                    .font(.system(size: side * 0.42))
+                    .foregroundStyle(Theme.accent)
+            } else if let thumbnail {
+                Image(nsImage: thumbnail)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .padding(4)
+            } else {
+                Image(nsImage: Icons.icon(for: item))
+                    .resizable()
+                    .frame(width: side * 0.7, height: side * 0.7)
+            }
+        }
+        .frame(width: side, height: side)
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.border))
+        .task(id: item.url) {
+            guard !item.isFolder else { return }
+            let request = QLThumbnailGenerator.Request(fileAt: item.url, size: CGSize(width: side, height: side),
+                                                       scale: 2, representationTypes: .thumbnail)
+            thumbnail = try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request).nsImage
+        }
     }
 }
 
@@ -36,67 +72,71 @@ private struct ItemDetails: View {
     private var favorites: FavoritesStore { .shared }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(spacing: 8) {
-                Image(nsImage: Icons.icon(for: item))
-                    .resizable()
-                    .frame(width: 72, height: 72)
-                Text(item.name)
-                    .font(.headline)
-                    .multilineTextAlignment(.center)
-                    .textSelection(.enabled)
-                KindLabel(item: item)
-                if isCurrentFolder {
-                    Text("Current folder").font(.caption).foregroundStyle(.tertiary)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 11) {
+                ItemPreview(item: item)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(item.name)
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .lineLimit(3)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 6) {
+                        TypeChip(item: item)
+                        Text(isCurrentFolder ? "this folder" : item.kindDescription.lowercased())
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.textTertiary)
+                            .lineLimit(1)
+                    }
                 }
             }
-            .frame(maxWidth: .infinity)
 
-            HStack {
+            HStack(spacing: 6) {
+                let pinned = favorites.contains(item.url)
                 Button {
                     favorites.toggle(item.url)
                 } label: {
-                    Label(favorites.contains(item.url) ? "Favorited" : "Favorite",
-                          systemImage: favorites.contains(item.url) ? "star.fill" : "star")
+                    Label(pinned ? "Pinned" : "Pin", systemImage: pinned ? "pin.fill" : "pin")
                 }
-                .tint(favorites.contains(item.url) ? .yellow : nil)
+                .buttonStyle(SubtleButtonStyle())
                 if !isCurrentFolder {
                     Button("Open") { model.open(item) }
+                        .buttonStyle(SubtleButtonStyle())
                 }
                 Button {
                     FileActions.revealInFinder([item.url])
                 } label: {
                     Image(systemName: "magnifyingglass")
                 }
+                .buttonStyle(SubtleButtonStyle())
                 .help("Reveal in Finder")
             }
-            .controlSize(.small)
-            .frame(maxWidth: .infinity)
 
-            Divider()
+            Rectangle().fill(Theme.border).frame(height: 1)
 
-            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 10, verticalSpacing: 8) {
+            VStack(spacing: 6) {
                 sizeRows
-                DetailRow(label: "Created", value: Format.date(item.created))
-                DetailRow(label: "Modified", value: Format.date(item.modified))
+                DetailRow(label: "created", value: Format.compactDate(item.created))
+                DetailRow(label: "changed", value: Format.compactDate(item.modified))
                 if let opened = lastOpened {
-                    DetailRow(label: "Last opened", value: Format.date(opened))
+                    DetailRow(label: "opened", value: Format.compactDate(opened))
                 }
                 if item.isSymlink, let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: item.path) {
-                    DetailRow(label: "Points to", value: Format.path(destination))
+                    DetailRow(label: "points to", value: Format.path(destination))
                 }
             }
 
-            Divider()
+            Rectangle().fill(Theme.border).frame(height: 1)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Where").font(.caption).foregroundStyle(.secondary)
+                SectionCaption(title: "Path")
                 Text(Format.path(item.path))
-                    .font(.callout.monospaced())
+                    .font(Theme.mono)
+                    .foregroundStyle(Theme.textSecondary)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                 Button("Copy Path") { FileActions.copyPaths([item.url]) }
-                    .controlSize(.small)
+                    .buttonStyle(SubtleButtonStyle())
             }
         }
         .onAppear {
@@ -107,36 +147,41 @@ private struct ItemDetails: View {
     @ViewBuilder private var sizeRows: some View {
         if item.isFolder {
             let size = sizes.size(for: item.path)
-            GridRow {
-                Text("Size").foregroundStyle(.secondary).gridColumnAlignment(.trailing)
-                HStack(spacing: 6) {
-                    if let size {
-                        Text((size.complete ? "" : "≥ ") + Format.bytes(size.bytes)).monospacedDigit()
-                        Button {
-                            sizes.request([item.path], force: true)
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                        .buttonStyle(.borderless)
-                        .help("Recalculate")
-                    } else {
-                        ProgressView().controlSize(.mini)
-                        Text("Calculating…").foregroundStyle(.secondary)
+            HStack {
+                Text("size").foregroundStyle(Theme.textTertiary)
+                Spacer()
+                if let size {
+                    Text((size.complete ? "" : "≥ ") + Format.bytes(size.bytes))
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Theme.accent)
+                    Button {
+                        sizes.request([item.path], force: true)
+                    } label: {
+                        Image(systemName: "arrow.clockwise").font(.system(size: 9, weight: .bold))
                     }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.textTertiary)
+                    .help("Recalculate")
+                } else {
+                    ProgressView().controlSize(.mini)
                 }
             }
+            .font(.system(size: 11.5))
             if let size {
-                DetailRow(label: "Contains", value: "\(size.files.formatted()) files")
+                DetailRow(label: "files", value: size.files.formatted())
                 if !size.complete {
-                    DetailRow(label: "", value: "Some subfolders couldn't be read.")
+                    Text("Some subfolders couldn't be read.")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Theme.warning)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         } else {
             if let bytes = item.fileSize {
-                DetailRow(label: "Size", value: "\(Format.bytes(bytes)) (\(bytes.formatted()) bytes)")
+                DetailRow(label: "size", value: Format.bytes(bytes), emphasized: true)
             }
             if let allocated = item.allocatedSize {
-                DetailRow(label: "On disk", value: Format.bytes(allocated))
+                DetailRow(label: "on disk", value: Format.bytes(allocated))
             }
         }
     }
@@ -149,12 +194,20 @@ private struct ItemDetails: View {
 private struct DetailRow: View {
     let label: String
     let value: String
+    var emphasized = false
 
     var body: some View {
-        GridRow {
-            Text(label).foregroundStyle(.secondary).gridColumnAlignment(.trailing)
-            Text(value).textSelection(.enabled)
+        HStack(alignment: .firstTextBaseline) {
+            Text(label).foregroundStyle(Theme.textTertiary)
+            Spacer(minLength: 10)
+            Text(value)
+                .font(.system(size: 11.5, weight: emphasized ? .semibold : .regular, design: .monospaced))
+                .foregroundStyle(emphasized ? Theme.accent : Theme.text)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .textSelection(.enabled)
         }
+        .font(.system(size: 11.5))
     }
 }
 
@@ -169,21 +222,22 @@ private struct MultipleSelectionSummary: View {
         let folderBytes = folders.compactMap { sizes.size(for: $0.path)?.bytes }.reduce(0, +)
         let pending = folders.contains { sizes.size(for: $0.path) == nil }
 
-        VStack(spacing: 10) {
-            Image(systemName: "square.stack.3d.up.fill")
-                .font(.system(size: 44))
-                .foregroundStyle(.tint)
-            Text("\(items.count) items selected").font(.headline)
-            Text("\(folders.count) folders, \(items.count - folders.count) files")
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 10) {
+            Text("\(items.count) selected")
+                .font(.system(size: 14, weight: .semibold))
+            Text("\(folders.count) dirs · \(items.count - folders.count) files")
+                .font(Theme.mono)
+                .foregroundStyle(Theme.textSecondary)
             HStack(spacing: 6) {
-                Text("Total: " + Format.bytes(fileBytes + folderBytes)).monospacedDigit()
+                Text(Format.bytes(fileBytes + folderBytes))
+                    .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Theme.accent)
                 if pending { ProgressView().controlSize(.mini) }
             }
             Button("Copy Paths") { FileActions.copyPaths(urls) }
-                .controlSize(.small)
+                .buttonStyle(SubtleButtonStyle())
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear { sizes.request(folders.map(\.path)) }
     }
 }

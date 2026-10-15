@@ -14,7 +14,7 @@ import SwiftUI
 enum DebugSnapshots {
     private static var hasRun = false
 
-    static func runIfRequested(model: BrowserModel, openWindow: OpenWindowAction) async {
+    static func runIfRequested(workspace: Workspace) async {
         let env = ProcessInfo.processInfo.environment
         guard !hasRun, let dir = env["EXPLORER_SNAPSHOT_DIR"], let scenes = env["EXPLORER_SCENES"] else { return }
         hasRun = true
@@ -25,6 +25,7 @@ enum DebugSnapshots {
         try? await Task.sleep(for: .seconds(1.5))
 
         for (index, scene) in scenes.split(separator: ";").enumerated() {
+            let model = workspace.selected
             let parts = scene.split(separator: ":", maxSplits: 1).map(String.init)
             let argument = parts.count > 1 ? (parts[1] as NSString).expandingTildeInPath : ""
             var wait = 2.5
@@ -44,8 +45,9 @@ enum DebugSnapshots {
                     StorageModel.shared.scan()
                     while StorageModel.shared.isScanning { try? await Task.sleep(for: .milliseconds(200)) }
                 }
-            case "newtab": Tabs.open(URL(fileURLWithPath: argument), with: openWindow)
-            case "plus": NSApp.sendAction(#selector(NSResponder.newWindowForTab(_:)), to: nil, from: nil)
+            case "newtab": workspace.newTab(URL(fileURLWithPath: argument))
+            case "tab": workspace.select((Int(argument) ?? 1) - 1)
+            case "omnibox": model.omniboxRequest = OmniboxRequest(text: parts.count > 1 ? parts[1] : "")
             case "drop":
                 // drop:<source>><destination folder>, the same path a real drop takes.
                 let ends = argument.components(separatedBy: ">").map { ($0 as NSString).expandingTildeInPath }
@@ -63,14 +65,22 @@ enum DebugSnapshots {
                 }
                 log("probe hasFullDiskAccess=\(StorageModel.checkFullDiskAccess()) bundle=\(Bundle.main.bundlePath)")
             case "create": model.creating = argument == "file" ? .file : .folder
+            case "resize":
+                let size = argument.split(separator: "x").compactMap { Double($0) }
+                if size.count == 2, let window = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain }) {
+                    window.setContentSize(NSSize(width: size[0], height: size[1]))
+                }
+            case "sort":
+                if let key = SortKey(rawValue: argument) { model.sort = SortSpec(key: key, ascending: key == .name) }
             case "scope": model.searchScope = argument == "mac" ? .mac : .folder
             case "wait": wait = Double(argument) ?? 2
             default: break
             }
             try? await Task.sleep(for: .seconds(wait))
-            let names = model.items.map(\.name).sorted().joined(separator: ",")
-            let selected = model.selection.map(\.lastPathComponent).sorted().joined(separator: ",")
-            log("\(scene) -> url=\(model.currentURL.path) items=[\(names)] selected=[\(selected)] error=\(model.loadError ?? "none")")
+            let shown = workspace.selected
+            let names = shown.rows.map { "\($0.name)@\(RelativeTime.short($0.item.modified))" }.joined(separator: ",")
+            let selected = shown.selection.map(\.lastPathComponent).sorted().joined(separator: ",")
+            log("\(scene) -> tabs=\(workspace.tabs.count) url=\(shown.currentURL.path) items=[\(names)] selected=[\(selected)] error=\(shown.loadError ?? "none") windows=\(NSApp.windows.filter { $0.isVisible && $0.canBecomeMain }.map(\.title))")
             if env["EXPLORER_NO_CAPTURE"] == nil { capture(to: "\(dir)/\(index)-\(parts[0]).png") }
         }
         if env["EXPLORER_SNAPSHOT_QUIT"] != nil { NSApp.terminate(nil) }

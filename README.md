@@ -1,6 +1,6 @@
 # TheExplorer
 
-A native macOS file explorer, built because Finder makes simple things hard: telling folders from files at a glance, seeing how big a folder actually is, and finding out what's eating your disk.
+A native macOS file explorer with its own look (dark "Workbench" theme, mint accent, dense rows), built because Finder makes simple things hard: telling folders from files at a glance, seeing how big a folder actually is, and finding out what's eating your disk.
 
 Written in SwiftUI. Spotlight powers search across the whole Mac, and a parallel fts(3) scanner measures disk usage.
 
@@ -8,15 +8,16 @@ Written in SwiftUI. Spotlight powers search across the whole Mac, and a parallel
 
 - **Browse with real sizes.** Every folder's total size is calculated in the background and drawn as a bar, so the heavy folders stand out. Columns for name, size, kind, modified, created and item count (sortable, and you can hide them).
 - **Folders vs. files, unmistakably.** Folders get a medium-weight name, a chevron and a tinted "Folder" kind. You can also filter the view to just folders or just files.
-- **Get around fast.** Clickable breadcrumb path bar (⌘L to type a path, `~` works), back/forward history, and ⌘↑ for the enclosing folder.
-- **Tabs.** Native macOS tabs, each with its own folder, history and search. ⌘T opens a new tab, and ⌘-double-click opens a folder in one. Tabs come back where you left them after you quit.
+- **One bar for path and search.** The command bar shows where you are as clickable chips. Press ⌘K (or ⌘F, or click it) and type to search, or start with `/` or `~` to jump to a path with folder completion (↑↓ to choose, ⇥ to complete). ⌘L opens it with the current path ready to edit.
+- **Get around fast.** Back/forward history, ⌘↑ for the enclosing folder, arrow keys and type-to-select in every list.
+- **Tabs.** Browser-style tabs, each with its own folder, history and search. ⌘T opens one and ⌘-double-click opens a folder in one. Drop files on a tab to move them into its folder, or hover a drag over a tab to switch to it. Tabs come back where you left them after you quit.
 - **Search.**
   - *This Folder* walks the current folder and its subfolders, including hidden and unindexed files.
   - *Entire Mac* uses Spotlight, so it's instant but skips unindexed locations.
   - Results are ranked by relevance, with clutter like `Library`, `node_modules` and `.git` pushed down.
 - **Storage breakdown.** Scan your home folder, the whole Mac, or any folder. Drill into a treemap and a ranked list with percentages, see the largest files, and compare against total disk usage. Moving something to the Trash updates the totals without a rescan.
 - **Recents.** The newest files and folders in your home folder, by date created, modified or added, over the last 24 hours to 90 days. Grouped by day, updated live, with an option to hide clutter.
-- **Favorites.** Pin files or folders to the sidebar with ⌘D or by dragging them in, and drag to reorder.
+- **Pinned.** Pin files or folders to the sidebar with ⌘D or by dropping them on the "Pinned" heading. Dropping onto a pinned folder (or any sidebar place) moves items into it.
 - **Inspector.** Size, size on disk, item count, created, modified and last-opened dates, and the full path for whatever is selected.
 - **Drag and drop.** Drag items between tabs, windows, or from Finder. Drop onto empty space to put them in the folder you're viewing, onto a folder row to put them inside it, or onto a path bar segment to send them up the tree. Like Finder, it moves within a disk and copies across disks; hold ⌥ to copy. If an item with the same name already exists, both are kept ("name 2") and nothing is overwritten.
 - **Right-click anywhere.** Right-click empty space in a folder to create a new folder or file (you're asked for the name), open that folder in Terminal, copy its path, or favorite it. Right-click an item for open, open in new tab, Quick Look, rename, copy path, Terminal and more.
@@ -65,21 +66,24 @@ Grant **Full Disk Access** (System Settings › Privacy & Security › Full Disk
 
 | Action | Shortcut |
 | --- | --- |
-| New tab / Open folder in new tab | ⌘T / ⌥⌘↓ (or ⌘-double-click) |
+| New tab / Close tab | ⌘T / ⌘W |
+| Next / previous tab, jump to tab | ⌃Tab / ⌃⇧Tab, ⌘1…⌘9 |
+| Open folder in new tab | ⌥⌘↓ (or ⌘-double-click) |
+| Search or jump to a path | ⌘K or ⌘F |
 | Back / Forward / Enclosing folder | ⌘[ / ⌘] / ⌘↑ |
 | Open selection | ⌘↓, Return, or double-click |
 | Quick Look | Space or ⌘Y |
 | Find | ⌘F |
-| Go to path | ⌘L or ⇧⌘G |
+| Edit the current path | ⌘L or ⇧⌘G |
 | Recents / Storage | ⇧⌘F / ⇧⌘B |
 | Home / Desktop / Documents / Downloads / Applications | ⇧⌘H / ⇧⌘D / ⇧⌘O / ⌥⌘L / ⇧⌘A |
-| Add to or remove from Favorites | ⌘D |
+| Pin or unpin in the sidebar | ⌘D |
 | Show in enclosing folder / Reveal in Finder | ⌘R / ⌥⌘R |
 | Copy path | ⌥⌘C |
 | New folder / New file / Rename | ⇧⌘N / ⌥⌘N / ⇧⌘↩ |
 | Open current folder in Terminal | ⌃⌘T |
 | Move to Trash | ⌘⌫ |
-| Inspector / Hidden files | ⌘I / ⇧⌘. |
+| Sidebar / Inspector / Hidden files | ⌥⌘S / ⌘I / ⇧⌘. |
 | Refresh | ⇧⌘R |
 
 ## Project layout
@@ -106,7 +110,15 @@ open -g -n --env EXPLORER_SNAPSHOT_DIR=/tmp/shots --env EXPLORER_SNAPSHOT_QUIT=1
     build/debug/TheExplorer.app
 ```
 
-Scenes are separated by `;`. The available scenes are `folder:<path>`, `select:<path>`, `newtab:<path>`, `plus`, `recents`, `search:<text>`, `searchmac:<text>`, `scope:mac|folder`, `create:folder|file`, `drop:<source>><folder>`, `storage[:<path>]` and `wait:<seconds>`. Launch with `open -g` so the app never takes focus; running the binary directly can leave the app without a window. To run fully hidden and just read the log, add `-j` and `--env EXPLORER_NO_CAPTURE=1`.
+Scenes are separated by `;`. The available scenes are `folder:<path>`, `select:<path>`, `newtab:<path>`, `tab:<n>`, `omnibox:<text>`, `recents`, `search:<text>`, `searchmac:<text>`, `scope:mac|folder`, `create:folder|file`, `drop:<source>><folder>`, `storage[:<path>]` and `wait:<seconds>`. Launch with `open -g` so the app never takes focus; running the binary directly can leave the app without a window. To run fully hidden and just read the log, add `-j` and `--env EXPLORER_NO_CAPTURE=1`.
+
+## App icon
+
+The icon is drawn in code. After changing `scripts/make-icon.swift`, regenerate it with:
+
+```sh
+swift scripts/make-icon.swift   # writes Resources/AppIcon.icns
+```
 
 ## Tests
 

@@ -12,9 +12,7 @@ struct TreemapView: View {
     /// Beyond this many tiles, the rest are merged into a single "smaller items" tile.
     private static let maxTiles = 60
 
-    private static let palette: [Color] = [
-        .blue, .purple, .pink, .orange, .teal, .indigo, .green, .mint, .cyan, .red, .yellow, .brown,
-    ]
+    private static let palette = Theme.palette
 
     var body: some View {
         GeometryReader { proxy in
@@ -51,7 +49,7 @@ struct TreemapView: View {
     }
 
     private func color(for tile: Tile, index: Int) -> Color {
-        guard let node = tile.node, node.kind == .folder else { return .gray }
+        guard let node = tile.node, node.kind == .folder else { return Theme.textSecondary }
         return Self.palette[index % Self.palette.count]
     }
 
@@ -90,26 +88,34 @@ private struct TileView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let big = proxy.size.width > 70 && proxy.size.height > 34
-            RoundedRectangle(cornerRadius: 5)
-                .fill(color.gradient.opacity(tile.isFolder ? (isHovered ? 0.95 : 0.8) : (isHovered ? 0.55 : 0.4)))
+            let showsLabel = proxy.size.width > 64 && proxy.size.height > 36
+            let showsPercent = proxy.size.width > 110 && proxy.size.height > 54
+            RoundedRectangle(cornerRadius: 6)
+                .fill(color.opacity(tile.isFolder ? (isHovered ? 0.30 : 0.18) : (isHovered ? 0.16 : 0.08)))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 5)
-                        .strokeBorder(isSelected ? Color.primary : .clear, lineWidth: 2)
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(color.opacity(isSelected ? 1 : (isHovered ? 0.7 : 0.38)), lineWidth: isSelected ? 2 : 1)
                 }
                 .overlay(alignment: .topLeading) {
-                    if big {
-                        VStack(alignment: .leading, spacing: 1) {
+                    if showsLabel {
+                        VStack(alignment: .leading, spacing: 2) {
                             Text(tile.name)
-                                .font(.caption.weight(.semibold))
+                                .font(.system(size: 11.5, weight: .semibold))
+                                .foregroundStyle(Theme.text)
                                 .lineLimit(1)
                             Text(Format.bytes(tile.size))
-                                .font(.caption2)
-                                .opacity(0.85)
+                                .font(Theme.monoSmall)
+                                .foregroundStyle(color)
                         }
-                        .foregroundStyle(.white)
-                        .shadow(color: .black.opacity(0.35), radius: 1)
-                        .padding(5)
+                        .padding(7)
+                    }
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    if showsPercent {
+                        Text(Format.percent(tile.size, of: total))
+                            .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(color.opacity(0.55))
+                            .padding(8)
                     }
                 }
         }

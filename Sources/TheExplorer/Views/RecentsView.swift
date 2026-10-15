@@ -2,143 +2,104 @@ import SwiftUI
 
 struct RecentsView: View {
     @Bindable var model: BrowserModel
+    @Environment(\.openTab) private var openTab
 
     var body: some View {
         @Bindable var recents = model.recents
+        let rows = recents.sections.flatMap { section in
+            section.items.map { recent in
+                ListRow(
+                    item: recent.item,
+                    size: recent.item.isFolder ? nil : recent.item.fileSize,
+                    date: recent.date,
+                    location: recent.item.url.deletingLastPathComponent().path,
+                    group: section.title
+                )
+            }
+        }
 
         VStack(spacing: 0) {
             PaneHeader {
-                Picker("Date", selection: $recents.dateKind) {
-                    ForEach(RecentsDateKind.allCases) { Text("By Date \($0.rawValue)").tag($0) }
+                Segmented(selection: $recents.dateKind, options: RecentsDateKind.allCases.map { ($0, $0.rawValue) })
+                    .fixedSize()
+                    .help("Created: when it was made. Modified: last content change. Added: when it arrived in its folder (downloads, copies, moves).")
+                Menu {
+                    Picker("Within", selection: $recents.range) {
+                        ForEach(RecentsRange.allCases) { Text("Last \($0.label)").tag($0) }
+                    }
+                    .pickerStyle(.inline)
+                } label: {
+                    MenuLabel(title: "Last \(recents.range.label)")
                 }
-                .labelsHidden()
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
                 .fixedSize()
-                .help("Created: when the item was made. Modified: last content change. Added: when it arrived in its folder (downloads, copies, moves).")
-
-                Picker("Within", selection: $recents.range) {
-                    ForEach(RecentsRange.allCases) { Text("Last \($0.label)").tag($0) }
+                Segmented(selection: $recents.kindFilter, options: [(.all, "All"), (.folders, "Dirs"), (.files, "Files")])
+                    .fixedSize()
+                Toggle(isOn: $recents.hideNoise) {
+                    Text("Hide clutter").font(.system(size: 11.5))
                 }
-                .labelsHidden()
-                .fixedSize()
-
-                Picker("Show", selection: $recents.kindFilter) {
-                    Text("Files & Folders").tag(KindFilter.all)
-                    Text("Folders Only").tag(KindFilter.folders)
-                    Text("Files Only").tag(KindFilter.files)
-                }
-                .labelsHidden()
-                .fixedSize()
-
-                Toggle("Hide clutter", isOn: $recents.hideNoise)
-                    .toggleStyle(.checkbox)
-                    .help("Hides items inside Library, hidden folders, app bundles and dependency folders like node_modules and .git.")
-
+                .toggleStyle(.checkbox)
+                .help("Hides items inside Library, hidden folders, app bundles and dependency folders like node_modules and .git.")
                 Spacer(minLength: 0)
-                if recents.isGathering {
-                    ProgressView().controlSize(.small)
-                }
-                Text(countDescription(recents))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+                Text(countDescription(recents, shown: rows.count))
+                    .font(Theme.mono)
+                    .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)
                     .layoutPriority(-1)
             }
 
-            List(selection: $recents.selection) {
-                ForEach(recents.sections) { section in
-                    Section {
-                        ForEach(section.items) { recent in
-                            RecentRow(recent: recent, dateKind: recents.dateKind)
-                                .tag(recent.id)
-                                .draggable(recent.item.url)
-                        }
-                    } header: {
-                        Text(section.title)
+            FileListView(
+                rows: rows,
+                selection: $recents.selection,
+                dateTitle: recents.dateKind.rawValue,
+                showLocation: true,
+                empty: recents.isGathering ? nil : EmptyState(
+                    symbol: "clock", title: "Nothing new here",
+                    hint: "Nothing in your home folder matches these filters. Try a longer time range."),
+                focusRequest: model.listFocusRequest,
+                onOpen: { urls, newTab in
+                    let items = rows.filter { urls.contains($0.id) }.map(\.item)
+                    if newTab {
+                        items.filter(\.isFolder).forEach { openTab($0.url) }
+                    } else if items.count == 1, let item = items.first {
+                        model.open(item)
+                    } else {
+                        items.forEach { NSWorkspace.shared.open($0.url) }
                     }
-                }
-            }
-            .listStyle(.inset)
-            .alternatingRowBackgrounds()
-            .contextMenu(forSelectionType: URL.self) { urls in
-                FileContextMenu(urls: urls, model: model)
-            } primaryAction: { urls in
-                if urls.count == 1, let url = urls.first, let item = FileItem(url: url) {
-                    model.open(item)
-                } else {
-                    urls.forEach { NSWorkspace.shared.open($0) }
-                }
-            }
-            .onKeyPress(.space) {
-                model.quickLook(recents.selection)
-                return .handled
-            }
-            .overlay {
-                if recents.sections.isEmpty && !recents.isGathering {
-                    ContentUnavailableView("Nothing New", systemImage: "clock",
-                                           description: Text("No items in your home folder match these filters."))
-                }
-            }
+                },
+                onQuickLook: { model.quickLook($0) },
+                rowMenu: { FileContextMenu(urls: $0, model: model) },
+                backgroundMenu: { EmptyView() }
+            )
         }
         .onAppear { recents.start() }
         .onDisappear { recents.stop() }
     }
 
-    private func countDescription(_ recents: RecentsModel) -> String {
-        let shown = recents.sections.reduce(0) { $0 + $1.items.count }
+    private func countDescription(_ recents: RecentsModel, shown: Int) -> String {
         if recents.totalCount > shown {
             return "\(shown.formatted()) newest of \(recents.totalCount.formatted())"
         }
-        return "\(shown.formatted()) \(shown == 1 ? "item" : "items")"
+        return "\(shown.formatted()) items"
     }
 }
 
-private struct RecentRow: View {
-    let recent: RecentItem
-    let dateKind: RecentsDateKind
+/// Menu button label in the Workbench style.
+struct MenuLabel: View {
+    let title: String
 
     var body: some View {
-        let item = recent.item
-        HStack(spacing: 10) {
-            Image(nsImage: Icons.icon(for: item))
-                .resizable()
-                .frame(width: 30, height: 30)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(item.name)
-                        .fontWeight(item.isFolder ? .semibold : .regular)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    if item.isFolder {
-                        Text("FOLDER")
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(.tint)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(.tint.opacity(0.15), in: .capsule)
-                    }
-                }
-                Text(Format.path(item.url.deletingLastPathComponent().path))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.head)
-            }
-            Spacer(minLength: 12)
-            if let size = item.fileSize, !item.isFolder {
-                Text(Format.bytes(size))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(Format.relative(recent.date))
-                    .font(.callout)
-                Text("\(dateKind.rawValue) \(recent.date.formatted(date: .abbreviated, time: .shortened))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(minWidth: 150, alignment: .trailing)
+        HStack(spacing: 5) {
+            Text(title)
+            Image(systemName: "chevron.up.chevron.down").font(.system(size: 8, weight: .bold))
         }
-        .padding(.vertical, 3)
+        .font(.system(size: 11, weight: .medium))
+        .foregroundStyle(Theme.text)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .background(Theme.field, in: .rect(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Theme.fieldBorder))
     }
 }
