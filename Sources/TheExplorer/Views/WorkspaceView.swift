@@ -224,7 +224,7 @@ private struct TabItem: View {
             Button("Duplicate Tab") { workspace.newTab(tab.currentURL) }
             Divider()
             Button("Copy Path") { FileActions.copyPaths([tab.currentURL]) }
-            Button("Open in Terminal") { FileActions.openInTerminal(tab.currentURL) }
+            Button(FileActions.openInTerminalTitle) { FileActions.openInTerminal(tab.currentURL) }
             Divider()
             Button("Close Tab") { workspace.close(tab) }
                 .disabled(workspace.tabs.count == 1)
@@ -275,7 +275,7 @@ struct CommandBar: View {
                     .disabled(!model.canCreateItems)
                 Divider()
                 Button("Recalculate Folder Sizes") { model.recalculateSizes() }
-                Button("Open in Terminal") { FileActions.openInTerminal(model.currentURL) }
+                Button(FileActions.openInTerminalTitle) { FileActions.openInTerminal(model.currentURL) }
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 12, weight: .semibold))
@@ -642,7 +642,7 @@ private struct BreadcrumbChip: View {
         .dropDestination(for: URL.self) { urls, _ in model.receiveDrop(urls, into: url) } isTargeted: { targeted = $0 }
         .contextMenu {
             Button("Open in New Tab") { openTab(url) }
-            Button("Open in Terminal") { FileActions.openInTerminal(url) }
+            Button(FileActions.openInTerminalTitle) { FileActions.openInTerminal(url) }
             Button("Copy Path") { FileActions.copyPaths([url]) }
             Button("Reveal in Finder") { FileActions.revealInFinder([url]) }
             Button(FavoritesStore.shared.contains(url) ? "Unpin" : "Pin to Sidebar") { FavoritesStore.shared.toggle(url) }

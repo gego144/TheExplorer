@@ -55,7 +55,7 @@ struct FolderBackgroundMenu: View {
         Button("New Folder…") { model.creating = .folder }
         Button("New File…") { model.creating = .file }
         Divider()
-        Button("Open in Terminal") { FileActions.openInTerminal(folder) }
+        Button(FileActions.openInTerminalTitle) { FileActions.openInTerminal(folder) }
         Button("Copy Path") { FileActions.copyPaths([folder]) }
         Button("Reveal in Finder") { FileActions.revealInFinder([folder]) }
         Button(FavoritesStore.shared.contains(folder) ? "Unpin" : "Pin to Sidebar") {

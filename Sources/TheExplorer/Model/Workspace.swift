@@ -2,22 +2,6 @@ import AppKit
 import Observation
 import SwiftUI
 
-/// App-wide view preferences, shared by every window.
-@MainActor
-@Observable
-final class Prefs {
-    static let shared = Prefs()
-
-    var showSidebar: Bool { didSet { UserDefaults.standard.set(showSidebar, forKey: "showSidebar") } }
-    var showInspector: Bool { didSet { UserDefaults.standard.set(showInspector, forKey: "showInspector") } }
-
-    private init() {
-        let defaults = UserDefaults.standard
-        showSidebar = defaults.object(forKey: "showSidebar") as? Bool ?? true
-        showInspector = defaults.object(forKey: "showInspector") as? Bool ?? true
-    }
-}
-
 /// What a window is opened with: its tabs' folders and which one is active. The id makes every
 /// open unique (SwiftUI otherwise reuses a window already showing an equal value).
 struct WindowState: Codable, Hashable {

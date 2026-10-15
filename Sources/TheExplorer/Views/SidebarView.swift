@@ -84,7 +84,7 @@ struct SidebarView: View {
     @ViewBuilder
     private func locationMenu(_ url: URL) -> some View {
         Button("Open in New Tab") { openTab(url) }
-        Button("Open in Terminal") { FileActions.openInTerminal(url) }
+        Button(FileActions.openInTerminalTitle) { FileActions.openInTerminal(url) }
         Button("Copy Path") { FileActions.copyPaths([url]) }
         Button("Reveal in Finder") { FileActions.revealInFinder([url]) }
         Button("Pin") { favorites.add(url) }
@@ -221,7 +221,7 @@ private struct PinnedRow: View {
         .contextMenu {
             if favorite.isDirectory {
                 Button("Open in New Tab") { openTab(favorite.url) }
-                Button("Open in Terminal") { FileActions.openInTerminal(favorite.url) }
+                Button(FileActions.openInTerminalTitle) { FileActions.openInTerminal(favorite.url) }
             } else {
                 Button("Open") { NSWorkspace.shared.open(favorite.url) }
             }

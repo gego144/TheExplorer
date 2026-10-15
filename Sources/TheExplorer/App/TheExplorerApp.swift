@@ -12,6 +12,10 @@ struct TheExplorerApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1280, height: 800)
         .commands { ExplorerCommands() }
+
+        Settings {
+            SettingsView()
+        }
     }
 }
 
@@ -122,7 +126,7 @@ struct ExplorerCommands: Commands {
             Button("New File…") { model?.creating = .file }
                 .keyboardShortcut("n", modifiers: [.command, .option])
                 .disabled(!(model?.canCreateItems ?? false))
-            Button("Open in Terminal") { model.map { FileActions.openInTerminal($0.currentURL) } }
+            Button(FileActions.openInTerminalTitle) { model.map { FileActions.openInTerminal($0.currentURL) } }
                 .keyboardShortcut("t", modifiers: [.command, .control])
                 .disabled(model?.destination != .folder)
         }

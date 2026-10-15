@@ -81,6 +81,9 @@ enum DebugSnapshots {
                 if let key = SortKey(rawValue: argument) { model.sort = SortSpec(key: key, ascending: key == .name) }
             case "scope": model.searchScope = argument == "mac" ? .mac : .folder
             case "wait": wait = Double(argument) ?? 2
+            case "terminal":
+                Prefs.shared.terminalID = argument
+                log("terminal -> \(FileActions.openInTerminalTitle) installed=\(Prefs.shared.terminal.isInstalled) app=\(Prefs.shared.terminal.appURL?.path ?? "none")")
             // Real input, delivered to this window only (see InputDriver).
             case "key": InputDriver.press(parts[1])
             case "type": await InputDriver.type(parts.count > 1 ? parts[1] : "")
@@ -137,7 +140,8 @@ enum DebugSnapshots {
     /// CGWindowListCreateImage is obsoleted in the macOS 15 SDK, so it's looked up at runtime;
     /// capturing your own windows needs no Screen Recording permission.
     private static func capture(to path: String) {
-        guard let window = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }),
+        // The frontmost of the app's windows (e.g. Settings once it's open).
+        guard let window = NSApp.orderedWindows.first(where: { $0.isVisible && $0.contentView != nil }),
               let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGWindowListCreateImage") else { return }
         let create = unsafeBitCast(symbol, to: WindowImageFn.self)
         // kCGWindowListOptionIncludingWindow = 8, kCGWindowImageBoundsIgnoreFraming = 1

@@ -82,7 +82,7 @@ final class RecentsModel {
     var dateKind: RecentsDateKind = .created { didSet { restart() } }
     var range: RecentsRange { didSet { restart() } }
     var kindFilter: KindFilter = .all { didSet { refilter() } }
-    var hideNoise = true { didSet { refilter() } }
+    var hideNoise: Bool { didSet { refilter() } }
     var selection: Set<URL> = []
 
     /// Newest first, with a day-group header on the first row of each group.
@@ -100,7 +100,8 @@ final class RecentsModel {
 
     init(mode: RecentsMode) {
         self.mode = mode
-        range = mode == .opened ? .all : .week
+        range = mode == .opened ? .all : Prefs.shared.newRange
+        hideNoise = Prefs.shared.newHidesClutter
     }
 
     var isActive: Bool { query != nil }

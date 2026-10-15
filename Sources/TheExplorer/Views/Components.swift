@@ -39,7 +39,7 @@ struct FileContextMenu: View {
             Button("Reveal in Finder") { FileActions.revealInFinder(urls) }
             if let single {
                 let isFolder = FileItem(url: single)?.isFolder == true
-                Button(isFolder ? "Open in Terminal" : "Open Enclosing Folder in Terminal") {
+                Button(isFolder ? FileActions.openInTerminalTitle : "Open Enclosing Folder in \(Prefs.shared.terminal.name)") {
                     FileActions.openInTerminal(isFolder ? single : single.deletingLastPathComponent())
                 }
             }

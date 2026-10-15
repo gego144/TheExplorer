@@ -109,7 +109,7 @@ final class BrowserModel: Identifiable {
     private(set) var forwardStack: [URL] = []
 
     var selection: Set<URL> = []
-    var sort: SortSpec = .byChanged { didSet { rebuildRows() } }
+    var sort: SortSpec { didSet { rebuildRows() } }
     var kindFilter: KindFilter = .all { didSet { rebuildRows() } }
     var previewURL: URL?
 
@@ -118,13 +118,14 @@ final class BrowserModel: Identifiable {
 
     var showHidden: Bool {
         didSet {
-            UserDefaults.standard.set(showHidden, forKey: "showHidden")
+            // Like Finder, showing hidden files sticks for new tabs too.
+            Prefs.shared.showHidden = showHidden
             rebuildRows()
         }
     }
     var foldersFirst: Bool {
         didSet {
-            UserDefaults.standard.set(foldersFirst, forKey: "foldersFirst")
+            Prefs.shared.foldersFirst = foldersFirst
             rebuildRows()
         }
     }
@@ -148,11 +149,11 @@ final class BrowserModel: Identifiable {
     @ObservationIgnored private var sizeObserver: NSObjectProtocol?
 
     init(url: URL? = nil) {
-        let defaults = UserDefaults.standard
-        showHidden = defaults.bool(forKey: "showHidden")
-        foldersFirst = defaults.object(forKey: "foldersFirst") as? Bool ?? true
-        let saved = defaults.string(forKey: "lastPath").map(URL.init(fileURLWithPath:))
-        let start = url ?? saved ?? .home
+        let prefs = Prefs.shared
+        showHidden = prefs.showHidden
+        foldersFirst = prefs.foldersFirst
+        sort = prefs.defaultSort
+        let start = url ?? prefs.startURL
         currentURL = FileManager.default.fileExists(atPath: start.path) ? start : .home
         sizeObserver = NotificationCenter.default.addObserver(forName: FolderSizeStore.didChange, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.folderSizesChanged() }
@@ -602,8 +603,13 @@ enum FileActions {
         NSWorkspace.shared.activateFileViewerSelecting(Array(urls))
     }
 
+    /// Opens `folder` in the terminal chosen in Settings.
+    @MainActor
     static func openInTerminal(_ folder: URL) {
-        guard let terminal = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal") else { return }
-        NSWorkspace.shared.open([folder], withApplicationAt: terminal, configuration: NSWorkspace.OpenConfiguration())
+        Prefs.shared.terminal.open(folder)
     }
+
+    /// "Open in cmux", "Open in Terminal"… for menus.
+    @MainActor
+    static var openInTerminalTitle: String { "Open in \(Prefs.shared.terminal.name)" }
 }
