@@ -89,12 +89,17 @@ final class BrowserModel: Identifiable {
     var destination: Destination = .folder
     private(set) var currentURL: URL
     private(set) var items: [FileItem] = [] { didSet { rebuildRows() } }
+    /// Folders shown expanded inline, and the contents loaded for them.
+    private(set) var expanded: Set<URL> = []
+    @ObservationIgnored private var children: [URL: [FileItem]] = [:]
     /// The folder as shown: hidden files and the kind filter applied, sorted. Rebuilt only when
     /// the listing, sort or filters change, never while rendering.
     private(set) var rows: [ListRow] = []
     /// Largest size among `rows`, for scaling the size bars.
     private(set) var maxSize: Int64 = 0
+    /// Counts for the folder itself, not counting the contents of expanded folders.
     private(set) var folderCount = 0
+    private(set) var fileCount = 0
     private(set) var hiddenCount = 0
     /// Capacity of the volume holding the current folder, refreshed with each listing.
     private(set) var volume: VolumeUsage?
@@ -170,21 +175,96 @@ final class BrowserModel: Identifiable {
     var isSearching: Bool { !searchText.trimmingCharacters(in: .whitespaces).isEmpty }
 
     private func rebuildRows() {
-        let sizes = FolderSizeStore.shared
         var folders = 0
+        var files = 0
         var hidden = 0
-        var visible: [ListRow] = []
-        visible.reserveCapacity(items.count)
         for item in items {
             if item.isHidden { hidden += 1 }
             guard (showHidden || !item.isHidden) && kindFilter.matches(isFolder: item.isFolder) else { continue }
-            if item.isFolder { folders += 1 }
-            visible.append(ListRow(item: item, size: item.isFolder ? nil : item.fileSize, liveFolderSize: item.isFolder, date: item.modified))
+            if item.isFolder { folders += 1 } else { files += 1 }
         }
-        rows = RowSorter.sorted(visible, by: sort, foldersFirst: foldersFirst) { sizes.size(for: $0)?.bytes }
+        var flattened: [ListRow] = []
+        flattened.reserveCapacity(items.count)
+        appendRows(of: items, depth: 0, to: &flattened)
+        rows = flattened
         folderCount = folders
+        fileCount = files
         hiddenCount = showHidden ? 0 : hidden
         updateMaxSize()
+    }
+
+    /// One level, filtered and sorted, with each expanded folder's contents right below it.
+    private func appendRows(of items: [FileItem], depth: Int, to output: inout [ListRow]) {
+        let sizes = FolderSizeStore.shared
+        let level = items.compactMap { item -> ListRow? in
+            guard (showHidden || !item.isHidden) && kindFilter.matches(isFolder: item.isFolder) else { return nil }
+            return ListRow(item: item, size: item.isFolder ? nil : item.fileSize, liveFolderSize: item.isFolder,
+                           date: item.modified, depth: depth,
+                           expansion: item.isFolder ? expanded.contains(item.url) : nil)
+        }
+        for row in RowSorter.sorted(level, by: sort, foldersFirst: foldersFirst, folderSize: { sizes.size(for: $0)?.bytes }) {
+            output.append(row)
+            if row.expansion == true, let contents = children[row.item.url] {
+                appendRows(of: contents, depth: depth + 1, to: &output)
+            }
+        }
+    }
+
+    // MARK: - Inline expansion
+
+    func toggleExpanded(_ url: URL) {
+        if expanded.contains(url) { collapse(url) } else { expand(url) }
+    }
+
+    func expand(_ url: URL) {
+        guard !expanded.contains(url) else { return }
+        expanded.insert(url)
+        loadChildren(of: [url])
+    }
+
+    /// Collapses a folder and everything expanded inside it. Selected items that disappear
+    /// hand their selection to the folder, as in Finder.
+    func collapse(_ url: URL) {
+        guard expanded.contains(url) else { return }
+        let prefix = url.path + "/"
+        let isInside = { (other: URL) in other.path.hasPrefix(prefix) }
+        expanded = expanded.filter { $0 != url && !isInside($0) }
+        children = children.filter { $0.key != url && !isInside($0.key) }
+        if selection.contains(where: isInside) {
+            selection = selection.filter { !isInside($0) }.union([url])
+        }
+        rebuildRows()
+    }
+
+    private func loadChildren(of folders: [URL]) {
+        guard !folders.isEmpty else { return }
+        Task { [weak self] in
+            let listings = await Task.detached(priority: .userInitiated) {
+                folders.map { folder in (folder, (try? Self.listContents(of: folder)) ?? []) }
+            }.value
+            guard let self else { return }
+            var measure: [String] = []
+            for (folder, contents) in listings where self.expanded.contains(folder) {
+                self.children[folder] = contents
+                measure += contents.filter(\.isFolder).map(\.path)
+            }
+            self.rebuildRows()
+            FolderSizeStore.shared.request(measure)
+        }
+    }
+
+    /// Everything listed: the folder's items plus the contents of expanded folders.
+    var listedItems: [FileItem] {
+        children.isEmpty ? items : items + expanded.compactMap { children[$0] }.joined()
+    }
+
+    nonisolated static func listContents(of url: URL) throws -> [FileItem] {
+        try FileManager.default
+            .contentsOfDirectory(at: url, includingPropertiesForKeys: FileItem.resourceKeys, options: [])
+            .map { child in
+                let values = (try? child.resourceValues(forKeys: Set(FileItem.resourceKeys))) ?? URLResourceValues()
+                return FileItem(url: child, values: values)
+            }
     }
 
     private func updateMaxSize() {
@@ -208,7 +288,7 @@ final class BrowserModel: Identifiable {
     }
 
     var selectedItems: [FileItem] {
-        items.filter { selection.contains($0.url) }
+        listedItems.filter { selection.contains($0.url) }
     }
 
     var title: String {
@@ -254,6 +334,8 @@ final class BrowserModel: Identifiable {
                 forwardStack.removeAll()
             }
             currentURL = url
+            expanded = []
+            children = [:]
             items = []
             selection = []
             pendingSelection = nil
@@ -321,14 +403,7 @@ final class BrowserModel: Identifiable {
         isLoading = true
         loadTask = Task { [weak self] in
             let listing = Task.detached(priority: .userInitiated) { () -> Result<[FileItem], Error> in
-                Result {
-                    try FileManager.default
-                        .contentsOfDirectory(at: url, includingPropertiesForKeys: FileItem.resourceKeys, options: [])
-                        .map { child in
-                            let values = (try? child.resourceValues(forKeys: Set(FileItem.resourceKeys))) ?? URLResourceValues()
-                            return FileItem(url: child, values: values)
-                        }
-                }
+                Result { try Self.listContents(of: url) }
             }
             let volume = Task.detached(priority: .utility) { VolumeUsage(of: url) }
             let result = await listing.value
@@ -347,9 +422,15 @@ final class BrowserModel: Identifiable {
                     self.selection = Set(items.filter { pending.contains($0.path) }.map(\.url))
                     self.pendingSelection = nil
                 } else if keepSelection {
-                    self.selection = previousSelection.intersection(Set(items.map(\.url)))
+                    self.selection = previousSelection.intersection(Set(self.listedItems.map(\.url)))
                 }
                 FolderSizeStore.shared.request(items.filter(\.isFolder).map(\.path))
+                // Refresh expanded folders too; drop the ones that are gone.
+                let present = Set(items.map(\.url))
+                self.expanded = self.expanded.filter { folder in
+                    present.contains(folder) || self.expanded.contains(folder.deletingLastPathComponent())
+                }
+                self.loadChildren(of: Array(self.expanded))
             case .failure(let error):
                 self.items = []
                 self.loadError = Self.describe(error, for: url)
@@ -383,7 +464,7 @@ final class BrowserModel: Identifiable {
     }
 
     func open(urls: Set<URL>) {
-        let targets = items.filter { urls.contains($0.url) }
+        let targets = listedItems.filter { urls.contains($0.url) }
         if targets.count == 1, let only = targets.first {
             open(only)
         } else {

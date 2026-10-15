@@ -14,6 +14,10 @@ struct ListRow: Identifiable, Sendable {
     var location: String?
     /// Group header shown above this row; set on the first row of each group only.
     var group: String?
+    /// Nesting level inside inline-expanded folders.
+    var depth = 0
+    /// Folder rows that can expand inline: whether they are. nil when the row can't expand.
+    var expansion: Bool?
 
     var id: URL { item.url }
 }
@@ -58,6 +62,8 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
     var onDropInto: (([URL], URL) -> Bool)?
     /// Drop onto empty space.
     var onDropBackground: (([URL]) -> Bool)?
+    /// Expands or collapses a folder inline (its arrow, or → and ←).
+    var onToggleExpand: ((URL) -> Void)?
     /// Called when the last row scrolls into view, to load the next page.
     var onReachEnd: (() -> Void)?
     /// Shown below the last row.
@@ -136,6 +142,9 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
         .focusable()
         .focusEffectDisabled()
         .focused($focused)
+        .onKeyPress(keys: [.leftArrow, .rightArrow]) { press in
+            expandOrCollapse(expanding: press.key == .rightArrow)
+        }
         .onKeyPress(keys: [.upArrow, .downArrow]) { press in
             move(press.key == .upArrow ? -1 : 1, extend: press.modifiers.contains(.shift))
             return .handled
@@ -223,7 +232,8 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
     private func rowView(_ row: ListRow, maxSize: Int64) -> some View {
         let isSelected = selection.contains(row.id)
         return RowContent(row: row, isSelected: isSelected, listFocused: focused, isDropTarget: dropTarget == row.id,
-                          maxSize: maxSize, showLocation: showLocation)
+                          maxSize: maxSize, showLocation: showLocation,
+                          onToggle: row.expansion != nil ? onToggleExpand.map { toggle in { toggle(row.id) } } : nil)
             .equatable()
             .contentShape(.rect)
             .onTapGesture { click(row.id) }
@@ -257,6 +267,23 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
     private func indices(from a: URL, to b: URL) -> ClosedRange<Int>? {
         guard let i = rows.firstIndex(where: { $0.id == a }), let j = rows.firstIndex(where: { $0.id == b }) else { return nil }
         return min(i, j)...max(i, j)
+    }
+
+    /// → expands the selected folders; ← collapses them, or from inside one, selects its folder.
+    private func expandOrCollapse(expanding: Bool) -> KeyPress.Result {
+        guard let onToggleExpand, !selection.isEmpty else { return .ignored }
+        let selected = rows.filter { selection.contains($0.id) }
+        if expanding {
+            selected.filter { $0.expansion == false }.forEach { onToggleExpand($0.id) }
+        } else if selected.contains(where: { $0.expansion == true }) {
+            selected.filter { $0.expansion == true }.forEach { onToggleExpand($0.id) }
+        } else if selected.count == 1, let row = selected.first, row.depth > 0,
+                  let parent = rows.first(where: { $0.id == row.id.deletingLastPathComponent() }) {
+            selection = [parent.id]
+            anchor = parent.id
+            cursor = parent.id
+        }
+        return .handled
     }
 
     private func move(_ delta: Int, extend: Bool) {
@@ -300,23 +327,27 @@ private struct RowContent: View, Equatable {
     let isDropTarget: Bool
     let maxSize: Int64
     let showLocation: Bool
+    /// Expands or collapses this folder. Not part of equality.
+    var onToggle: (() -> Void)?
 
     @State private var hovered = false
+
+    private static let indent: CGFloat = 16
 
     static func == (lhs: RowContent, rhs: RowContent) -> Bool {
         lhs.isSelected == rhs.isSelected && lhs.listFocused == rhs.listFocused && lhs.isDropTarget == rhs.isDropTarget
             && lhs.maxSize == rhs.maxSize && lhs.showLocation == rhs.showLocation
             && lhs.row.item == rhs.row.item && lhs.row.size == rhs.row.size && lhs.row.date == rhs.row.date
             && lhs.row.location == rhs.row.location && lhs.row.liveFolderSize == rhs.row.liveFolderSize
+            && lhs.row.depth == rhs.row.depth && lhs.row.expansion == rhs.row.expansion
+            && (lhs.onToggle == nil) == (rhs.onToggle == nil)
     }
 
     var body: some View {
         let item = row.item
         HStack(spacing: Column.spacing) {
-            Image(systemName: "chevron.right")
-                .font(.system(size: 8, weight: .heavy))
-                .foregroundStyle(isSelected ? Theme.accent : Theme.accent.opacity(0.75))
-                .frame(width: Column.marker)
+            disclosure
+                .padding(.leading, CGFloat(row.depth) * Self.indent)
                 .opacity(item.isFolder ? 1 : 0)
             HStack(spacing: 5) {
                 Text(item.name)
@@ -366,6 +397,28 @@ private struct RowContent: View, Equatable {
             }
         }
         .onHover { hovered = $0 }
+    }
+
+    /// The folder arrow. Where folders can expand inline it's a button with a generous hit area
+    /// that turns down when open; clicking it never selects or opens the row.
+    @ViewBuilder
+    private var disclosure: some View {
+        let arrow = Image(systemName: "chevron.right")
+            .font(.system(size: 8, weight: .heavy))
+            .foregroundStyle(isSelected || row.expansion == true ? Theme.accent : Theme.accent.opacity(0.75))
+            .rotationEffect(.degrees(row.expansion == true ? 90 : 0))
+            .animation(.snappy(duration: 0.15), value: row.expansion)
+            .frame(width: Column.marker)
+        if let onToggle {
+            arrow
+                .frame(width: Column.marker + 12, height: 26)
+                .contentShape(.rect)
+                .padding(.horizontal, -6)
+                .highPriorityGesture(TapGesture().onEnded(onToggle))
+                .help(row.expansion == true ? "Collapse (←)" : "Expand (→)")
+        } else {
+            arrow
+        }
     }
 
     private var background: Color {

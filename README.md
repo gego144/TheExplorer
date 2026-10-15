@@ -10,6 +10,7 @@ Written in SwiftUI. Spotlight powers search across the whole Mac, and a parallel
 - **Folders vs. files, unmistakably.** Folders get a medium-weight name, a chevron and a tinted "Folder" kind. You can also filter the view to just folders or just files.
 - **One bar for path and search.** The command bar shows where you are as clickable chips. Press ⌘K (or ⌘F, or click it) and type to search, or start with `/` or `~` to jump to a path with folder completion (↑↓ to choose, ⇥ to complete). ⌘L opens it with the current path ready to edit.
 - **Get around fast.** Back/forward history, ⌘↑ for the enclosing folder, arrow keys and type-to-select in every list.
+- **Expand folders in place.** Click a folder's arrow (or press →) to show its contents indented below it, as in Finder's list view. Press ← or click again to collapse. Double-click still opens the folder.
 - **Tabs.** Browser-style tabs, each with its own folder, history and search. ⌘T opens one and ⌘-double-click opens a folder in one. Drop files on a tab to move them into its folder, or hover a drag over a tab to switch to it. Tabs come back where you left them after you quit.
 - **Search.**
   - *This Folder* walks the current folder and its subfolders, including hidden and unindexed files.
@@ -111,7 +112,7 @@ open -g -n --env EXPLORER_SNAPSHOT_DIR=/tmp/shots --env EXPLORER_SNAPSHOT_QUIT=1
     build/debug/TheExplorer.app
 ```
 
-Scenes are separated by `;`. The available scenes are `folder:<path>`, `select:<path>`, `newtab:<path>`, `tab:<n>`, `omnibox:<text>`, `recents`, `new`, `range:<days>` (0 for all time), `more` (load the next page), `search:<text>`, `searchmac:<text>`, `scope:mac|folder`, `create:folder|file`, `drop:<source>><folder>`, `storage[:<path>]` and `wait:<seconds>`. Launch with `open -g` so the app never takes focus; running the binary directly can leave the app without a window. To run fully hidden and just read the log, add `-j` and `--env EXPLORER_NO_CAPTURE=1`.
+Scenes are separated by `;`. The available scenes are `folder:<path>`, `select:<path>`, `newtab:<path>`, `tab:<n>`, `omnibox:<text>`, `expand:<path>`, `recents`, `new`, `range:<days>` (0 for all time), `more` (load the next page), `search:<text>`, `searchmac:<text>`, `scope:mac|folder`, `create:folder|file`, `drop:<source>><folder>`, `storage[:<path>]` and `wait:<seconds>`. Launch with `open -g` so the app never takes focus; running the binary directly can leave the app without a window. To run fully hidden and just read the log, add `-j` and `--env EXPLORER_NO_CAPTURE=1`.
 
 ### Measuring speed
 

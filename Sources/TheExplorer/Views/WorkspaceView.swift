@@ -661,15 +661,24 @@ private struct Chip: View {
     let title: String
     let isCurrent: Bool
     var highlighted = false
+    @State private var hovered = false
 
     var body: some View {
+        let active = isCurrent || highlighted
         Text(title)
             .font(.system(size: 12, weight: isCurrent ? .semibold : .regular))
             .lineLimit(1)
             .padding(.horizontal, 7)
             .padding(.vertical, 2.5)
-            .foregroundStyle(isCurrent || highlighted ? Theme.accent : Theme.textSecondary)
-            .background(isCurrent || highlighted ? Theme.accentSoft : Theme.raised, in: .rect(cornerRadius: 5))
+            .foregroundStyle(active ? Theme.accent : (hovered ? Theme.text : Theme.textSecondary))
+            .background(active ? Theme.accentSoft : (hovered ? Theme.fieldBorder : Theme.raised), in: .rect(cornerRadius: 5))
+            .overlay {
+                RoundedRectangle(cornerRadius: 5)
+                    .strokeBorder(hovered ? (active ? Theme.accent.opacity(0.45) : Theme.textTertiary.opacity(0.6)) : .clear)
+            }
+            .contentShape(.rect)
+            .onHover { hovered = $0 }
+            .animation(.easeOut(duration: 0.12), value: hovered)
     }
 }
 
@@ -717,7 +726,7 @@ struct StatusBar: View {
             return model.title.lowercased()
         case .folder:
             let folders = model.folderCount
-            var text = "\(folders.formatted()) dirs · \((model.rows.count - folders).formatted()) files"
+            var text = "\(folders.formatted()) dirs · \(model.fileCount.formatted()) files"
             if model.hiddenCount > 0 { text += " · \(model.hiddenCount.formatted()) hidden" }
             if !model.selection.isEmpty {
                 let sizes = FolderSizeStore.shared

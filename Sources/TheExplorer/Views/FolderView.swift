@@ -18,7 +18,7 @@ struct FolderView: View {
                 empty: emptyState,
                 focusRequest: model.listFocusRequest,
                 onOpen: { urls, newTab in
-                    let folders = model.items.filter { urls.contains($0.url) && $0.isFolder }
+                    let folders = model.listedItems.filter { urls.contains($0.url) && $0.isFolder }
                     if newTab, !folders.isEmpty {
                         folders.forEach { openTab($0.url) }
                     } else {
@@ -28,6 +28,7 @@ struct FolderView: View {
                 onQuickLook: { model.quickLook($0) },
                 onDropInto: { urls, folder in model.receiveDrop(urls, into: folder) },
                 onDropBackground: { model.receiveDrop($0, into: model.currentURL) },
+                onToggleExpand: { model.toggleExpanded($0) },
                 rowMenu: { FileContextMenu(urls: $0, model: model) },
                 backgroundMenu: { FolderBackgroundMenu(model: model) }
             )

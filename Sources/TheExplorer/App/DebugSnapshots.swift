@@ -35,6 +35,7 @@ enum DebugSnapshots {
             case "select": model.selection = [URL(fileURLWithPath: argument).standardizedFileURL]
             case "recents": model.show(.recents)
             case "new": model.show(.newFiles)
+            case "expand": model.toggleExpanded(URL(fileURLWithPath: argument, isDirectory: true).standardizedFileURL)
             case "more": (model.destination == .newFiles ? model.newFiles : model.recents).loadMore()
             case "range":
                 let recents = model.destination == .newFiles ? model.newFiles : model.recents
