@@ -1,11 +1,22 @@
 import AppKit
 import Observation
 
-struct VolumeUsage {
+struct VolumeUsage: Sendable {
     let name: String
     let total: Int64
     let available: Int64
     var used: Int64 { max(0, total - available) }
+}
+
+extension VolumeUsage {
+    /// The volume holding `url`. Can take a while (available space is computed), so call it
+    /// off the main thread.
+    init?(of url: URL) {
+        let keys: Set<URLResourceKey> = [.volumeNameKey, .volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey]
+        guard let values = try? url.resourceValues(forKeys: keys), let total = values.volumeTotalCapacity else { return nil }
+        self.init(name: values.volumeName ?? "Disk", total: Int64(total),
+                  available: values.volumeAvailableCapacityForImportantUsage ?? 0)
+    }
 }
 
 enum ScanTarget: Hashable {

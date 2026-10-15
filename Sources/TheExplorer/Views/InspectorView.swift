@@ -213,9 +213,10 @@ private struct DetailRow: View {
 
 private struct MultipleSelectionSummary: View {
     let urls: Set<URL>
+    /// Read off the main thread: selecting everything in a huge folder must not stall.
+    @State private var items: [FileItem] = []
 
     var body: some View {
-        let items = urls.compactMap(FileItem.init(url:))
         let folders = items.filter(\.isFolder)
         let sizes = FolderSizeStore.shared
         let fileBytes = items.compactMap(\.fileSize).reduce(0, +)
@@ -223,7 +224,7 @@ private struct MultipleSelectionSummary: View {
         let pending = folders.contains { sizes.size(for: $0.path) == nil }
 
         VStack(alignment: .leading, spacing: 10) {
-            Text("\(items.count) selected")
+            Text("\(urls.count) selected")
                 .font(.system(size: 14, weight: .semibold))
             Text("\(folders.count) dirs · \(items.count - folders.count) files")
                 .font(Theme.mono)
@@ -238,6 +239,10 @@ private struct MultipleSelectionSummary: View {
                 .buttonStyle(SubtleButtonStyle())
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onAppear { sizes.request(folders.map(\.path)) }
+        .task(id: urls) {
+            let urls = urls
+            items = await Task.detached(priority: .userInitiated) { urls.compactMap(FileItem.init(url:)) }.value
+            FolderSizeStore.shared.request(items.filter(\.isFolder).map(\.path))
+        }
     }
 }

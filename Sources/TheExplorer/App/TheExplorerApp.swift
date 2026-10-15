@@ -218,6 +218,8 @@ struct ExplorerCommands: Commands {
             Divider()
             Button("Recents") { model?.show(.recents) }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
+            Button("New") { model?.show(.newFiles) }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
             Button("Storage") { model?.show(.storage) }
                 .keyboardShortcut("b", modifiers: [.command, .shift])
             Divider()

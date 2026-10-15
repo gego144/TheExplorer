@@ -62,7 +62,8 @@ struct WorkspaceView: View {
         } else {
             switch model.destination {
             case .folder: FolderView(model: model)
-            case .recents: RecentsView(model: model)
+            case .recents: RecentsView(model: model, recents: model.recents)
+            case .newFiles: RecentsView(model: model, recents: model.newFiles)
             case .storage: StorageView(model: model)
             }
         }
@@ -237,6 +238,7 @@ private struct TabItem: View {
         switch tab.destination {
         case .folder: return "diamond.fill"
         case .recents: return "clock.fill"
+        case .newFiles: return "sparkles"
         case .storage: return "chart.pie.fill"
         }
     }
@@ -310,9 +312,12 @@ struct Omnibox: View {
     @State private var query = ""
     @State private var highlighted: Int?
     @State private var invalid = false
+    @State private var suggestions: [URL] = []
+    /// Set when editing begins, so the field exists before it's asked to take focus.
+    @State private var editing = false
 
     private var isPathMode: Bool { query.hasPrefix("/") || query.hasPrefix("~") }
-    private var showsField: Bool { focused || !query.isEmpty }
+    private var showsField: Bool { editing || focused || !query.isEmpty }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -371,6 +376,11 @@ struct Omnibox: View {
             highlighted = nil
             model.searchText = isPathMode ? "" : query
         }
+        .task(id: isPathMode ? query : "") {
+            // Listed off the main thread: typing a path into a huge folder must stay instant.
+            let query = isPathMode ? query : ""
+            suggestions = query.isEmpty ? [] : await Task.detached(priority: .userInitiated) { Self.suggestions(for: query) }.value
+        }
         .onChange(of: model.searchText) {
             // Keep the field in step when the search is started or ended from elsewhere.
             guard !focused else { return }
@@ -381,8 +391,10 @@ struct Omnibox: View {
             }
         }
         .onChange(of: focused) {
+            guard !focused else { return }
+            editing = false
             // An unfinished path is a draft; drop it when you leave the field.
-            if !focused && isPathMode { query = "" }
+            if isPathMode { query = "" }
         }
         .onChange(of: model.currentURL) { if !focused && isPathMode { query = "" } }
         .onChange(of: model.destination) { if !focused && isPathMode { query = "" } }
@@ -391,6 +403,7 @@ struct Omnibox: View {
         }
         .onChange(of: ObjectIdentifier(model)) {
             query = model.searchText
+            editing = false
             focused = false
         }
     }
@@ -418,12 +431,19 @@ struct Omnibox: View {
 
     private func begin(_ text: String) {
         query = text
-        focused = true
+        editing = true
+        // Focus once the field is on screen; focusing a view that doesn't exist yet is ignored.
+        DispatchQueue.main.async { focused = true }
+        // If focus didn't take (e.g. the window isn't key), don't leave an empty field behind.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            if !focused && query.isEmpty { editing = false }
+        }
     }
 
     private func cancel() {
         query = ""
         model.searchText = ""
+        editing = false
         focused = false
         model.listFocusRequest += 1
     }
@@ -471,17 +491,22 @@ struct Omnibox: View {
 
     /// Folders matching what's typed: the contents of a folder ending in "/", otherwise siblings
     /// whose names start with the last component.
-    private var suggestions: [URL] {
+    nonisolated private static func suggestions(for query: String) -> [URL] {
         let expanded = (query as NSString).expandingTildeInPath
         let endsWithSlash = query.hasSuffix("/")
         let parent = endsWithSlash ? expanded : (expanded as NSString).deletingLastPathComponent
         let prefix = endsWithSlash ? "" : (expanded as NSString).lastPathComponent.lowercased()
-        guard let names = try? FileManager.default.contentsOfDirectory(atPath: parent.isEmpty ? "/" : parent) else { return [] }
-        return names
-            .filter { (prefix.hasPrefix(".") || !$0.hasPrefix(".")) && (prefix.isEmpty || $0.lowercased().hasPrefix(prefix)) }
-            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
-            .map { URL(fileURLWithPath: parent).appendingPathComponent($0) }
-            .filter { FileItem(url: $0)?.isFolder == true }
+        let keys: [URLResourceKey] = [.isDirectoryKey, .isPackageKey]
+        guard let children = try? FileManager.default.contentsOfDirectory(
+            at: URL(fileURLWithPath: parent.isEmpty ? "/" : parent), includingPropertiesForKeys: keys) else { return [] }
+        return children
+            .filter { url in
+                let name = url.lastPathComponent
+                guard (prefix.hasPrefix(".") || !name.hasPrefix(".")) && (prefix.isEmpty || name.lowercased().hasPrefix(prefix)) else { return false }
+                let values = try? url.resourceValues(forKeys: Set(keys))
+                return values?.isDirectory == true && values?.isPackage != true
+            }
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
             .prefix(8)
             .map { $0 }
     }
@@ -539,7 +564,7 @@ private struct Breadcrumbs: View {
 
     private var trail: [URL] {
         switch model.destination {
-        case .recents, .storage: return []
+        case .recents, .newFiles, .storage: return []
         case .folder:
             var urls: [URL] = []
             var url = model.currentURL
@@ -666,7 +691,7 @@ struct StatusBar: View {
                 ProgressView().controlSize(.mini)
             }
             Spacer()
-            if let volume = volume {
+            if let volume = model.volume {
                 Text(volume.name).foregroundStyle(Theme.textSecondary)
                 HeatBar(fraction: Double(volume.used) / Double(max(volume.total, 1)), height: 4, color: Theme.accent)
                     .frame(width: 110)
@@ -688,27 +713,19 @@ struct StatusBar: View {
             return "\(count.formatted()) \(count == 1 ? "result" : "results")"
         }
         switch model.destination {
-        case .recents, .storage:
+        case .recents, .newFiles, .storage:
             return model.title.lowercased()
         case .folder:
-            let visible = model.rows
-            let folders = visible.filter(\.item.isFolder).count
-            var text = "\(folders.formatted()) dirs · \((visible.count - folders).formatted()) files"
-            let hidden = model.showHidden ? 0 : model.items.filter(\.isHidden).count
-            if hidden > 0 { text += " · \(hidden.formatted()) hidden" }
-            let selected = visible.filter { model.selection.contains($0.id) }
-            if !selected.isEmpty {
-                let bytes = selected.compactMap(\.displaySize).reduce(0, +)
+            let folders = model.folderCount
+            var text = "\(folders.formatted()) dirs · \((model.rows.count - folders).formatted()) files"
+            if model.hiddenCount > 0 { text += " · \(model.hiddenCount.formatted()) hidden" }
+            if !model.selection.isEmpty {
+                let sizes = FolderSizeStore.shared
+                let selected = model.rows.filter { model.selection.contains($0.id) }
+                let bytes = selected.compactMap { $0.size ?? sizes.size(for: $0.item.path)?.bytes }.reduce(0, +)
                 text += " · \(selected.count.formatted()) selected" + (bytes > 0 ? " (\(Format.bytes(bytes)))" : "")
             }
             return text
         }
-    }
-
-    private var volume: VolumeUsage? {
-        let keys: Set<URLResourceKey> = [.volumeNameKey, .volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey]
-        guard let values = try? model.currentURL.resourceValues(forKeys: keys), let total = values.volumeTotalCapacity else { return nil }
-        return VolumeUsage(name: values.volumeName ?? "Disk", total: Int64(total),
-                           available: values.volumeAvailableCapacityForImportantUsage ?? 0)
     }
 }

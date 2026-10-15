@@ -28,8 +28,10 @@ if [[ -z "${SIGN_IDENTITY:-}" ]]; then
     fi
 fi
 
-swift build -c "$CONFIG"
-BIN="$(swift build -c "$CONFIG" --show-bin-path)/TheExplorer"
+# SWIFT_FLAGS passes extra flags, e.g. SWIFT_FLAGS="-Xswiftc -O" for an optimized debug build
+# when measuring performance with the debug scenes.
+swift build -c "$CONFIG" ${=SWIFT_FLAGS:-}
+BIN="$(swift build -c "$CONFIG" ${=SWIFT_FLAGS:-} --show-bin-path)/TheExplorer"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"

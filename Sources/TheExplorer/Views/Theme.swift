@@ -77,8 +77,20 @@ struct TypeChip: View {
             .help(item.kindDescription)
     }
 
+    private static var styleCache: [String: (label: String, color: Color)] = [:]
+
+    /// Memoized per type and extension: the UTType conformance checks are too slow to repeat
+    /// for every row on every redraw or sort.
     static func style(for item: FileItem) -> (label: String, color: Color) {
         if item.isFolder { return ("DIR", Theme.accent) }
+        let key = "\(item.isSymlink ? "l" : "")\(item.isPackage ? "p" : "")|\(item.contentType?.identifier ?? "")|\(item.fileExtension)"
+        if let cached = styleCache[key] { return cached }
+        let style = computeStyle(for: item)
+        styleCache[key] = style
+        return style
+    }
+
+    private static func computeStyle(for item: FileItem) -> (label: String, color: Color) {
         if item.isSymlink && item.contentType == nil { return ("LINK", Theme.textSecondary) }
         let ext = item.fileExtension
         let label = ext.isEmpty ? (item.isPackage ? "PKG" : "FILE") : String(ext.uppercased().prefix(5))

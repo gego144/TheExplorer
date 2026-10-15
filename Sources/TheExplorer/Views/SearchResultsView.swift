@@ -8,18 +8,18 @@ struct SearchResultsView: View {
 
     var body: some View {
         @Bindable var search = model.search
-        let sizes = FolderSizeStore.shared
         var rows = search.visibleHits.map { hit in
             ListRow(
                 item: hit.item,
-                size: hit.item.isFolder ? sizes.size(for: hit.item.path)?.bytes : hit.item.fileSize,
+                size: hit.item.isFolder ? nil : hit.item.fileSize,
+                liveFolderSize: hit.item.isFolder,
                 date: hit.item.modified,
-                location: hit.item.url.deletingLastPathComponent().path
+                location: (hit.item.path as NSString).deletingLastPathComponent
             )
         }
         if let sort {
-            let compare = BrowserModel.comparator(for: sort)
-            rows.sort { compare(FileRow(item: $0.item, folderSize: nil, sizeOverride: $0.size), FileRow(item: $1.item, folderSize: nil, sizeOverride: $1.size)) }
+            let sizes = FolderSizeStore.shared
+            rows = RowSorter.sorted(rows, by: sort) { sizes.size(for: $0)?.bytes }
         }
 
         return VStack(spacing: 0) {

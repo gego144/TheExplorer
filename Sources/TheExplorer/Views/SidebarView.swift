@@ -31,6 +31,7 @@ struct SidebarView: View {
 
                 caption("Views")
                 SidebarRow(title: "Recents", systemImage: "clock", isSelected: isShowing(.recents)) { model.show(.recents) }
+                SidebarRow(title: "New", systemImage: "sparkles", isSelected: isShowing(.newFiles)) { model.show(.newFiles) }
                 SidebarRow(title: "Storage", systemImage: "chart.pie", isSelected: isShowing(.storage)) { model.show(.storage) }
 
                 caption("Places")

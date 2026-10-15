@@ -1,16 +1,18 @@
 import SwiftUI
 
 /// One line in a file list: the item plus whatever the list should show about it.
-struct ListRow: Identifiable {
+struct ListRow: Identifiable, Sendable {
     let item: FileItem
+    /// Known size (files, or folders whose size the caller already has).
     var size: Int64?
-    var sizeCalculating = false
-    var sizePartial = false
+    /// Folder sizes measured on demand: the row reads FolderSizeStore itself, so sizes landing
+    /// only redraw the rows on screen instead of rebuilding the whole list.
+    var liveFolderSize = false
     /// Value of the date column (modified, created, added… depending on the view).
     var date: Date?
     /// Enclosing folder, shown when the list mixes folders (search, recents).
     var location: String?
-    /// Section header this row belongs to, for grouped lists.
+    /// Group header shown above this row; set on the first row of each group only.
     var group: String?
 
     var id: URL { item.url }
@@ -42,6 +44,8 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
     @Binding var selection: Set<URL>
     var sort: SortSpec?
     var onSort: ((SortKey) -> Void)?
+    /// Largest size in the list, for scaling size bars. Computed from `rows` when nil.
+    var maxSize: Int64?
     var dateTitle = "Changed"
     var dateSortKey: SortKey = .modified
     var showLocation = false
@@ -54,32 +58,44 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
     var onDropInto: (([URL], URL) -> Bool)?
     /// Drop onto empty space.
     var onDropBackground: (([URL]) -> Bool)?
+    /// Called when the last row scrolls into view, to load the next page.
+    var onReachEnd: (() -> Void)?
+    /// Shown below the last row.
+    var footer: AnyView?
     @ViewBuilder let rowMenu: (Set<URL>) -> RowMenu
     @ViewBuilder let backgroundMenu: () -> BackgroundMenu
 
     @FocusState private var focused: Bool
     @State private var anchor: URL?
     @State private var cursor: URL?
-    @State private var hovered: URL?
     @State private var dropTarget: URL?
     @State private var backgroundTargeted = false
     @State private var typeBuffer = ""
     @State private var lastTypeTime = Date.distantPast
 
     var body: some View {
-        let maxSize = rows.compactMap(\.size).max() ?? 0
+        let maxSize = self.maxSize ?? rows.lazy.compactMap(\.size).max() ?? 0
         GeometryReader { proxy in
             ScrollViewReader { scroller in
                 ScrollView {
                     LazyVStack(spacing: 1, pinnedViews: [.sectionHeaders]) {
                         Section {
-                            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                                if let group = row.group, index == 0 || rows[index - 1].group != group {
+                            ForEach(rows) { row in
+                                if let group = row.group {
                                     GroupHeader(title: group)
                                 }
                                 rowView(row, maxSize: maxSize)
                                     .padding(.horizontal, Column.gutter)
                                     .id(row.id)
+                            }
+                            if let onReachEnd, !rows.isEmpty {
+                                // Lazy, so this only appears (and fires) once you scroll to the end.
+                                Color.clear.frame(height: 1)
+                                    .onAppear(perform: onReachEnd)
+                                    .id(rows.count)
+                            }
+                            if let footer, !rows.isEmpty {
+                                footer
                             }
                         } header: {
                             header
@@ -142,7 +158,11 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
             typeSelect(press)
         }
         .onChange(of: focusRequest) { focused = true }
-        .onAppear { focused = true }
+        .onAppear {
+            // Lists appear mid-typing (search results replace the folder after the first
+            // character); never pull focus out of a text field you're typing in.
+            if !(NSApp.keyWindow?.firstResponder is NSText) { focused = true }
+        }
     }
 
     // MARK: - Header
@@ -201,107 +221,20 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
     // MARK: - Rows
 
     private func rowView(_ row: ListRow, maxSize: Int64) -> some View {
-        let item = row.item
         let isSelected = selection.contains(row.id)
-        return HStack(spacing: Column.spacing) {
-            Image(systemName: "chevron.right")
-                .font(.system(size: 8, weight: .heavy))
-                .foregroundStyle(isSelected ? Theme.accent : Theme.accent.opacity(0.75))
-                .frame(width: Column.marker)
-                .opacity(item.isFolder ? 1 : 0)
-            HStack(spacing: 5) {
-                Text(item.name)
-                    .font(.system(size: 12.5, weight: item.isFolder ? .semibold : .regular))
-                    .foregroundStyle(item.isHidden ? Theme.textTertiary : Theme.text)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                if item.isSymlink {
-                    Image(systemName: "arrow.turn.up.right")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(Theme.textTertiary)
-                        .help("Alias or symbolic link")
-                }
+        return RowContent(row: row, isSelected: isSelected, listFocused: focused, isDropTarget: dropTarget == row.id,
+                          maxSize: maxSize, showLocation: showLocation)
+            .equatable()
+            .contentShape(.rect)
+            .onTapGesture { click(row.id) }
+            .simultaneousGesture(TapGesture(count: 2).onEnded {
+                onOpen([row.id], NSEvent.modifierFlags.contains(.command))
+            })
+            .draggable(row.item.url)
+            .modifier(FolderDropModifier(row: row, onDropInto: onDropInto, dropTarget: $dropTarget))
+            .contextMenu {
+                rowMenu(selection.contains(row.id) ? selection : [row.id])
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            if showLocation {
-                Text(row.location.map(Format.path) ?? "")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Theme.textTertiary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .help(row.location ?? "")
-            }
-            TypeChip(item: item)
-                .frame(width: Column.type)
-            sizeCell(row, maxSize: maxSize)
-                .frame(width: Column.size, alignment: .trailing)
-            Text(RelativeTime.short(row.date))
-                .font(Theme.mono)
-                .foregroundStyle(Theme.textSecondary)
-                .lineLimit(1)
-                .frame(width: Column.date, alignment: .trailing)
-                .help(Format.date(row.date))
-        }
-        .padding(.horizontal, Column.inset)
-        .frame(height: 28)
-        .background(rowBackground(isSelected: isSelected, isHovered: hovered == row.id), in: .rect(cornerRadius: 6))
-        .overlay(alignment: .leading) {
-            if isSelected {
-                Capsule().fill(Theme.accent).frame(width: 2.5, height: 14).padding(.leading, 1.5)
-            }
-        }
-        .overlay {
-            if dropTarget == row.id {
-                RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.accent, lineWidth: 1.5)
-            }
-        }
-        .contentShape(.rect)
-        .onHover { inside in
-            if inside { hovered = row.id } else if hovered == row.id { hovered = nil }
-        }
-        .onTapGesture { click(row.id) }
-        .simultaneousGesture(TapGesture(count: 2).onEnded {
-            onOpen([row.id], NSEvent.modifierFlags.contains(.command))
-        })
-        .draggable(item.url)
-        .modifier(FolderDropModifier(row: row, onDropInto: onDropInto, dropTarget: $dropTarget))
-        .contextMenu {
-            rowMenu(selection.contains(row.id) ? selection : [row.id])
-        }
-    }
-
-    private func rowBackground(isSelected: Bool, isHovered: Bool) -> Color {
-        if isSelected { return focused ? Theme.accentSoft : Theme.accentSoft.opacity(0.55) }
-        return isHovered ? Theme.hover : .clear
-    }
-
-    /// "▬▬──  12.4 GB": a short bar for scale beside the number.
-    @ViewBuilder
-    private func sizeCell(_ row: ListRow, maxSize: Int64) -> some View {
-        HStack(spacing: 8) {
-            if let size = row.size, maxSize > 0 {
-                HeatBar(fraction: Double(size) / Double(maxSize), height: 3)
-                    .frame(width: 30)
-            } else {
-                Color.clear.frame(width: 30, height: 3)
-            }
-            Group {
-                if let size = row.size {
-                    Text((row.sizePartial ? "≥ " : "") + Format.bytes(size))
-                        .foregroundStyle(Theme.text)
-                        .help(row.sizePartial ? "Some subfolders couldn't be read, so this is a minimum." : "")
-                } else if row.sizeCalculating {
-                    Text("···").foregroundStyle(Theme.textTertiary)
-                        .help("Calculating…")
-                } else {
-                    Text("—").foregroundStyle(Theme.textTertiary)
-                }
-            }
-            .font(Theme.mono)
-            .lineLimit(1)
-            .frame(maxWidth: .infinity, alignment: .trailing)
-        }
     }
 
     // MARK: - Selection
@@ -355,6 +288,120 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
         anchor = match.id
         cursor = match.id
         return .handled
+    }
+}
+
+/// What a row draws. Equatable, so when the selection moves SwiftUI only redraws the rows whose
+/// state changed; hover is local for the same reason.
+private struct RowContent: View, Equatable {
+    let row: ListRow
+    let isSelected: Bool
+    let listFocused: Bool
+    let isDropTarget: Bool
+    let maxSize: Int64
+    let showLocation: Bool
+
+    @State private var hovered = false
+
+    static func == (lhs: RowContent, rhs: RowContent) -> Bool {
+        lhs.isSelected == rhs.isSelected && lhs.listFocused == rhs.listFocused && lhs.isDropTarget == rhs.isDropTarget
+            && lhs.maxSize == rhs.maxSize && lhs.showLocation == rhs.showLocation
+            && lhs.row.item == rhs.row.item && lhs.row.size == rhs.row.size && lhs.row.date == rhs.row.date
+            && lhs.row.location == rhs.row.location && lhs.row.liveFolderSize == rhs.row.liveFolderSize
+    }
+
+    var body: some View {
+        let item = row.item
+        HStack(spacing: Column.spacing) {
+            Image(systemName: "chevron.right")
+                .font(.system(size: 8, weight: .heavy))
+                .foregroundStyle(isSelected ? Theme.accent : Theme.accent.opacity(0.75))
+                .frame(width: Column.marker)
+                .opacity(item.isFolder ? 1 : 0)
+            HStack(spacing: 5) {
+                Text(item.name)
+                    .font(.system(size: 12.5, weight: item.isFolder ? .semibold : .regular))
+                    .foregroundStyle(item.isHidden ? Theme.textTertiary : Theme.text)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if item.isSymlink {
+                    Image(systemName: "arrow.turn.up.right")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(Theme.textTertiary)
+                        .help("Alias or symbolic link")
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if showLocation {
+                Text(row.location.map(Format.path) ?? "")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Theme.textTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .help(row.location ?? "")
+            }
+            TypeChip(item: item)
+                .frame(width: Column.type)
+            sizeCell
+                .frame(width: Column.size, alignment: .trailing)
+            Text(RelativeTime.short(row.date))
+                .font(Theme.mono)
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(1)
+                .frame(width: Column.date, alignment: .trailing)
+                .help(Format.date(row.date))
+        }
+        .padding(.horizontal, Column.inset)
+        .frame(height: 28)
+        .background(background, in: .rect(cornerRadius: 6))
+        .overlay(alignment: .leading) {
+            if isSelected {
+                Capsule().fill(Theme.accent).frame(width: 2.5, height: 14).padding(.leading, 1.5)
+            }
+        }
+        .overlay {
+            if isDropTarget {
+                RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.accent, lineWidth: 1.5)
+            }
+        }
+        .onHover { hovered = $0 }
+    }
+
+    private var background: Color {
+        if isSelected { return listFocused ? Theme.accentSoft : Theme.accentSoft.opacity(0.55) }
+        return hovered ? Theme.hover : .clear
+    }
+
+    /// "▬▬──  12.4 GB": a short bar for scale beside the number.
+    @ViewBuilder
+    private var sizeCell: some View {
+        let measured = row.liveFolderSize && row.size == nil ? FolderSizeStore.shared.size(for: row.item.path) : nil
+        let size = row.size ?? measured?.bytes
+        let partial = measured.map { !$0.complete } ?? false
+        HStack(spacing: 8) {
+            if let size, maxSize > 0 {
+                HeatBar(fraction: Double(size) / Double(maxSize), height: 3)
+                    .frame(width: 30)
+            } else {
+                Color.clear.frame(width: 30, height: 3)
+            }
+            Group {
+                if let size {
+                    Text((partial ? "≥ " : "") + Format.bytes(size))
+                        .foregroundStyle(Theme.text)
+                        .help(partial ? "Some subfolders couldn't be read, so this is a minimum." : "")
+                } else if row.liveFolderSize && FolderSizeStore.shared.isCalculating(row.item.path) {
+                    Text("···").foregroundStyle(Theme.textTertiary)
+                        .help("Calculating…")
+                } else {
+                    Text("—").foregroundStyle(Theme.textTertiary)
+                }
+            }
+            .font(Theme.mono)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        }
     }
 }
 

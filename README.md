@@ -16,7 +16,8 @@ Written in SwiftUI. Spotlight powers search across the whole Mac, and a parallel
   - *Entire Mac* uses Spotlight, so it's instant but skips unindexed locations.
   - Results are ranked by relevance, with clutter like `Library`, `node_modules` and `.git` pushed down.
 - **Storage breakdown.** Scan your home folder, the whole Mac, or any folder. Drill into a treemap and a ranked list with percentages, see the largest files, and compare against total disk usage. Moving something to the Trash updates the totals without a rescan.
-- **Recents.** The newest files and folders in your home folder, by date created, modified or added, over the last 24 hours to 90 days. Grouped by day, updated live, with an option to hide clutter.
+- **Recents.** Works like Finder's Recents: every document you've opened, newest first, grouped into Today, Yesterday, Previous 7 Days, Previous 30 Days and then by month. Folders and apps are left out. Covers all time by default, and column headers re-sort the list.
+- **New.** The newest files and folders in your home folder, by date created, modified or added, over the last 24 hours to 90 days. Grouped by day, updated live, with an option to hide clutter. Scrolling to the bottom keeps loading older items. At the end of a range, one click widens it.
 - **Pinned.** Pin files or folders to the sidebar with ⌘D or by dropping them on the "Pinned" heading. Dropping onto a pinned folder (or any sidebar place) moves items into it.
 - **Inspector.** Size, size on disk, item count, created, modified and last-opened dates, and the full path for whatever is selected.
 - **Drag and drop.** Drag items between tabs, windows, or from Finder. Drop onto empty space to put them in the folder you're viewing, onto a folder row to put them inside it, or onto a path bar segment to send them up the tree. Like Finder, it moves within a disk and copies across disks; hold ⌥ to copy. If an item with the same name already exists, both are kept ("name 2") and nothing is overwritten.
@@ -75,7 +76,7 @@ Grant **Full Disk Access** (System Settings › Privacy & Security › Full Disk
 | Quick Look | Space or ⌘Y |
 | Find | ⌘F |
 | Edit the current path | ⌘L or ⇧⌘G |
-| Recents / Storage | ⇧⌘F / ⇧⌘B |
+| Recents / New / Storage | ⇧⌘F / ⇧⌘E / ⇧⌘B |
 | Home / Desktop / Documents / Downloads / Applications | ⇧⌘H / ⇧⌘D / ⇧⌘O / ⌥⌘L / ⇧⌘A |
 | Pin or unpin in the sidebar | ⌘D |
 | Show in enclosing folder / Reveal in Finder | ⌘R / ⌥⌘R |
@@ -110,7 +111,17 @@ open -g -n --env EXPLORER_SNAPSHOT_DIR=/tmp/shots --env EXPLORER_SNAPSHOT_QUIT=1
     build/debug/TheExplorer.app
 ```
 
-Scenes are separated by `;`. The available scenes are `folder:<path>`, `select:<path>`, `newtab:<path>`, `tab:<n>`, `omnibox:<text>`, `recents`, `search:<text>`, `searchmac:<text>`, `scope:mac|folder`, `create:folder|file`, `drop:<source>><folder>`, `storage[:<path>]` and `wait:<seconds>`. Launch with `open -g` so the app never takes focus; running the binary directly can leave the app without a window. To run fully hidden and just read the log, add `-j` and `--env EXPLORER_NO_CAPTURE=1`.
+Scenes are separated by `;`. The available scenes are `folder:<path>`, `select:<path>`, `newtab:<path>`, `tab:<n>`, `omnibox:<text>`, `recents`, `new`, `range:<days>` (0 for all time), `more` (load the next page), `search:<text>`, `searchmac:<text>`, `scope:mac|folder`, `create:folder|file`, `drop:<source>><folder>`, `storage[:<path>]` and `wait:<seconds>`. Launch with `open -g` so the app never takes focus; running the binary directly can leave the app without a window. To run fully hidden and just read the log, add `-j` and `--env EXPLORER_NO_CAPTURE=1`.
+
+### Measuring speed
+
+Scripted runs also watch the main thread. After each scene the log reports how long the scene took to show something, plus the worst main-thread stall during it. Anything over 250ms is also logged on its own line as `[hang]`:
+
+```
+[snapshot] recents timing: first content 0.08s, worst main-thread stall 49ms, stalls>100ms 0 · …
+```
+
+Debug builds aren't optimized, so build with `SWIFT_FLAGS="-Xswiftc -O" CONFIG=debug ./scripts/build-app.sh` to get numbers that match the release app. A folder with tens of thousands of files makes a good stress test. The rule the code follows is that anything proportional to the number of files (listing, sorting, Spotlight results, folder sizes, path suggestions) runs off the main thread, or runs once and is cached, never per redraw.
 
 ## App icon
 

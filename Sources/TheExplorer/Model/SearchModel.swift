@@ -25,7 +25,6 @@ final class SearchModel {
     var selection: Set<URL> = []
 
     static let maxResults = 2000
-    static let spotlightScanLimit = 25_000
 
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var spotlight: SpotlightQuery?
@@ -83,29 +82,45 @@ final class SearchModel {
 
     // MARK: - Spotlight
 
+    /// Broad terms can match hundreds of thousands of items, so ranking happens on the query's
+    /// background queue: names are free to read, so every match is ranked by name, and only the
+    /// best few thousand have their paths resolved.
     private func runSpotlight(terms: [String]) {
         let predicates = terms.map {
             NSPredicate(format: "%K LIKE[cd] %@", NSMetadataItemFSNameKey, "*\($0)*")
         }
-        let query = SpotlightQuery()
-        query.onUpdate = { [weak self] items, gathering in
-            guard let self else { return }
-            var ranked: [SearchHit] = []
-            ranked.reserveCapacity(min(items.count, Self.maxResults * 2))
-            // Very broad queries can match hundreds of thousands of items; rank a bounded slice.
-            for metadata in items.prefix(Self.spotlightScanLimit) {
-                guard let item = FileItem(metadata: metadata) else { continue }
-                ranked.append(SearchHit(item: item, rank: Self.rank(item, terms: terms)))
-            }
-            self.scannedCount = items.count
-            self.publish(ranked)
-            self.truncated = self.truncated || items.count > Self.spotlightScanLimit
-            self.isRunning = gathering
-        }
         // NSMetadataQuery throws on an AND compound with a single subpredicate.
         let predicate = predicates.count == 1 ? predicates[0] : NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
-        query.start(predicate: predicate,
-                    scopes: [NSMetadataQueryLocalComputerScope])
+        let query = SpotlightQuery(predicate: predicate, scopes: [NSMetadataQueryLocalComputerScope])
+        let lowered = terms.map { $0.lowercased() }
+        let limit = Self.maxResults
+        query.start { [weak self] results, gathering in
+            let count = results.count
+            var candidates: [(index: Int, rank: Int, modified: Date)] = []
+            candidates.reserveCapacity(count)
+            for index in 0..<count {
+                let name = results.name(at: index) ?? ""
+                let modified: Date = results.value(NSMetadataItemFSContentChangeDateKey, at: index) ?? .distantPast
+                candidates.append((index, Self.rank(name: name, terms: lowered), modified))
+            }
+            candidates.sort { $0.rank != $1.rank ? $0.rank < $1.rank : $0.modified > $1.modified }
+            // Resolve twice what's shown, so noisy paths sinking to the bottom still leave a full list.
+            let ranked = candidates.prefix(limit * 2).compactMap { candidate -> SearchHit? in
+                guard let item = results.item(at: candidate.index) else { return nil }
+                return SearchHit(item: item, rank: candidate.rank + (PathNoise.isNoisy(item.path) ? 10 : 0))
+            }
+            let hits = Self.sorted(ranked).prefix(limit)
+            DispatchQueue.main.async {
+                guard let self, self.spotlight === query else { return }
+                self.scannedCount = count
+                self.hits = Array(hits)
+                self.truncated = count > limit
+                self.isRunning = gathering
+                if !self.selection.isEmpty {
+                    self.selection.formIntersection(hits.map(\.id))
+                }
+            }
+        }
         spotlight = query
     }
 
@@ -164,34 +179,43 @@ final class SearchModel {
     // MARK: - Ranking
 
     private func publish(_ ranked: [SearchHit]) {
-        let sorted = ranked.sorted { lhs, rhs in
-            if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
-            return (lhs.item.modified ?? .distantPast) > (rhs.item.modified ?? .distantPast)
-        }
+        let sorted = Self.sorted(ranked)
         truncated = sorted.count > Self.maxResults
         hits = Array(sorted.prefix(Self.maxResults))
         let present = Set(hits.map(\.id))
         selection.formIntersection(present)
     }
 
+    nonisolated static func sorted(_ hits: [SearchHit]) -> [SearchHit] {
+        hits.sorted { lhs, rhs in
+            if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
+            return (lhs.item.modified ?? .distantPast) > (rhs.item.modified ?? .distantPast)
+        }
+    }
+
     /// Lower is better: exact name, then prefix, then word start, then anywhere.
     /// Items buried in Library, caches or dependency folders sink to the bottom.
-    static func rank(_ item: FileItem, terms: [String]) -> Int {
-        let name = item.name.lowercased()
-        let stem = (name as NSString).deletingPathExtension
-        let first = terms[0].lowercased()
-        var rank: Int
-        if name == first || stem == first {
-            rank = 0
-        } else if name.hasPrefix(first) {
-            rank = 1
-        } else if name.range(of: "[ _\\-.]" + NSRegularExpression.escapedPattern(for: first), options: .regularExpression) != nil {
-            rank = 2
-        } else {
-            rank = 3
+    nonisolated static func rank(_ item: FileItem, terms: [String]) -> Int {
+        rank(name: item.name, terms: terms.map { $0.lowercased() }) + (PathNoise.isNoisy(item.path) ? 10 : 0)
+    }
+
+    /// Name-only part of the rank; `terms` must be lowercased.
+    nonisolated static func rank(name: String, terms: [String]) -> Int {
+        guard let first = terms.first else { return 3 }
+        let name = name.lowercased()
+        if name == first { return 0 }
+        let stem = name.lastIndex(of: ".").map { name[..<$0] } ?? name[...]
+        if stem == first[...] { return 0 }
+        if name.hasPrefix(first) { return 1 }
+        // A match right after a separator is a word start ("my-report" for "report").
+        var searchStart = name.startIndex
+        while let match = name.range(of: first, range: searchStart..<name.endIndex) {
+            if match.lowerBound > name.startIndex, " _-.".contains(name[name.index(before: match.lowerBound)]) {
+                return 2
+            }
+            searchStart = name.index(after: match.lowerBound)
         }
-        if PathNoise.isNoisy(item.path) { rank += 10 }
-        return rank
+        return 3
     }
 }
 
@@ -206,10 +230,16 @@ enum PathNoise {
         "xcassets", "plugin", "kext", "appex", "lproj", "playground", "sparsebundle", "pkg",
     ]
 
+    private static let libraryPrefix = URL.home.path + "/Library/"
+    /// iCloud Drive lives inside Library but holds your own documents.
+    private static let iCloudPrefix = URL.home.path + "/Library/Mobile Documents/"
+
     static func isNoisy(_ path: String) -> Bool {
-        let homePrefix = URL.home.path + "/"
-        if path.hasPrefix(homePrefix + "Library/") { return true }
-        let components = path.split(separator: "/").dropLast()
+        let inICloud = path.hasPrefix(iCloudPrefix)
+        if path.hasPrefix(libraryPrefix) && !inICloud { return true }
+        // Within iCloud Drive, judge only the part below the container (com~apple~CloudDocs etc.).
+        let checked = inICloud ? path.dropFirst(iCloudPrefix.count).drop { $0 != "/" } : path[...]
+        let components = checked.split(separator: "/").dropLast()
         for component in components {
             if component.hasPrefix(".") || noisyComponents.contains(String(component)) { return true }
             if let dot = component.lastIndex(of: "."),

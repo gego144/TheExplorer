@@ -350,13 +350,11 @@ private struct LargestFilesView: View {
     let model: BrowserModel
     let files: [LargeFile]
     @State private var selection: Set<URL> = []
+    /// Built off the main thread once per scan (each file is read from disk).
+    @State private var rows: [ListRow] = []
     @Environment(\.openTab) private var openTab
 
     var body: some View {
-        let rows = files.compactMap { file -> ListRow? in
-            guard let item = FileItem(url: file.url) else { return nil }
-            return ListRow(item: item, size: file.size, date: item.modified, location: file.url.deletingLastPathComponent().path)
-        }
         FileListView(
             rows: rows,
             selection: $selection,
@@ -367,5 +365,14 @@ private struct LargestFilesView: View {
             rowMenu: { FileContextMenu(urls: $0, model: model) },
             backgroundMenu: { EmptyView() }
         )
+        .task(id: files.map(\.path)) {
+            let files = files
+            rows = await Task.detached(priority: .userInitiated) {
+                files.compactMap { file -> ListRow? in
+                    guard let item = FileItem(url: file.url) else { return nil }
+                    return ListRow(item: item, size: file.size, date: item.modified, location: (file.path as NSString).deletingLastPathComponent)
+                }
+            }.value
+        }
     }
 }

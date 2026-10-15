@@ -5,26 +5,16 @@ struct FolderView: View {
     @Environment(\.openTab) private var openTab
 
     var body: some View {
-        let sizes = FolderSizeStore.shared
-        let rows = model.rows.map { row in
-            ListRow(
-                item: row.item,
-                size: row.displaySize,
-                sizeCalculating: row.item.isFolder && sizes.isCalculating(row.item.path),
-                sizePartial: row.folderSize.map { !$0.complete } ?? false,
-                date: row.item.modified
-            )
-        }
-
         VStack(spacing: 0) {
             if let error = model.loadError {
                 ErrorBanner(message: error) { model.dismissError() }
             }
             FileListView(
-                rows: rows,
+                rows: model.rows,
                 selection: $model.selection,
                 sort: model.sort,
                 onSort: { model.sort = model.sort.toggled(to: $0) },
+                maxSize: model.maxSize,
                 empty: emptyState,
                 focusRequest: model.listFocusRequest,
                 onOpen: { urls, newTab in

@@ -4,7 +4,10 @@ import SwiftUI
 
 enum Destination: Hashable {
     case folder
+    /// Documents you've opened, like Finder's Recents.
     case recents
+    /// Files and folders that appeared recently.
+    case newFiles
     case storage
 }
 
@@ -17,6 +20,8 @@ enum NewItemKind {
 
 enum SortKey: String, CaseIterable {
     case name, kind, size, modified, created
+    /// The list's own date column (e.g. when it was opened, in Recents).
+    case date
 }
 
 struct SortSpec: Equatable {
@@ -39,22 +44,42 @@ struct OmniboxRequest: Equatable {
     var text: String
 }
 
-/// A row in the folder table: the item plus its (possibly still-computing) size.
-struct FileRow: Identifiable {
-    let item: FileItem
-    let folderSize: FolderSize?
-    /// Size supplied by the caller (e.g. search results), overriding the computed one.
-    var sizeOverride: Int64? = nil
+/// Sorts list rows. Each row's key is computed once and only indices move during the sort,
+/// so tens of thousands of rows sort in milliseconds.
+@MainActor
+enum RowSorter {
+    static func sorted(_ rows: [ListRow], by spec: SortSpec, foldersFirst: Bool = false,
+                       folderSize: (String) -> Int64? = { _ in nil }) -> [ListRow] {
+        switch spec.key {
+        case .name:
+            return sort(rows, keys: rows.map(\.item.name), spec, foldersFirst) { $0.localizedStandardCompare($1) }
+        case .kind:
+            return sort(rows, keys: rows.map { TypeChip.style(for: $0.item).label }, spec, foldersFirst) { $0.compare($1) }
+        case .size:
+            let keys = rows.map { row in row.size ?? (row.item.isFolder ? folderSize(row.item.path) : nil) ?? -1 }
+            return sort(rows, keys: keys, spec, foldersFirst) { $0 == $1 ? .orderedSame : ($0 < $1 ? .orderedAscending : .orderedDescending) }
+        case .modified:
+            return sort(rows, keys: rows.map { $0.item.modified ?? .distantPast }, spec, foldersFirst) { $0.compare($1) }
+        case .created:
+            return sort(rows, keys: rows.map { $0.item.created ?? .distantPast }, spec, foldersFirst) { $0.compare($1) }
+        case .date:
+            return sort(rows, keys: rows.map { $0.date ?? .distantPast }, spec, foldersFirst) { $0.compare($1) }
+        }
+    }
 
-    var id: URL { item.url }
-    var name: String { item.name }
-    var kind: String { item.kindDescription }
-    var modified: Date { item.modified ?? .distantPast }
-    var created: Date { item.created ?? .distantPast }
-    var displaySize: Int64? { sizeOverride ?? (item.isFolder ? folderSize?.bytes : item.fileSize) }
-    /// Unknown sizes sort below everything.
-    var sortSize: Int64 { displaySize ?? -1 }
-    var fileCount: Int { folderSize?.files ?? -1 }
+    private static func sort<Key>(_ rows: [ListRow], keys: [Key], _ spec: SortSpec, _ foldersFirst: Bool,
+                                  compare: (Key, Key) -> ComparisonResult) -> [ListRow] {
+        let folders = foldersFirst ? rows.map(\.item.isFolder) : []
+        let order = rows.indices.sorted { a, b in
+            if foldersFirst && folders[a] != folders[b] { return folders[a] }
+            let result = compare(keys[a], keys[b])
+            if result == .orderedSame {
+                return rows[a].item.name.localizedStandardCompare(rows[b].item.name) == .orderedAscending
+            }
+            return spec.ascending ? result == .orderedAscending : result == .orderedDescending
+        }
+        return order.map { rows[$0] }
+    }
 }
 
 /// Everything one window needs: where we are, history, what's selected, and how it's shown.
@@ -63,25 +88,40 @@ struct FileRow: Identifiable {
 final class BrowserModel: Identifiable {
     var destination: Destination = .folder
     private(set) var currentURL: URL
-    private(set) var items: [FileItem] = []
+    private(set) var items: [FileItem] = [] { didSet { rebuildRows() } }
+    /// The folder as shown: hidden files and the kind filter applied, sorted. Rebuilt only when
+    /// the listing, sort or filters change, never while rendering.
+    private(set) var rows: [ListRow] = []
+    /// Largest size among `rows`, for scaling the size bars.
+    private(set) var maxSize: Int64 = 0
+    private(set) var folderCount = 0
+    private(set) var hiddenCount = 0
+    /// Capacity of the volume holding the current folder, refreshed with each listing.
+    private(set) var volume: VolumeUsage?
     private(set) var isLoading = false
     private(set) var loadError: String?
     private(set) var backStack: [URL] = []
     private(set) var forwardStack: [URL] = []
 
     var selection: Set<URL> = []
-    var sort: SortSpec = .byChanged
-    var kindFilter: KindFilter = .all
+    var sort: SortSpec = .byChanged { didSet { rebuildRows() } }
+    var kindFilter: KindFilter = .all { didSet { rebuildRows() } }
     var previewURL: URL?
 
     var searchText = ""
     var searchScope: SearchScope = .folder
 
     var showHidden: Bool {
-        didSet { UserDefaults.standard.set(showHidden, forKey: "showHidden") }
+        didSet {
+            UserDefaults.standard.set(showHidden, forKey: "showHidden")
+            rebuildRows()
+        }
     }
     var foldersFirst: Bool {
-        didSet { UserDefaults.standard.set(foldersFirst, forKey: "foldersFirst") }
+        didSet {
+            UserDefaults.standard.set(foldersFirst, forKey: "foldersFirst")
+            rebuildRows()
+        }
     }
 
     var renaming: FileItem?
@@ -93,12 +133,14 @@ final class BrowserModel: Identifiable {
     var listFocusRequest = 0
 
     let search = SearchModel()
-    let recents = RecentsModel()
+    let recents = RecentsModel(mode: .opened)
+    let newFiles = RecentsModel(mode: .new)
     @ObservationIgnored private var started = false
     @ObservationIgnored private var pendingSelection: Set<String>?
     @ObservationIgnored private var listingFailed = false
     @ObservationIgnored private var loadTask: Task<Void, Never>?
     @ObservationIgnored private lazy var watcher = DirectoryWatcher { [weak self] in self?.reload(keepSelection: true) }
+    @ObservationIgnored private var sizeObserver: NSObjectProtocol?
 
     init(url: URL? = nil) {
         let defaults = UserDefaults.standard
@@ -107,6 +149,13 @@ final class BrowserModel: Identifiable {
         let saved = defaults.string(forKey: "lastPath").map(URL.init(fileURLWithPath:))
         let start = url ?? saved ?? .home
         currentURL = FileManager.default.fileExists(atPath: start.path) ? start : .home
+        sizeObserver = NotificationCenter.default.addObserver(forName: FolderSizeStore.didChange, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.folderSizesChanged() }
+        }
+    }
+
+    deinit {
+        if let sizeObserver { NotificationCenter.default.removeObserver(sizeObserver) }
     }
 
     /// Loads the first listing. Kept out of init because SwiftUI may construct throwaway models.
@@ -120,32 +169,41 @@ final class BrowserModel: Identifiable {
 
     var isSearching: Bool { !searchText.trimmingCharacters(in: .whitespaces).isEmpty }
 
-    var rows: [FileRow] {
+    private func rebuildRows() {
         let sizes = FolderSizeStore.shared
-        var rows = items
-            .filter { (showHidden || !$0.isHidden) && kindFilter.matches(isFolder: $0.isFolder) }
-            .map { FileRow(item: $0, folderSize: $0.isFolder ? sizes.size(for: $0.path) : nil) }
-        rows.sort(by: Self.comparator(for: sort))
-        if foldersFirst {
-            let folders = rows.filter(\.item.isFolder)
-            let files = rows.filter { !$0.item.isFolder }
-            rows = folders + files
+        var folders = 0
+        var hidden = 0
+        var visible: [ListRow] = []
+        visible.reserveCapacity(items.count)
+        for item in items {
+            if item.isHidden { hidden += 1 }
+            guard (showHidden || !item.isHidden) && kindFilter.matches(isFolder: item.isFolder) else { continue }
+            if item.isFolder { folders += 1 }
+            visible.append(ListRow(item: item, size: item.isFolder ? nil : item.fileSize, liveFolderSize: item.isFolder, date: item.modified))
         }
-        return rows
+        rows = RowSorter.sorted(visible, by: sort, foldersFirst: foldersFirst) { sizes.size(for: $0)?.bytes }
+        folderCount = folders
+        hiddenCount = showHidden ? 0 : hidden
+        updateMaxSize()
     }
 
-    static func comparator(for sort: SortSpec) -> (FileRow, FileRow) -> Bool {
-        { lhs, rhs in
-            let order: ComparisonResult
-            switch sort.key {
-            case .name: order = lhs.name.localizedStandardCompare(rhs.name)
-            case .kind: order = TypeChip.style(for: lhs.item).label.compare(TypeChip.style(for: rhs.item).label)
-            case .size: order = lhs.sortSize == rhs.sortSize ? .orderedSame : (lhs.sortSize < rhs.sortSize ? .orderedAscending : .orderedDescending)
-            case .modified: order = lhs.modified.compare(rhs.modified)
-            case .created: order = lhs.created.compare(rhs.created)
-            }
-            if order == .orderedSame { return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending }
-            return sort.ascending ? order == .orderedAscending : order == .orderedDescending
+    private func updateMaxSize() {
+        let sizes = FolderSizeStore.shared
+        var largest: Int64 = 0
+        for row in rows {
+            let size = row.size ?? (row.liveFolderSize ? sizes.size(for: row.item.path)?.bytes : nil) ?? 0
+            if size > largest { largest = size }
+        }
+        if largest != maxSize { maxSize = largest }
+    }
+
+    /// Folder sizes arrive in batches; only a size sort needs the rows reordered.
+    private func folderSizesChanged() {
+        guard destination == .folder, !items.isEmpty else { return }
+        if sort.key == .size {
+            rebuildRows()
+        } else {
+            updateMaxSize()
         }
     }
 
@@ -156,6 +214,7 @@ final class BrowserModel: Identifiable {
     var title: String {
         switch destination {
         case .recents: "Recents"
+        case .newFiles: "New"
         case .storage: "Storage"
         case .folder: FileManager.default.displayName(atPath: currentURL.path)
         }
@@ -167,6 +226,7 @@ final class BrowserModel: Identifiable {
         switch destination {
         case .folder: return selection
         case .recents: return recents.selection
+        case .newFiles: return newFiles.selection
         case .storage:
             let storage = StorageModel.shared
             guard let id = storage.selection, let node = storage.focus?.children.first(where: { $0.id == id }),
@@ -260,17 +320,20 @@ final class BrowserModel: Identifiable {
         loadTask?.cancel()
         isLoading = true
         loadTask = Task { [weak self] in
-            let result = await Task.detached(priority: .userInitiated) { () -> Result<[FileItem], Error> in
+            let listing = Task.detached(priority: .userInitiated) { () -> Result<[FileItem], Error> in
                 Result {
                     try FileManager.default
                         .contentsOfDirectory(at: url, includingPropertiesForKeys: FileItem.resourceKeys, options: [])
                         .map { child in
                             let values = (try? child.resourceValues(forKeys: Set(FileItem.resourceKeys))) ?? URLResourceValues()
-                            return FileItem(url: child.standardizedFileURL, values: values)
+                            return FileItem(url: child, values: values)
                         }
                 }
-            }.value
+            }
+            let volume = Task.detached(priority: .utility) { VolumeUsage(of: url) }
+            let result = await listing.value
             guard let self, !Task.isCancelled, url == self.currentURL else { return }
+            self.volume = await volume.value
             self.isLoading = false
             switch result {
             case .success(let items):

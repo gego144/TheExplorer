@@ -22,6 +22,7 @@ enum DebugSnapshots {
         let activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated], reason: "Debug scenes")
         defer { ProcessInfo.processInfo.endActivity(activity) }
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        HangWatchdog.start()
         try? await Task.sleep(for: .seconds(1.5))
 
         for (index, scene) in scenes.split(separator: ";").enumerated() {
@@ -33,6 +34,11 @@ enum DebugSnapshots {
             case "folder": model.navigate(to: URL(fileURLWithPath: argument))
             case "select": model.selection = [URL(fileURLWithPath: argument).standardizedFileURL]
             case "recents": model.show(.recents)
+            case "new": model.show(.newFiles)
+            case "more": (model.destination == .newFiles ? model.newFiles : model.recents).loadMore()
+            case "range":
+                let recents = model.destination == .newFiles ? model.newFiles : model.recents
+                if let days = Int(argument), let range = RecentsRange(rawValue: days) { recents.range = range }
             case "search":
                 model.searchText = argument
             case "searchmac":
@@ -76,14 +82,31 @@ enum DebugSnapshots {
             case "wait": wait = Double(argument) ?? 2
             default: break
             }
-            try? await Task.sleep(for: .seconds(wait))
+            let began = Date()
+            HangWatchdog.reset()
+            var firstContent: TimeInterval?
+            while Date().timeIntervalSince(began) < wait {
+                if firstContent == nil, hasContent(workspace.selected) { firstContent = Date().timeIntervalSince(began) }
+                try? await Task.sleep(for: .milliseconds(20))
+            }
             let shown = workspace.selected
-            let names = shown.rows.map { "\($0.name)@\(RelativeTime.short($0.item.modified))" }.joined(separator: ",")
+            log("\(scene) timing: first content \(firstContent.map { String(format: "%.2fs", $0) } ?? "never"), worst main-thread stall \(HangWatchdog.worst)ms, stalls>100ms \(HangWatchdog.stalls) · recents=\(shown.recents.rows.count) new=\(shown.newFiles.rows.count) total=\(shown.newFiles.totalCount.map(String.init) ?? "nil") more=\(shown.newFiles.hasMore) gathering=\(shown.newFiles.isGathering) hits=\(shown.search.hits.count)")
+            let names = shown.rows.prefix(40).map { "\($0.item.name)@\(RelativeTime.short($0.item.modified))" }.joined(separator: ",")
             let selected = shown.selection.map(\.lastPathComponent).sorted().joined(separator: ",")
             log("\(scene) -> tabs=\(workspace.tabs.count) url=\(shown.currentURL.path) items=[\(names)] selected=[\(selected)] error=\(shown.loadError ?? "none") windows=\(NSApp.windows.filter { $0.isVisible && $0.canBecomeMain }.map(\.title))")
             if env["EXPLORER_NO_CAPTURE"] == nil { capture(to: "\(dir)/\(index)-\(parts[0]).png") }
         }
         if env["EXPLORER_SNAPSHOT_QUIT"] != nil { NSApp.terminate(nil) }
+    }
+
+    private static func hasContent(_ model: BrowserModel) -> Bool {
+        if model.isSearching { return !model.search.hits.isEmpty }
+        switch model.destination {
+        case .recents: return !model.recents.rows.isEmpty
+        case .newFiles: return !model.newFiles.rows.isEmpty
+        case .folder: return !model.items.isEmpty
+        case .storage: return StorageModel.shared.focus != nil
+        }
     }
 
     private static func log(_ message: String) {
@@ -103,6 +126,41 @@ enum DebugSnapshots {
         guard let image = create(.null, 8, UInt32(window.windowNumber), 1)?.takeRetainedValue() else { return }
         let rep = NSBitmapImageRep(cgImage: image)
         try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+    }
+}
+
+/// Measures how long the main thread takes to answer a ping; anything over ~100ms is a visible
+/// stutter, and over a second is a beach ball.
+enum HangWatchdog {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var worstMs = 0
+    nonisolated(unsafe) private static var stallCount = 0
+    nonisolated(unsafe) private static var started = false
+
+    static var worst: Int { lock.withLock { worstMs } }
+    static var stalls: Int { lock.withLock { stallCount } }
+
+    static func reset() {
+        lock.withLock { worstMs = 0; stallCount = 0 }
+    }
+
+    static func start() {
+        guard lock.withLock({ let was = started; started = true; return !was }) else { return }
+        Thread.detachNewThread {
+            while true {
+                let sent = Date()
+                let answered = DispatchSemaphore(value: 0)
+                DispatchQueue.main.async { answered.signal() }
+                answered.wait()
+                let ms = Int(Date().timeIntervalSince(sent) * 1000)
+                lock.withLock {
+                    worstMs = max(worstMs, ms)
+                    if ms > 100 { stallCount += 1 }
+                }
+                if ms > 250 { FileHandle.standardError.write(Data("[hang] main thread blocked \(ms)ms\n".utf8)) }
+                Thread.sleep(forTimeInterval: 0.02)
+            }
+        }
     }
 }
 #endif
