@@ -305,12 +305,16 @@ struct Omnibox: View {
     @State private var highlighted: Int?
     @State private var invalid = false
     @State private var suggestions: [URL] = []
+    /// Folders you visit most, listed when the field opens empty.
+    @State private var recents: [URL] = []
     /// Set when editing begins, so the field exists before it's asked to take focus.
     @State private var editing = false
     @State private var hovering = HoverPreview.on
 
     private var isPathMode: Bool { query.hasPrefix("/") || query.hasPrefix("~") }
     private var showsField: Bool { editing || focused || !query.isEmpty }
+    /// What the dropdown lists: path completions, or your recent folders before you type.
+    private var listed: [URL] { isPathMode ? suggestions : query.isEmpty ? recents : [] }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -365,8 +369,8 @@ struct Omnibox: View {
         .animation(Theme.hoverAnimation, value: hovering)
         .onTapGesture { if !showsField { begin("") } }
         .overlay(alignment: .topLeading) {
-            if focused && isPathMode && !suggestions.isEmpty {
-                SuggestionList(suggestions: suggestions, highlighted: highlighted) { go(to: $0) }
+            if focused && !listed.isEmpty {
+                SuggestionList(title: isPathMode ? nil : "Recent folders", suggestions: listed, highlighted: highlighted) { go(to: $0) }
                     .offset(y: 34)
             }
         }
@@ -378,7 +382,11 @@ struct Omnibox: View {
         .task(id: isPathMode ? query : "") {
             // Listed off the main thread: typing a path into a huge folder must stay instant.
             let query = isPathMode ? query : ""
-            suggestions = query.isEmpty ? [] : await Task.detached(priority: .userInitiated) { Self.suggestions(for: query) }.value
+            let visits = FolderVisits.shared
+            let scores = visits.visits.keys.reduce(into: [String: Double]()) { $0[$1] = visits.score($1) }
+            suggestions = query.isEmpty ? [] : await Task.detached(priority: .userInitiated) {
+                Self.suggestions(for: query, scores: scores)
+            }.value
         }
         .onChange(of: model.searchText) {
             // Keep the field in step when the search is started or ended from elsewhere.
@@ -416,6 +424,7 @@ struct Omnibox: View {
 
     private func begin(_ text: String) {
         query = text
+        recents = FolderVisits.shared.top(8, excluding: model.destination == .folder ? [model.currentURL.path] : [])
         editing = true
         // Focus once the field is on screen; focusing a view that doesn't exist yet is ignored.
         DispatchQueue.main.async { focused = true }
@@ -434,10 +443,10 @@ struct Omnibox: View {
     }
 
     private func submit() {
-        if isPathMode {
-            if let highlighted, suggestions.indices.contains(highlighted) {
-                go(to: suggestions[highlighted])
-            } else if model.goTo(path: query) {
+        if let highlighted, listed.indices.contains(highlighted) {
+            go(to: listed[highlighted])
+        } else if isPathMode {
+            if model.goTo(path: query) {
                 finish()
             } else {
                 invalid = true
@@ -461,22 +470,24 @@ struct Omnibox: View {
     }
 
     private func moveHighlight(_ delta: Int) -> KeyPress.Result {
-        guard isPathMode, !suggestions.isEmpty else { return .ignored }
-        let next = (highlighted ?? (delta > 0 ? -1 : suggestions.count)) + delta
-        highlighted = min(max(0, next), suggestions.count - 1)
+        let listed = listed
+        guard focused, !listed.isEmpty else { return .ignored }
+        let next = (highlighted ?? (delta > 0 ? -1 : listed.count)) + delta
+        highlighted = min(max(0, next), listed.count - 1)
         return .handled
     }
 
     /// Tab fills in the highlighted (or only/first) folder suggestion.
     private func complete() -> KeyPress.Result {
-        guard isPathMode, let target = highlighted.map({ suggestions[$0] }) ?? suggestions.first else { return .ignored }
+        let listed = listed
+        guard let target = highlighted.map({ listed[$0] }) ?? listed.first else { return .ignored }
         query = Format.path(target.path) + "/"
         return .handled
     }
 
     /// Folders matching what's typed: the contents of a folder ending in "/", otherwise siblings
-    /// whose names start with the last component.
-    nonisolated private static func suggestions(for query: String) -> [URL] {
+    /// whose names start with the last component. The ones you visit most come first.
+    nonisolated private static func suggestions(for query: String, scores: [String: Double]) -> [URL] {
         let expanded = (query as NSString).expandingTildeInPath
         let endsWithSlash = query.hasSuffix("/")
         let parent = endsWithSlash ? expanded : (expanded as NSString).deletingLastPathComponent
@@ -491,19 +502,33 @@ struct Omnibox: View {
                 let values = try? url.resourceValues(forKeys: Set(keys))
                 return values?.isDirectory == true && values?.isPackage != true
             }
-            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+            .sorted { lhs, rhs in
+                let left = scores[lhs.standardizedFileURL.path] ?? 0
+                let right = scores[rhs.standardizedFileURL.path] ?? 0
+                if left != right { return left > right }
+                return lhs.lastPathComponent.localizedStandardCompare(rhs.lastPathComponent) == .orderedAscending
+            }
             .prefix(8)
             .map { $0 }
     }
 }
 
 private struct SuggestionList: View {
+    var title: String?
     let suggestions: [URL]
     let highlighted: Int?
     let onPick: (URL) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
+            if let title {
+                Text(title)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(Theme.textTertiary)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 2)
+                    .padding(.bottom, 4)
+            }
             ForEach(Array(suggestions.enumerated()), id: \.element) { index, url in
                 Button {
                     onPick(url)

@@ -86,6 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated { Session.save() }
         FileIndex.shared.saveIfNeeded()
+        FolderVisits.shared.saveIfNeeded()
     }
 
     /// Triggers File › New Window, the only way to open a SwiftUI window from outside a view.
@@ -298,6 +299,7 @@ struct ExplorerCommands: Commands {
                 .keyboardShortcut("l", modifiers: [.command, .option])
             Button("Applications") { model?.navigate(to: URL(fileURLWithPath: "/Applications")) }
                 .keyboardShortcut("a", modifiers: [.command, .shift])
+            RecentFoldersMenu(model: model)
             Divider()
             Button("Go to Path…") { goToPath() }
                 .keyboardShortcut("l")
@@ -456,5 +458,24 @@ private struct ActionCommands: View {
         let selection = model?.activeSelection ?? []
         let ordered = selection.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
         if ActionRunner.shared.run(action, on: ordered) == nil { NSSound.beep() }
+    }
+}
+
+/// Go › Recent Folders: the folders you visit most, like ⌘K lists before you type.
+private struct RecentFoldersMenu: View {
+    let model: BrowserModel?
+
+    var body: some View {
+        let folders = FolderVisits.shared.top(10)
+        Menu("Recent Folders") {
+            ForEach(folders, id: \.self) { url in
+                Button(Format.path(url.path)) { model?.navigate(to: url) }
+            }
+            if !folders.isEmpty {
+                Divider()
+                Button("Clear Menu") { FolderVisits.shared.clear() }
+            }
+        }
+        .disabled(folders.isEmpty || model == nil)
     }
 }

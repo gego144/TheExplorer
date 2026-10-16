@@ -553,10 +553,19 @@ final class FileIndex: @unchecked Sendable {
         guard let root else { return nil }
         let rootPath = storage.name(root)
         var current = root
-        for component in path.dropFirst(rootPath.count).split(separator: "/") {
-            guard let child = storage.children(of: current).first(where: {
-                !storage.flags[Int($0)].contains(.removed) && storage.name($0) == component
-            }) else { return nil }
+        // Compared as bytes rather than by making a String of every sibling's name.
+        for component in path.utf8.dropFirst(rootPath.utf8.count).split(separator: UInt8(ascii: "/")) {
+            var child = storage.firstChild[Int(current)]
+            while child >= 0 {
+                let i = Int(child)
+                let start = Int(storage.nameStart[i])
+                if !storage.flags[i].contains(.removed), Int(storage.nameLength[i]) == component.count,
+                   storage.names[start..<start + component.count].elementsEqual(component) {
+                    break
+                }
+                child = storage.nextSibling[i]
+            }
+            guard child >= 0 else { return nil }
             current = child
         }
         return current

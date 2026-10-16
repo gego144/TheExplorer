@@ -39,6 +39,7 @@ Search works like a launcher's rather than Spotlight's. TheExplorer keeps its ow
 - **Fuzzy matching.** Matching is case- and accent-insensitive, and the letters you type don't have to be next to each other: `tex` finds *TheExplorer* and `qrp` finds *q3-report.pdf*.
 - **Ranking.** Whole names beat prefixes, prefixes beat word starts, and those beat everything else. Recently opened and recently changed files rise to the top.
 - **Folder words.** Extra words can match the folders a file is in, so `explorer readme` finds the README inside *TheExplorer*.
+- **Recent folders.** TheExplorer learns which folders you work in, the way zoxide does: how often you visit, weighted toward the last hour and day. Passing through a folder doesn't count; staying a moment or opening a file there does. Open ⌘K without typing to see them, or use Go › Recent Folders. They rank higher in search, along with what's in them, so `expl` lands on the project you live in rather than another folder with a similar name, and path completion lists them first.
 - **What's left out.** Library, hidden folders, the insides of apps and packages, dependency folders like `node_modules`, Unity's project caches, and any folder a project's `.gitignore` lists (build output, caches) aren't indexed, though the folders themselves are. Generated hash-named files rank last. To search everything in a folder, go there, show hidden files (⇧⌘.) and search *Here*.
 
 <table>
@@ -164,7 +165,7 @@ For the storage scan to include protected folders like Mail and Messages, grant 
 | New tab / Close tab | ⌘T / ⌘W |
 | Next / previous tab, jump to tab | ⌃Tab / ⌃⇧Tab, ⌘1…⌘9 |
 | Open folder in new tab | ⌥⌘↓ (or ⌘-double-click) |
-| Search or jump to a path | ⌘K or ⌘F |
+| Search, jump to a path, or pick a recent folder | ⌘K or ⌘F |
 | Edit the current path | ⌘L or ⇧⌘G |
 | Back / Forward / Enclosing folder | ⌘[ / ⌘] / ⌘↑ |
 | Open selection | ⌘↓, Return, or double-click |

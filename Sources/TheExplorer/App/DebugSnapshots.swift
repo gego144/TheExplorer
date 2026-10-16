@@ -222,12 +222,14 @@ enum DebugSnapshots {
                 await FileIndex.shared.waitUntilReady()
                 let storage = FileIndex.shared.snapshot()
                 log("index items=\(storage.liveCount) entries=\(storage.count) names=\(storage.names.count / 1024)KB \(FileIndex.shared.origin)")
+                let boosts = FolderVisits.shared.searchBoosts()
+                log("visit boosts=\(boosts.count)")
                 for query in argument.split(separator: ",").map(String.init) {
                     var times: [Double] = []
                     var hits: [IndexHit] = []
                     for _ in 0..<5 {
                         let began = CACurrentMediaTime()
-                        hits = FileIndex.search(query, in: storage, limit: SearchModel.indexResults)
+                        hits = FileIndex.search(query, in: storage, boosts: boosts, limit: SearchModel.indexResults)
                         times.append((CACurrentMediaTime() - began) * 1000)
                     }
                     log("query \"\(query)\" \(String(format: "%.1fms (best %.1fms)", times[0], times.min()!)) hits=\(hits.count): " + hits.prefix(8).map { Format.path($0.path) + "[\($0.score)]" }.joined(separator: " | "))

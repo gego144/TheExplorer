@@ -152,6 +152,8 @@ final class BrowserModel: Identifiable {
     @ObservationIgnored private var pendingSelection: Set<String>?
     @ObservationIgnored private var listingFailed = false
     @ObservationIgnored private var loadTask: Task<Void, Never>?
+    /// Counts the folder as visited once you've stayed in it (see FolderVisits).
+    @ObservationIgnored private var visitTask: Task<Void, Never>?
     /// The git repository the folder is in, if any; rows show their status from it.
     private(set) var git: GitRepository?
     @ObservationIgnored private var gitTask: Task<Void, Never>?
@@ -355,7 +357,8 @@ final class BrowserModel: Identifiable {
         let leaving = historyURL
         let wasS3 = destination == .s3
         destination = .folder
-        if recordHistory && (url != currentURL || wasS3) {
+        let arriving = url != currentURL || wasS3
+        if recordHistory && arriving {
             backStack.append(leaving)
             forwardStack.removeAll()
         }
@@ -368,7 +371,18 @@ final class BrowserModel: Identifiable {
             pendingSelection = nil
             UserDefaults.standard.set(url.path, forKey: "lastPath")
         }
+        if arriving { countVisit() }
         reload(selecting: selecting.isEmpty ? nil : selecting.map(\.standardizedFileURL))
+    }
+
+    private func countVisit() {
+        visitTask?.cancel()
+        let url = currentURL
+        visitTask = Task { [weak self] in
+            try? await Task.sleep(for: FolderVisits.dwell)
+            guard let self, !Task.isCancelled, self.destination == .folder, self.currentURL == url else { return }
+            FolderVisits.shared.record(url)
+        }
     }
 
     /// Where history records you are: the S3 location when browsing S3, otherwise the folder.
@@ -528,6 +542,7 @@ final class BrowserModel: Identifiable {
             navigate(to: item.url)
         } else {
             NSWorkspace.shared.open(item.url)
+            FolderVisits.shared.record(item.url.deletingLastPathComponent())
         }
     }
 

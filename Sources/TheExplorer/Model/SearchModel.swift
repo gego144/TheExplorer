@@ -98,10 +98,12 @@ final class SearchModel {
             guard !Task.isCancelled else { return }
         }
         let limit = Self.indexResults
+        let boosts = FolderVisits.shared.searchBoosts()
         let found = await Task.detached(priority: .userInitiated) { () -> [SearchHit] in
             let storage = index.snapshot()
             let under = folder.flatMap { FileIndex.resolve($0, in: storage) }
-            let hits = FileIndex.search(text, in: storage, under: under, includeHidden: includeHidden, limit: limit)
+            let hits = FileIndex.search(text, in: storage, under: under, includeHidden: includeHidden,
+                                        boosts: boosts, limit: limit)
             return hits.enumerated().compactMap { rank, hit in
                 FileItem(url: URL(fileURLWithPath: hit.path, isDirectory: hit.isFolder)).map { SearchHit(item: $0, rank: rank) }
             }

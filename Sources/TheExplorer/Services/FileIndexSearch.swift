@@ -16,12 +16,19 @@ extension FileIndex {
     /// to match the name itself. Matches then get a nudge for being recently used or changed,
     /// for being apps, and for being near the top of the tree.
     ///
-    /// `folder` limits results to what's inside that indexed folder.
+    /// `folder` limits results to what's inside that indexed folder. `boosts` are extra points
+    /// for folders by path (the ones you visit most, from FolderVisits): the folder gets them in
+    /// full, and what's inside it half for each level down.
     static func search(_ query: String, in storage: Storage, under folder: Int32? = nil,
-                       includeHidden: Bool = false, limit: Int, now: Date = Date()) -> [IndexHit] {
+                       includeHidden: Bool = false, boosts: [String: Int] = [:],
+                       limit: Int, now: Date = Date()) -> [IndexHit] {
         let tokens = FuzzyMatcher.tokens(query)
         guard !tokens.isEmpty, storage.count > 0 else { return [] }
         let count = storage.count
+        var boosted: [Int32: Int] = [:]
+        for (path, boost) in boosts {
+            if let index = resolve(path, in: storage) { boosted[index] = boost }
+        }
         let nowSeconds = Int32(clamping: Int(now.timeIntervalSinceReferenceDate))
 
         // For words that might be about the path: which folders have them in their own name or
@@ -96,6 +103,7 @@ extension FileIndex {
                     }
                     guard var score = matched else { continue }
                     score += bonus(i, storage: storage, now: nowSeconds)
+                    if !boosted.isEmpty { score += visitBonus(Int32(i), boosted: boosted, storage: storage) }
                     guard score > floor || best.count < keep else { continue }
                     best.append((score, Int32(i)))
                     if best.count >= keep * 2 {
@@ -138,6 +146,19 @@ extension FileIndex {
         let start = Int(storage.nameStart[i])
         bonus -= hashPenalty(storage.names[start..<start + Int(storage.nameLength[i])])
         return bonus
+    }
+
+    /// The best of a visited folder's boost on the item itself and, halving per level, on the
+    /// folders up to three levels above it.
+    private static func visitBonus(_ index: Int32, boosted: [Int32: Int], storage: Storage) -> Int {
+        var best = 0
+        var current = index
+        for level in 0...3 {
+            guard current >= 0 else { break }
+            if let boost = boosted[current] { best = max(best, boost >> level) }
+            current = storage.parent[Int(current)]
+        }
+        return best
     }
 
     /// Names made of a long hex hash ("cf2149e75d5dc5d6….bin", "b704a70e.8cb7cf31.js") are
