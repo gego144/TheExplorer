@@ -11,50 +11,84 @@ Real folder sizes, search that forgives typos, previews of everything, git statu
 ![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)
 ![SwiftUI](https://img.shields.io/badge/UI-SwiftUI-2E2E2E)
 
-[Guide](GUIDE.md) · [Install](#install) · [Development](DEVELOPMENT.md)
-
-<br>
-
-<img src="docs/screenshots/hero.png" alt="TheExplorer showing a git project expanded inline, with change badges and a live code preview" width="100%">
+[Features](#features) · [Install](#install) · [Guide](GUIDE.md) · [Development](DEVELOPMENT.md)
 
 </div>
 
-## Why
+## Features
 
-Finder makes simple things hard: telling folders from files at a glance, seeing how big a folder actually is, finding a file you half remember the name of, and finding out what's eating your disk. TheExplorer is a replacement built around those, tuned to stay fast on folders with tens of thousands of files.
+### Git status, right in the list
 
-## Highlights
+In a repository, changed files get a letter (**M** modified, **U** untracked…) and folders get a dot when something inside changed. The path bar shows the branch and how many files changed, and code previews live in the inspector.
 
-- **Real folder sizes.** Every folder's total size, worked out in the background and drawn as a bar.
-- **Search like a launcher.** Its own live index instead of Spotlight, with results in milliseconds as you type. Fuzzy matching forgives typos and ranks the folders you visit most first.
-- **One bar for everything.** ⌘K to search, type a path to jump, or pick from your recent folders.
-- **Previews with details.** Code, images, PDFs, video and audio, with dimensions, durations and codecs. Browse zips without unpacking them.
-- **Git status.** Changed files get a letter, and the path bar shows the branch.
-- **Storage map.** A treemap of what's using your disk.
-- **S3 like a folder.** Browse buckets in the same list, drop to upload, and drag to Finder to download.
-- **Actions.** Turn shell commands, like ffmpeg conversions, into right-click actions.
-- **The basics, done right.** Tabs, cut, copy and paste with Finder, undo across tabs, Open With and default apps per file type, and keyboard shortcuts for everything.
+<img src="docs/screenshots/hero.png" alt="A git project expanded inline, with change badges, the branch chip and a code preview" width="100%">
+
+### Real folder sizes
+
+Every folder's total size is worked out in the background and drawn as a bar, so the heavy ones stand out. Click a folder's arrow to expand it in place.
+
+<img src="docs/screenshots/folder-sizes.png" alt="A folder listing with size bars and type chips" width="100%">
+
+### Search that forgives typos
+
+TheExplorer keeps its own live index instead of using Spotlight, so results update in milliseconds as you type. Matching is fuzzy and forgives slips: here `serch` finds the Search files.
+
+<img src="docs/screenshots/search.png" alt="Search results for the misspelled query serch" width="100%">
+
+### Recent folders and path jumping
+
+Open ⌘K without typing to see the folders you use most, or start with `~` or `/` to jump to a path with completion. Folders you visit often rank first everywhere.
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/screenshots/search.png" alt="Search results for a misspelled query"></td>
     <td width="50%"><img src="docs/screenshots/recent-folders.png" alt="Recent folders in the command bar"></td>
-  </tr>
-  <tr>
-    <td align="center"><sub>Search that forgives typos</sub></td>
-    <td align="center"><sub>Your recent folders, one keystroke away</sub></td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="docs/screenshots/video.png" alt="A video previewed with its length, resolution and codec"></td>
-    <td width="50%"><img src="docs/screenshots/storage.png" alt="The storage treemap"></td>
-  </tr>
-  <tr>
-    <td align="center"><sub>Previews with what's inside</sub></td>
-    <td align="center"><sub>See what's eating your disk</sub></td>
+    <td width="50%"><img src="docs/screenshots/path-bar.png" alt="Path completion in the command bar"></td>
   </tr>
 </table>
 
-Everything else, with screenshots and the full list of shortcuts, is in the **[guide](GUIDE.md)**.
+### Previews with the details
+
+Select a file to preview it, with what's inside: dimensions and color for images, length, resolution and codec for video, and pages, lines or fonts for everything else.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/preview.png" alt="An image previewed with its dimensions and color profile"></td>
+    <td width="50%"><img src="docs/screenshots/video.png" alt="A video previewed with its length, resolution and codec"></td>
+  </tr>
+</table>
+
+### Zips without unpacking
+
+Selecting a zip lists everything inside as a tree with sizes, instantly, even for huge archives. Drag files out to unpack just those.
+
+<img src="docs/screenshots/zip.png" alt="A zip archive's contents listed in the inspector" width="100%">
+
+### Storage map
+
+Scan any folder or the whole Mac and drill into a treemap to see what's using your disk. Moving something to the Trash updates the totals without a rescan.
+
+<img src="docs/screenshots/storage.png" alt="The storage treemap and ranked folder list" width="100%">
+
+### S3, like a folder
+
+Browse your S3 buckets in the same list as your files. Drop files on a bucket to upload, and drag items to Finder or the desktop to download.
+
+<img src="docs/screenshots/s3.png" alt="Browsing an S3 bucket" width="100%">
+
+### Actions and Open With
+
+Turn shell commands you run on files, like an ffmpeg conversion, into right-click actions. Choose which app opens each file type, from Settings or the right-click menu.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/actions.png" alt="Actions in Settings"></td>
+    <td width="50%"><img src="docs/screenshots/open-with.png" alt="Default apps for file types in Settings"></td>
+  </tr>
+</table>
+
+### And the basics, done right
+
+Tabs, cut, copy and paste that work with Finder, ⌘Z undo across tabs and windows, drag and drop, and a keyboard shortcut for everything. The **[guide](GUIDE.md)** covers every feature in detail.
 
 ## Install
 
