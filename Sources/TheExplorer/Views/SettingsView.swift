@@ -8,8 +8,12 @@ struct SettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             section("Default file browser") {
-                SettingRow("Open folders with", hint: "Folders opened from other apps, the Dock, Spotlight or “open .” in Terminal, and other apps’ “Show in Finder”. Finder keeps the desktop.") {
-                    FolderHandlerPicker()
+                SettingRow("“Show in Finder” opens", hint: "Where other apps’ “Show in Finder” and “Reveal” buttons show files. Applies right away.") {
+                    FileViewerPicker(prefs: prefs)
+                }
+                RowDivider()
+                SettingRow("Folders open in", hint: folderOpenerHint) {
+                    AppName(bundleID: prefs.folderOpenerID)
                 }
             }
 
@@ -82,6 +86,13 @@ struct SettingsView: View {
         .fixedSize(horizontal: false, vertical: true)
         .background(Theme.background)
         .preferredColorScheme(.dark)
+    }
+
+    private var folderOpenerHint: String {
+        if prefs.folderOpenerID.caseInsensitiveCompare(FolderHandler.thisAppID) == .orderedSame {
+            return "Folders opened from other apps, the Dock and Spotlight open here."
+        }
+        return "macOS keeps Finder for folders opened from other apps, the Dock and Spotlight, and doesn’t let other apps take that over. To open a folder here from Finder, right-click it and choose Open With › TheExplorer."
     }
 
     private var startHint: String {
@@ -204,59 +215,89 @@ private struct TerminalPicker: View {
     }
 }
 
-/// Switches the file browser macOS uses between TheExplorer and Finder.
-private struct FolderHandlerPicker: View {
-    @State private var chosen = FolderHandler.finderID
-    @State private var needsRelogin = false
+/// Chooses where other apps' "Show in Finder" goes: TheExplorer or Finder.
+private struct FileViewerPicker: View {
+    @Bindable var prefs: Prefs
+    @State private var error: String?
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 4) {
             Menu {
-                Button { choose(FolderHandler.thisAppID) } label: { appLabel(Bundle.main.bundleURL) }
-                Button { choose(FolderHandler.finderID) } label: { appLabel(FolderHandler.finderURL) }
+                Button { choose(FolderHandler.thisAppID) } label: { AppName.label(for: FolderHandler.thisAppID) }
+                Button { choose(FolderHandler.finderID) } label: { AppName.label(for: FolderHandler.finderID) }
             } label: {
-                let app = chosenURL
-                HStack(spacing: 6) {
-                    Image(nsImage: NSWorkspace.shared.icon(forFile: app.path)).resizable().frame(width: 16, height: 16)
-                    MenuLabel(title: Self.name(app))
-                }
+                AppName(bundleID: prefs.fileViewerID, isMenu: true)
             }
             .menuStyle(.button)
             .buttonStyle(.plain)
             .menuIndicator(.hidden)
             .fixedSize()
-            if needsRelogin {
-                Text("Takes effect after you log out and back in.")
+            if let error {
+                Text(error)
                     .font(.system(size: 10.5))
                     .foregroundStyle(Theme.warning)
+                    .multilineTextAlignment(.trailing)
+                    .frame(maxWidth: 220, alignment: .trailing)
             }
         }
-        .onAppear(perform: refresh)
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refresh() }
-    }
-
-    private var chosenURL: URL {
-        chosen == FolderHandler.finderID
-            ? FolderHandler.finderURL
-            : NSWorkspace.shared.urlForApplication(withBundleIdentifier: chosen) ?? Bundle.main.bundleURL
-    }
-
-    private func appLabel(_ url: URL) -> some View {
-        Label { Text(Self.name(url)) } icon: { Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)) }
-    }
-
-    private static func name(_ url: URL) -> String {
-        FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
-    }
-
-    private func refresh() {
-        chosen = FolderHandler.chosenID
-        needsRelogin = FolderHandler.needsRelogin
+        .onAppear { prefs.refreshFileBrowser() }
     }
 
     private func choose(_ bundleID: String) {
-        FolderHandler.choose(bundleID)
-        refresh()
+        error = nil
+        do {
+            try FolderHandler.setViewer(bundleID)
+        } catch {
+            self.error = error.localizedDescription
+        }
+        prefs.refreshFileBrowser()
+        // Older macOS versions also let the folder opener follow; macOS 26 refuses quietly.
+        let app = bundleID == FolderHandler.finderID ? FolderHandler.finderURL : Bundle.main.bundleURL
+        Task {
+            await FolderHandler.requestFolderOpener(app)
+            prefs.refreshFileBrowser()
+        }
+    }
+}
+
+/// An app's icon and name, from its bundle identifier.
+private struct AppName: View {
+    let bundleID: String
+    var isMenu = false
+
+    var body: some View {
+        let url = Self.url(for: bundleID)
+        HStack(spacing: 6) {
+            if let url {
+                Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(width: 16, height: 16)
+            }
+            if isMenu {
+                MenuLabel(title: Self.name(bundleID))
+            } else {
+                Text(Self.name(bundleID))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.textSecondary)
+            }
+        }
+    }
+
+    static func label(for bundleID: String) -> some View {
+        Label {
+            Text(name(bundleID))
+        } icon: {
+            if let url = url(for: bundleID) { Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)) }
+        }
+    }
+
+    static func url(for bundleID: String) -> URL? {
+        if bundleID.caseInsensitiveCompare(FolderHandler.thisAppID) == .orderedSame { return Bundle.main.bundleURL }
+        if bundleID.caseInsensitiveCompare(FolderHandler.finderID) == .orderedSame { return FolderHandler.finderURL }
+        return NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)
+    }
+
+    static func name(_ bundleID: String) -> String {
+        guard let url = url(for: bundleID) else { return bundleID }
+        return FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
     }
 }
 

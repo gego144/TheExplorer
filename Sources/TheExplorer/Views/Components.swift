@@ -36,7 +36,7 @@ struct FileContextMenu: View {
                 Button("Pin to Sidebar") { urls.forEach { favorites.add($0) } }
             }
             Button(urls.count == 1 ? "Copy Path" : "Copy Paths") { FileActions.copyPaths(urls) }
-            Button("Reveal in Finder") { FileActions.revealInFinder(urls) }
+            Button(FileActions.revealTitle) { FileActions.revealInFinder(urls) }
             if let single {
                 let isFolder = FileItem(url: single)?.isFolder == true
                 Button(isFolder ? FileActions.openInTerminalTitle : "Open Enclosing Folder in \(Prefs.shared.terminal.name)") {

@@ -86,7 +86,7 @@ struct SidebarView: View {
         Button("Open in New Tab") { openTab(url) }
         Button(FileActions.openInTerminalTitle) { FileActions.openInTerminal(url) }
         Button("Copy Path") { FileActions.copyPaths([url]) }
-        Button("Reveal in Finder") { FileActions.revealInFinder([url]) }
+        Button(FileActions.revealTitle) { FileActions.revealInFinder([url]) }
         Button("Pin") { favorites.add(url) }
     }
 

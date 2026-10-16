@@ -99,6 +99,15 @@ enum DebugSnapshots {
                 }
                 event.setParam(list, forKeyword: keyDirectObject)
                 _ = try? event.sendEvent(options: [.noReply], timeout: 5)
+            case "viewer":
+                // Sets the file viewer (pass the current one to exercise the write without changing anything).
+                do {
+                    try FolderHandler.setViewer(argument)
+                    Prefs.shared.refreshFileBrowser()
+                    log("viewer set -> viewer=\(Prefs.shared.fileViewerID) opener=\(Prefs.shared.folderOpenerID) revealTitle=\(FileActions.revealTitle)")
+                } catch {
+                    log("viewer failed: \(error.localizedDescription)")
+                }
             case "settings":
                 // Settings in a plain window ordered in behind, so capture() picks it up.
                 let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView()))

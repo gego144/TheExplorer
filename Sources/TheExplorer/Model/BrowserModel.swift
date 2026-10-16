@@ -653,9 +653,17 @@ enum FileActions {
         NSPasteboard.general.setString(paths, forType: .string)
     }
 
+    /// Shows items selected in their folder: in Finder, or in TheExplorer itself once it's the
+    /// file viewer (where macOS would send the request anyway).
+    @MainActor
     static func revealInFinder(_ urls: some Sequence<URL>) {
-        NSWorkspace.shared.activateFileViewerSelecting(Array(urls))
+        let urls = Array(urls)
+        if Prefs.shared.fileViewerIsThisApp, Session.open(urls, revealing: true) { return }
+        NSWorkspace.shared.activateFileViewerSelecting(urls)
     }
+
+    @MainActor
+    static var revealTitle: String { Prefs.shared.fileViewerIsThisApp ? "Show in Enclosing Folder" : "Reveal in Finder" }
 
     /// Opens `folder` in the terminal chosen in Settings.
     @MainActor

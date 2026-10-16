@@ -115,7 +115,7 @@ private struct ItemDetails: View {
                     Image(systemName: "magnifyingglass")
                 }
                 .buttonStyle(SubtleButtonStyle())
-                .help("Reveal in Finder")
+                .help(FileActions.revealTitle)
             }
 
             if preview == .archive {

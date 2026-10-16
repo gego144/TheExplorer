@@ -335,7 +335,7 @@ private struct StorageContextMenu: View {
             Divider()
             Button("Pin to Sidebar") { FavoritesStore.shared.add(node.url) }
             Button("Copy Path") { FileActions.copyPaths([node.url]) }
-            Button("Reveal in Finder") { FileActions.revealInFinder([node.url]) }
+            Button(FileActions.revealTitle) { FileActions.revealInFinder([node.url]) }
             Divider()
             Button("Move to Trash…", role: .destructive) { storage.pendingTrash = node }
         } else {

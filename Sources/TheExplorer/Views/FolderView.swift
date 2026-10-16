@@ -57,7 +57,7 @@ struct FolderBackgroundMenu: View {
         Divider()
         Button(FileActions.openInTerminalTitle) { FileActions.openInTerminal(folder) }
         Button("Copy Path") { FileActions.copyPaths([folder]) }
-        Button("Reveal in Finder") { FileActions.revealInFinder([folder]) }
+        Button(FileActions.revealTitle) { FileActions.revealInFinder([folder]) }
         Button(FavoritesStore.shared.contains(folder) ? "Unpin" : "Pin to Sidebar") {
             FavoritesStore.shared.toggle(folder)
         }

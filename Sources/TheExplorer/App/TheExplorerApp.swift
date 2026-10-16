@@ -195,7 +195,7 @@ struct ExplorerCommands: Commands {
             }
             .keyboardShortcut("r")
             .disabled(model?.activeSelection.count != 1)
-            Button("Reveal in Finder") { model.map { FileActions.revealInFinder(pathTargets($0)) } }
+            Button(FileActions.revealTitle) { model.map { FileActions.revealInFinder(pathTargets($0)) } }
                 .keyboardShortcut("r", modifiers: [.command, .option])
             Divider()
             Button("Pin / Unpin") {
