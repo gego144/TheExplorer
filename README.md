@@ -21,7 +21,7 @@ Real folder sizes, one bar for paths and search, previews of everything, and a s
 
 ## Why
 
-Finder makes simple things hard: telling folders from files at a glance, seeing how big a folder actually is, and finding out what's eating your disk. TheExplorer is a replacement built around those, written in Swift and SwiftUI and tuned to stay fast on folders with tens of thousands of files. Spotlight powers search across the whole Mac, and a parallel `fts(3)` scanner measures disk usage.
+Finder makes simple things hard: telling folders from files at a glance, seeing how big a folder actually is, and finding out what's eating your disk. TheExplorer is a replacement built around those, written in Swift and SwiftUI and tuned to stay fast on folders with tens of thousands of files. Search runs on its own live index of your files rather than Spotlight, and a parallel `fts(3)` scanner measures disk usage.
 
 ## Features
 
@@ -33,7 +33,13 @@ Every folder's total size is calculated in the background and drawn as a bar, so
 
 ### One bar for paths and search
 
-The command bar shows where you are as clickable chips. Press ⌘K and type to search, or start with `/` or `~` to jump to a path with folder completion (↑↓ to choose, ⇥ to complete). *Here* searches the current folder and everything below it, including hidden and unindexed files. *Everywhere* uses Spotlight. Results are ranked by relevance, with clutter like `Library`, `node_modules` and `.git` pushed down.
+The command bar shows where you are as clickable chips. Press ⌘K and type to search, or start with `/` or `~` to jump to a path with folder completion (↑↓ to choose, ⇥ to complete). *Everywhere* searches all your files, and *Here* the current folder and everything below it.
+
+Search works like a launcher's rather than Spotlight's. TheExplorer keeps its own index of file names: your home folder, Applications, iCloud Drive and cloud storage. The index is built once (about a second for a few hundred thousand files) and saved. FSEvents keeps it current from then on, so results update on every keystroke in a few milliseconds. At launch the saved index loads in a few milliseconds. FSEvents then replays whatever changed while the app was closed, and only those folders are re-read.
+- **Fuzzy matching.** Matching is case- and accent-insensitive, and the letters you type don't have to be next to each other: `tex` finds *TheExplorer* and `qrp` finds *q3-report.pdf*.
+- **Ranking.** Whole names beat prefixes, prefixes beat word starts, and those beat everything else. Recently opened and recently changed files rise to the top.
+- **Folder words.** Extra words can match the folders a file is in, so `explorer readme` finds the README inside *TheExplorer*.
+- **What's left out.** Library, hidden folders, the insides of apps and packages, dependency folders like `node_modules`, Unity's project caches, and any folder a project's `.gitignore` lists (build output, caches) aren't indexed, though the folders themselves are. Generated hash-named files rank last. To search everything in a folder, go there, show hidden files (⇧⌘.) and search *Here*.
 
 <table>
   <tr>
@@ -174,7 +180,7 @@ For the storage scan to include protected folders like Mail and Messages, grant 
 Sources/TheExplorer/
   App/        App entry point, menu commands, tabs and session restore, debug scenes and input
   Model/      Per-window browser state, search, recents, storage, settings, actions
-  Services/   Disk scanner, folder size cache, favorites, Spotlight wrapper, zip reader, S3 client and signer, directory watcher
+  Services/   Search index and fuzzy matcher, disk scanner, folder size cache, favorites, Spotlight wrapper (Recents), zip reader, S3 client and signer, directory watcher
   Views/      SwiftUI views (file list, sidebar, search, recents, storage and treemap, inspector, previews, settings)
   Util/       Formatting and icon caching
 Resources/    Info.plist and app icon
@@ -185,7 +191,7 @@ docs/         README screenshots
 
 A debug build (`CONFIG=debug ./scripts/build-app.sh`) goes to `build/debug/` with its own bundle identifier, so it never replaces the copy you use.
 
-**Speed is a feature.** Anything proportional to the number of files (listing, sorting, Spotlight results, folder sizes, path suggestions) runs off the main thread, or runs once and is cached, never per redraw.
+**Speed is a feature.** Anything proportional to the number of files (listing, sorting, search, Spotlight results, folder sizes, path suggestions) runs off the main thread, or runs once and is cached, never per redraw.
 
 <details>
 <summary><b>Signing and permissions</b></summary>

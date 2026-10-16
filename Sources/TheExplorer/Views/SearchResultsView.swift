@@ -2,8 +2,8 @@ import SwiftUI
 
 struct SearchResultsView: View {
     @Bindable var model: BrowserModel
-    /// Newest changed first by default; nil would keep Spotlight's relevance order.
-    @State private var sort: SortSpec? = .byChanged
+    /// Nil keeps the best matches first; clicking a column sorts by it instead.
+    @State private var sort: SortSpec?
     @Environment(\.openTab) private var openTab
 
     var body: some View {
@@ -30,7 +30,11 @@ struct SearchResultsView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer()
-                if search.isRunning && model.searchScope == .folder && search.scannedCount > 0 {
+                if search.isIndexing {
+                    Text("Indexing your files…")
+                        .font(Theme.mono)
+                        .foregroundStyle(Theme.textTertiary)
+                } else if search.isRunning && search.scannedCount > 0 {
                     Text("\(search.scannedCount.formatted()) checked")
                         .font(Theme.mono)
                         .foregroundStyle(Theme.textTertiary)
@@ -50,7 +54,7 @@ struct SearchResultsView: View {
                 showLocation: true,
                 empty: search.isRunning ? nil : EmptyState(
                     symbol: "magnifyingglass", title: "No matches for “\(model.searchText)”",
-                    hint: model.searchScope == .folder ? "Try “Everywhere” to search the whole Mac." : "Try “Here” to search hidden and unindexed files in this folder."),
+                    hint: model.searchScope == .folder ? "Try “Everywhere” to search all your files." : "Library, hidden folders and the insides of apps aren't indexed. Go to the folder and search “Here” with hidden files shown (⇧⌘.) to look at everything in it."),
                 focusRequest: model.listFocusRequest,
                 onOpen: { urls, newTab in open(urls, newTab: newTab, rows: rows) },
                 onQuickLook: { model.quickLook($0, in: $1) },
@@ -63,7 +67,7 @@ struct SearchResultsView: View {
             }
 
             if model.searchScope == .mac {
-                Text("Everywhere uses the Spotlight index, so hidden, system and excluded folders are skipped. “Here” searches every file in the current folder.")
+                Text("Everywhere searches \(IndexStatus.shared.isReady ? IndexStatus.shared.itemCount.formatted() + " items in " : "")your home folder, Applications and cloud drives, kept current as files change. Library, hidden folders, the insides of apps and folders like node_modules are left out.")
                     .font(.system(size: 10.5))
                     .foregroundStyle(Theme.textTertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -87,7 +91,7 @@ struct SearchResultsView: View {
 
     private var scopeDescription: String {
         switch model.searchScope {
-        case .mac: "Searching everywhere"
+        case .mac: "Searching your files"
         case .folder: "Searching “\(FileManager.default.displayName(atPath: model.currentURL.path))” and below"
         }
     }

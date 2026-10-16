@@ -217,6 +217,21 @@ enum DebugSnapshots {
                 let ends = argument.components(separatedBy: ">")
                 if let item = FileItem(url: URL(fileURLWithPath: ends[0])) { model.rename(item, to: ends[1]) }
             case "mkdir": model.create(.folder, named: argument)
+            case "indexbench":
+                // indexbench:q1,q2 logs the index's size and build time, then each query's time and best hits.
+                await FileIndex.shared.waitUntilReady()
+                let storage = FileIndex.shared.snapshot()
+                log("index items=\(storage.liveCount) entries=\(storage.count) names=\(storage.names.count / 1024)KB \(FileIndex.shared.origin)")
+                for query in argument.split(separator: ",").map(String.init) {
+                    var times: [Double] = []
+                    var hits: [IndexHit] = []
+                    for _ in 0..<5 {
+                        let began = CACurrentMediaTime()
+                        hits = FileIndex.search(query, in: storage, limit: SearchModel.indexResults)
+                        times.append((CACurrentMediaTime() - began) * 1000)
+                    }
+                    log("query \"\(query)\" \(String(format: "%.1fms (best %.1fms)", times[0], times.min()!)) hits=\(hits.count): " + hits.prefix(8).map { Format.path($0.path) + "[\($0.score)]" }.joined(separator: " | "))
+                }
             case "menuitem":
                 // menuitem:Edit>Undo fires the first item in that menu whose title starts so.
                 let names = argument.components(separatedBy: ">")

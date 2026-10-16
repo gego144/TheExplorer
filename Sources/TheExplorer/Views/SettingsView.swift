@@ -43,6 +43,12 @@ struct SettingsView: View {
                 }
             }
 
+            section("Search") {
+                SettingRow("Index", hint: "Your home folder, Applications, iCloud Drive and cloud storage, kept current as files change. Library, hidden folders, the insides of apps, folders like node_modules and anything a project’s .gitignore lists are left out.") {
+                    SearchIndexStatus()
+                }
+            }
+
             section("New windows") {
                 SettingRow("Start in", hint: startHint) {
                     StartLocationPicker(prefs: prefs)
@@ -142,6 +148,22 @@ struct SettingsView: View {
         case .size: ascending ? "Smallest first" : "Largest first"
         case .name, .kind: ascending ? "A to Z" : "Z to A"
         }
+    }
+}
+
+/// How big the search index is, with a way to rebuild it.
+private struct SearchIndexStatus: View {
+    private let status = IndexStatus.shared
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(status.isReady ? "\(status.itemCount.formatted()) items" : "Building…")
+                .font(Theme.mono)
+                .foregroundStyle(Theme.textSecondary)
+            Button("Rebuild") { FileIndex.shared.rebuildNow() }
+                .buttonStyle(SubtleButtonStyle())
+        }
+        .fixedSize()
     }
 }
 

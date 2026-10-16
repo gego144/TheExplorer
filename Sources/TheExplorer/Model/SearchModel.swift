@@ -2,9 +2,10 @@ import Foundation
 import Observation
 
 enum SearchScope: Hashable {
-    /// Live, exhaustive walk of the current folder (finds hidden and unindexed files too).
+    /// The current folder and everything in it: from the index when it covers the folder,
+    /// otherwise (or with hidden files shown) a live walk that finds everything.
     case folder
-    /// Spotlight across every indexed volume. Instant, but skips unindexed locations.
+    /// Everything in TheExplorer's index (see FileIndex).
     case mac
 }
 
@@ -21,13 +22,16 @@ final class SearchModel {
     private(set) var isRunning = false
     private(set) var scannedCount = 0
     private(set) var truncated = false
+    /// The index is still being built (only right after launch).
+    private(set) var isIndexing = false
     var kindFilter: KindFilter = .all
     var selection: Set<URL> = []
 
     static let maxResults = 2000
+    /// Results from the index are ranked, so only the best are worth listing.
+    static let indexResults = 200
 
     @ObservationIgnored private var task: Task<Void, Never>?
-    @ObservationIgnored private var spotlight: SpotlightQuery?
     @ObservationIgnored private var currentKey: String?
 
     var visibleHits: [SearchHit] {
@@ -47,12 +51,16 @@ final class SearchModel {
             return
         }
         isRunning = true
+        // The index answers in milliseconds, so it only waits out a burst of typing; a walk
+        // starts over on every change, so it waits for a pause.
+        let indexed = scope == .mac || (!includeHidden && FileIndex.shared.covers(folder.path))
         task = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(180))
+            try? await Task.sleep(for: .milliseconds(indexed ? 25 : 180))
             guard let self, !Task.isCancelled else { return }
-            switch scope {
-            case .mac: self.runSpotlight(terms: terms)
-            case .folder: await self.runFolderWalk(terms: terms, folder: folder, includeHidden: includeHidden)
+            if indexed {
+                await self.runIndex(text: text, under: scope == .folder ? folder.path : nil, includeHidden: includeHidden)
+            } else {
+                await self.runFolderWalk(terms: terms, folder: folder, includeHidden: includeHidden)
             }
         }
     }
@@ -60,9 +68,8 @@ final class SearchModel {
     func cancel() {
         task?.cancel()
         task = nil
-        spotlight?.stop()
-        spotlight = nil
         isRunning = false
+        isIndexing = false
         scannedCount = 0
         truncated = false
         selection = []
@@ -80,48 +87,31 @@ final class SearchModel {
         currentKey = nil
     }
 
-    // MARK: - Spotlight
+    // MARK: - Index
 
-    /// Broad terms can match hundreds of thousands of items, so ranking happens on the query's
-    /// background queue: names are free to read, so every match is ranked by name, and only the
-    /// best few thousand have their paths resolved.
-    private func runSpotlight(terms: [String]) {
-        let predicates = terms.map {
-            NSPredicate(format: "%K LIKE[cd] %@", NSMetadataItemFSNameKey, "*\($0)*")
+    private func runIndex(text: String, under folder: String?, includeHidden: Bool) async {
+        let index = FileIndex.shared
+        if !index.isReady {
+            isIndexing = true
+            await index.waitUntilReady()
+            isIndexing = false
+            guard !Task.isCancelled else { return }
         }
-        // NSMetadataQuery throws on an AND compound with a single subpredicate.
-        let predicate = predicates.count == 1 ? predicates[0] : NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
-        let query = SpotlightQuery(predicate: predicate, scopes: [NSMetadataQueryLocalComputerScope])
-        let lowered = terms.map { $0.lowercased() }
-        let limit = Self.maxResults
-        query.start { [weak self] results, gathering in
-            let count = results.count
-            var candidates: [(index: Int, rank: Int, modified: Date)] = []
-            candidates.reserveCapacity(count)
-            for index in 0..<count {
-                let name = results.name(at: index) ?? ""
-                let modified: Date = results.value(NSMetadataItemFSContentChangeDateKey, at: index) ?? .distantPast
-                candidates.append((index, Self.rank(name: name, terms: lowered), modified))
+        let limit = Self.indexResults
+        let found = await Task.detached(priority: .userInitiated) { () -> [SearchHit] in
+            let storage = index.snapshot()
+            let under = folder.flatMap { FileIndex.resolve($0, in: storage) }
+            let hits = FileIndex.search(text, in: storage, under: under, includeHidden: includeHidden, limit: limit)
+            return hits.enumerated().compactMap { rank, hit in
+                FileItem(url: URL(fileURLWithPath: hit.path, isDirectory: hit.isFolder)).map { SearchHit(item: $0, rank: rank) }
             }
-            candidates.sort { $0.rank != $1.rank ? $0.rank < $1.rank : $0.modified > $1.modified }
-            // Resolve twice what's shown, so noisy paths sinking to the bottom still leave a full list.
-            let ranked = candidates.prefix(limit * 2).compactMap { candidate -> SearchHit? in
-                guard let item = results.item(at: candidate.index) else { return nil }
-                return SearchHit(item: item, rank: candidate.rank + (PathNoise.isNoisy(item.path) ? 10 : 0))
-            }
-            let hits = Self.sorted(ranked).prefix(limit)
-            DispatchQueue.main.async {
-                guard let self, self.spotlight === query else { return }
-                self.scannedCount = count
-                self.hits = Array(hits)
-                self.truncated = count > limit
-                self.isRunning = gathering
-                if !self.selection.isEmpty {
-                    self.selection.formIntersection(hits.map(\.id))
-                }
-            }
-        }
-        spotlight = query
+        }.value
+        guard !Task.isCancelled else { return }
+        // Already in order of relevance.
+        hits = found
+        truncated = found.count >= limit
+        selection.formIntersection(found.map(\.id))
+        isRunning = false
     }
 
     // MARK: - Folder walk

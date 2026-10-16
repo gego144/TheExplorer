@@ -57,6 +57,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Search's own index: built in the background, then kept current.
+        FileIndex.shared.start()
         // Safety net: if macOS thought it restored windows but none came back (e.g. state saved by
         // an older build), open a fresh one instead of sitting there with no window.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -83,6 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated { Session.save() }
+        FileIndex.shared.saveIfNeeded()
     }
 
     /// Triggers File › New Window, the only way to open a SwiftUI window from outside a view.
