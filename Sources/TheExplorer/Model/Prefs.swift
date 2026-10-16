@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import UniformTypeIdentifiers
 
 /// Where new windows start.
 enum StartLocation: String, CaseIterable {
@@ -121,5 +122,68 @@ struct Terminal: Identifiable, Hashable {
 
     private static func openWithApp(_ appURL: URL, folder: URL) {
         NSWorkspace.shared.open([folder], withApplicationAt: appURL, configuration: NSWorkspace.OpenConfiguration())
+    }
+}
+
+/// The app macOS uses as the file browser: Finder, unless you make TheExplorer the default in
+/// Settings. That covers folders opened from other apps (Dock stacks, Spotlight, `open .`) and
+/// other apps' "Show in Finder".
+///
+/// macOS no longer lets apps change the folder handler through Launch Services (it fails with
+/// paramErr, even to set Finder again), so this writes the two preferences that ForkLift and
+/// Path Finder document: the folder entry in Launch Services' handler list, and `NSFileViewer`.
+/// Launch Services reads its list at login, so a change applies after logging out and back in.
+@MainActor
+enum FolderHandler {
+    static let finderURL = URL(fileURLWithPath: "/System/Library/CoreServices/Finder.app")
+    static let finderID = "com.apple.finder"
+
+    private static let handlersDomain = "com.apple.LaunchServices/com.apple.launchservices.secure" as CFString
+    nonisolated private static let folderType = "public.folder"
+
+    /// The app chosen in Settings (what applies from the next login).
+    static var chosenID: String {
+        let viewer = CFPreferencesCopyValue("NSFileViewer" as CFString, kCFPreferencesAnyApplication,
+                                            kCFPreferencesCurrentUser, kCFPreferencesAnyHost) as? String
+        return viewer ?? folderEntry(in: storedHandlers) ?? finderID
+    }
+
+    /// The app macOS opens folders with right now.
+    static var activeID: String? {
+        NSWorkspace.shared.urlForApplication(toOpen: .folder).flatMap { Bundle(url: $0)?.bundleIdentifier }
+    }
+
+    static var thisAppID: String { Bundle.main.bundleIdentifier ?? "com.gego.TheExplorer" }
+
+    /// Chosen but not yet in effect.
+    static var needsRelogin: Bool { chosenID.caseInsensitiveCompare(activeID ?? finderID) != .orderedSame }
+
+    static func choose(_ bundleID: String) {
+        let isFinder = bundleID == finderID
+        CFPreferencesSetValue("NSFileViewer" as CFString, isFinder ? nil : bundleID as CFString,
+                              kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+        CFPreferencesSynchronize(kCFPreferencesAnyApplication, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+        CFPreferencesSetValue("LSHandlers" as CFString, handlers(choosing: isFinder ? nil : bundleID, in: storedHandlers) as CFArray,
+                              handlersDomain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+        CFPreferencesSynchronize(handlersDomain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+    }
+
+    private static var storedHandlers: [[String: Any]] {
+        CFPreferencesCopyValue("LSHandlers" as CFString, handlersDomain, kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+            as? [[String: Any]] ?? []
+    }
+
+    /// The handler list with the folder entry replaced: removed for Finder (the built-in default),
+    /// or pointing at `bundleID`. Every other entry is kept as it was.
+    nonisolated static func handlers(choosing bundleID: String?, in existing: [[String: Any]]) -> [[String: Any]] {
+        var handlers = existing.filter { ($0["LSHandlerContentType"] as? String)?.lowercased() != folderType }
+        if let bundleID {
+            handlers.append(["LSHandlerContentType": folderType, "LSHandlerRoleAll": bundleID])
+        }
+        return handlers
+    }
+
+    nonisolated static func folderEntry(in handlers: [[String: Any]]) -> String? {
+        handlers.first { ($0["LSHandlerContentType"] as? String)?.lowercased() == folderType }?["LSHandlerRoleAll"] as? String
     }
 }

@@ -13,6 +13,7 @@ import SwiftUI
 @MainActor
 enum DebugSnapshots {
     private static var hasRun = false
+    private static var settingsWindow: NSWindow?
 
     static func runIfRequested(workspace: Workspace) async {
         let env = ProcessInfo.processInfo.environment
@@ -85,7 +86,26 @@ enum DebugSnapshots {
                 Prefs.shared.terminalID = argument
                 log("terminal -> \(FileActions.openInTerminalTitle) installed=\(Prefs.shared.terminal.isInstalled) app=\(Prefs.shared.terminal.appURL?.path ?? "none")")
             // Real input, delivered to this window only (see InputDriver).
-            case "key": InputDriver.press(parts[1])
+            case "reveal":
+                // The event other apps' "Show in Finder" sends to the file viewer, sent to ourselves.
+                let event = NSAppleEventDescriptor(
+                    eventClass: AEEventClass(kAEMiscStandards), eventID: AEEventID(kAEMakeObjectsVisible),
+                    targetDescriptor: .currentProcess(), returnID: AEReturnID(kAutoGenerateReturnID),
+                    transactionID: AETransactionID(kAnyTransactionID)
+                )
+                let list = NSAppleEventDescriptor.list()
+                for path in argument.split(separator: ",") {
+                    list.insert(NSAppleEventDescriptor(fileURL: URL(fileURLWithPath: String(path))), at: 0)
+                }
+                event.setParam(list, forKeyword: keyDirectObject)
+                _ = try? event.sendEvent(options: [.noReply], timeout: 5)
+            case "settings":
+                // Settings in a plain window ordered in behind, so capture() picks it up.
+                let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView()))
+                window.title = "Settings"
+                window.orderFront(nil)
+                settingsWindow = window
+                        case "key": InputDriver.press(parts[1])
             case "type": await InputDriver.type(parts.count > 1 ? parts[1] : "")
             case "click", "dblclick", "cmdclick", "chevron":
                 // click:<row name>; chevron clicks the folder arrow instead of the name.

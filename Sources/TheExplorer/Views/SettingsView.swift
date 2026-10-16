@@ -1,12 +1,18 @@
 import SwiftUI
 
-/// Settings (⌘,): the terminal to open folders in, where new windows start, and the
-/// defaults new tabs begin with.
+/// Settings (⌘,): the default file browser, the terminal to open folders in, where new windows
+/// start, and the defaults new tabs begin with.
 struct SettingsView: View {
     @Bindable private var prefs = Prefs.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
+            section("Default file browser") {
+                SettingRow("Open folders with", hint: "Folders opened from other apps, the Dock, Spotlight or “open .” in Terminal, and other apps’ “Show in Finder”. Finder keeps the desktop.") {
+                    FolderHandlerPicker()
+                }
+            }
+
             section("Terminal") {
                 SettingRow("Open folders in", hint: "Used by Open in Terminal (⌃⌘T) and the right-click menus.") {
                     TerminalPicker(selection: $prefs.terminalID)
@@ -195,6 +201,62 @@ private struct TerminalPicker: View {
         panel.prompt = "Use App"
         guard panel.runModal() == .OK, let url = panel.url, let id = Bundle(url: url)?.bundleIdentifier else { return }
         selection = id
+    }
+}
+
+/// Switches the file browser macOS uses between TheExplorer and Finder.
+private struct FolderHandlerPicker: View {
+    @State private var chosen = FolderHandler.finderID
+    @State private var needsRelogin = false
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            Menu {
+                Button { choose(FolderHandler.thisAppID) } label: { appLabel(Bundle.main.bundleURL) }
+                Button { choose(FolderHandler.finderID) } label: { appLabel(FolderHandler.finderURL) }
+            } label: {
+                let app = chosenURL
+                HStack(spacing: 6) {
+                    Image(nsImage: NSWorkspace.shared.icon(forFile: app.path)).resizable().frame(width: 16, height: 16)
+                    MenuLabel(title: Self.name(app))
+                }
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            if needsRelogin {
+                Text("Takes effect after you log out and back in.")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(Theme.warning)
+            }
+        }
+        .onAppear(perform: refresh)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refresh() }
+    }
+
+    private var chosenURL: URL {
+        chosen == FolderHandler.finderID
+            ? FolderHandler.finderURL
+            : NSWorkspace.shared.urlForApplication(withBundleIdentifier: chosen) ?? Bundle.main.bundleURL
+    }
+
+    private func appLabel(_ url: URL) -> some View {
+        Label { Text(Self.name(url)) } icon: { Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)) }
+    }
+
+    private static func name(_ url: URL) -> String {
+        FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
+    }
+
+    private func refresh() {
+        chosen = FolderHandler.chosenID
+        needsRelogin = FolderHandler.needsRelogin
+    }
+
+    private func choose(_ bundleID: String) {
+        FolderHandler.choose(bundleID)
+        refresh()
     }
 }
 

@@ -330,6 +330,10 @@ final class BrowserModel: Identifiable {
     }
 
     func navigate(to url: URL, select: URL? = nil, recordHistory: Bool = true) {
+        navigate(to: url, selecting: select.map { [$0] } ?? [], recordHistory: recordHistory)
+    }
+
+    func navigate(to url: URL, selecting: [URL], recordHistory: Bool = true) {
         let url = url.standardizedFileURL
         searchText = ""
         destination = .folder
@@ -346,7 +350,7 @@ final class BrowserModel: Identifiable {
             pendingSelection = nil
             UserDefaults.standard.set(url.path, forKey: "lastPath")
         }
-        reload(selecting: select.map { [$0.standardizedFileURL] })
+        reload(selecting: selecting.isEmpty ? nil : selecting.map(\.standardizedFileURL))
     }
 
     func goBack() {
@@ -424,7 +428,8 @@ final class BrowserModel: Identifiable {
                     self.listingFailed = false
                 }
                 if let pending = self.pendingSelection {
-                    self.selection = Set(items.filter { pending.contains($0.path) }.map(\.url))
+                    // Both sides standardized: listings can say /private/tmp where the request says /tmp.
+                    self.selection = Set(items.filter { pending.contains($0.url.standardizedFileURL.path) }.map(\.url))
                     self.pendingSelection = nil
                 } else if keepSelection {
                     self.selection = previousSelection.intersection(Set(self.listedItems.map(\.url)))

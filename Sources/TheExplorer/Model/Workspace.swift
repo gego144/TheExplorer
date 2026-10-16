@@ -55,6 +55,31 @@ final class Workspace {
         tabs[index].start()
     }
 
+    /// Shows folders handed over by macOS: the tab already showing one, otherwise a new tab.
+    /// Files open their folder with the file selected; `revealing` does that for folders too
+    /// (other apps' "Show in Finder").
+    func show(_ urls: [URL], revealing: Bool = false) {
+        // Grouped by folder, so revealing several files in one folder selects them all.
+        var folders: [URL] = []
+        var picks: [URL: [URL]] = [:]
+        for url in urls.map(\.standardizedFileURL) {
+            let isFolder = !revealing && ((try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false)
+            let folder = isFolder ? url : url.deletingLastPathComponent()
+            if picks[folder] == nil { folders.append(folder) }
+            picks[folder, default: []] += isFolder ? [] : [url]
+        }
+        for folder in folders {
+            if let existing = tabs.first(where: { $0.destination == .folder && !$0.isSearching && $0.currentURL == folder }) {
+                select(existing)
+            } else {
+                newTab(folder)
+            }
+            if let picked = picks[folder], !picked.isEmpty {
+                selected.navigate(to: folder, selecting: picked, recordHistory: false)
+            }
+        }
+    }
+
     func select(_ tab: BrowserModel) {
         if let index = tabs.firstIndex(where: { $0 === tab }) { select(index) }
     }
@@ -103,6 +128,31 @@ enum Session {
     static func register(_ workspace: Workspace) {
         live.removeAll { $0.workspace == nil || $0.workspace === workspace }
         live.append(WeakWorkspace(workspace: workspace))
+    }
+
+    /// The window you used last, where folders opened from other apps go.
+    private static weak var lastActive: Workspace?
+    /// Folders that arrived before any window was up (e.g. the app was launched to open one).
+    private static var pending: [(urls: [URL], revealing: Bool)] = []
+
+    static func activated(_ workspace: Workspace) { lastActive = workspace }
+
+    /// Folders macOS asked the app to open (as the default file browser, Open With, `open -a`),
+    /// or items to reveal. Returns false when there's no window to show them in yet.
+    static func open(_ urls: [URL], revealing: Bool = false) -> Bool {
+        guard let workspace = lastActive ?? live.last(where: { $0.workspace != nil })?.workspace else {
+            pending.append((urls, revealing))
+            return false
+        }
+        workspace.show(urls, revealing: revealing)
+        if !isScripted { NSApp.activate() }
+        return true
+    }
+
+    /// Shows whatever arrived before this window was up.
+    static func showPending(in workspace: Workspace) {
+        pending.forEach { workspace.show($0.urls, revealing: $0.revealing) }
+        pending = []
     }
 
     /// Scripted debug runs start from a clean slate and leave nothing behind.

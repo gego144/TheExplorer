@@ -11,6 +11,9 @@ struct TheExplorerApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1280, height: 800)
+        // Folders opened from outside go to AppDelegate, which puts them in a tab; otherwise
+        // SwiftUI would open a new window for each one.
+        .handlesExternalEvents(matching: [])
         .commands { ExplorerCommands() }
 
         Settings {
@@ -23,6 +26,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         // The app draws its own tabs; turn off macOS window tabbing and its menu items.
         NSWindow.allowsAutomaticWindowTabbing = false
+        // "Show in Finder" from other apps, once TheExplorer is the file viewer (NSFileViewer).
+        NSAppleEventManager.shared().setEventHandler(
+            self, andSelector: #selector(reveal(_:withReplyEvent:)),
+            forEventClass: AEEventClass(kAEMiscStandards), andEventID: AEEventID(kAEMakeObjectsVisible)
+        )
+    }
+
+    /// The reveal event: shows each item selected in its folder.
+    @objc private func reveal(_ event: NSAppleEventDescriptor, withReplyEvent reply: NSAppleEventDescriptor) {
+        guard let direct = event.paramDescriptor(forKeyword: keyDirectObject) else { return }
+        let items = direct.numberOfItems > 0 ? (1...direct.numberOfItems).compactMap { direct.atIndex($0) } : [direct]
+        let urls = items.compactMap { item in
+            item.coerce(toDescriptorType: typeFileURL).flatMap { URL(dataRepresentation: $0.data, relativeTo: nil) }
+        }
+        guard !urls.isEmpty else { return }
+        show(urls, revealing: true)
+    }
+
+    private func show(_ urls: [URL], revealing: Bool) {
+        MainActor.assumeIsolated {
+            guard !Session.open(urls, revealing: revealing) else { return }
+            // No window yet: the next one to appear picks them up. At launch that's the first
+            // window; otherwise open one.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                guard !NSApp.windows.contains(where: { $0.isVisible && $0.canBecomeMain }) else { return }
+                Self.openNewWindow()
+            }
+        }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -44,6 +75,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
+    /// Folders from Finder's Open With, `open -a`, or anywhere once TheExplorer is the default
+    /// file browser.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        show(urls, revealing: false)
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated { Session.save() }
     }
@@ -63,6 +100,7 @@ private struct WorkspaceWindow: View {
     /// Other saved windows to reopen; only the first window of a launch gets these.
     @State private var pendingWindows: [WindowState]
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.controlActiveState) private var controlActiveState
 
     init(state: Binding<WindowState?>) {
         _state = state
@@ -84,7 +122,12 @@ private struct WorkspaceWindow: View {
                 workspace.start()
                 pendingWindows.forEach { openWindow(value: $0) }
                 pendingWindows = []
+                Session.activated(workspace)
+                Session.showPending(in: workspace)
                 state = workspace.state
+            }
+            .onChange(of: controlActiveState) { _, active in
+                if active == .key { Session.activated(workspace) }
             }
             .onChange(of: workspace.state.paths) { state = workspace.state }
             .onChange(of: workspace.state.selected) { state = workspace.state }
