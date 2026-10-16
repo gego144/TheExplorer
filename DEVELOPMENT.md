@@ -1,0 +1,115 @@
+# Developing TheExplorer
+
+How to build, test and work on TheExplorer. For using the app, see [GUIDE.md](GUIDE.md).
+
+## Building
+
+TheExplorer builds from source with SwiftPM. You need macOS 15 or later and Xcode 16 or later (Swift 6 toolchain).
+
+```sh
+make run        # build, install to /Applications, and open it
+make install    # build and install without opening
+make test       # run the test suite
+make clean
+```
+
+`make app` runs `scripts/build-app.sh`, which builds with SwiftPM and wraps the binary in an app bundle in `build/`. To work on the code in Xcode, run `open Package.swift`.
+
+## Layout
+
+```
+Sources/TheExplorer/
+  App/        App entry point, menu commands, tabs and session restore, debug scenes and input
+  Model/      Per-window browser state, search, recents, storage, settings, actions
+  Services/   Search index and fuzzy matcher, disk scanner, folder size cache, favorites, Spotlight wrapper (Recents), zip reader, S3 client and signer, directory watcher
+  Views/      SwiftUI views (file list, sidebar, search, recents, storage and treemap, inspector, previews, settings)
+  Util/       Formatting and icon caching
+Resources/    Info.plist and app icon
+scripts/      build-app.sh, make-icon.swift
+Tests/        Swift Testing suites
+docs/         Screenshots for the README and guide
+```
+
+A debug build (`CONFIG=debug ./scripts/build-app.sh`) goes to `build/debug/` with its own bundle identifier, so it never replaces the copy you use.
+
+**Speed is a feature.** Anything proportional to the number of files (listing, sorting, search, Spotlight results, folder sizes, path suggestions) runs off the main thread, or runs once and is cached, never per redraw.
+
+## Signing and permissions
+
+macOS remembers privacy permissions (Desktop, Documents, Downloads, Full Disk Access…) per app, identified by its code signature. An ad-hoc signature changes on every build, which makes macOS ask for permissions again after every rebuild. To avoid that, the build script signs with a stable identity:
+
+1. `SIGN_IDENTITY`, if you set it (for example an Apple Development certificate).
+2. Otherwise, a self-signed certificate called **TheExplorer Local Signing**, if it's in your keychain.
+3. Otherwise, ad-hoc, with a warning.
+
+To create the local certificate on a new Mac:
+
+```sh
+WORK=$(mktemp -d) && cd "$WORK"
+printf '[req]\ndistinguished_name=dn\nx509_extensions=ext\nprompt=no\n[dn]\nCN=TheExplorer Local Signing\n[ext]\nbasicConstraints=critical,CA:false\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=critical,codeSigning\n' > cert.cnf
+/usr/bin/openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 3650 -config cert.cnf
+/usr/bin/openssl pkcs12 -export -inkey key.pem -in cert.pem -name "TheExplorer Local Signing" -out id.p12 -passout pass:temp
+security import id.p12 -k ~/Library/Keychains/login.keychain-db -P temp -T /usr/bin/codesign
+cd - && rm -rf "$WORK"
+```
+
+It shows as "not trusted" in Keychain Access. That's expected for a self-signed certificate and doesn't stop it signing. To remove it, delete it in Keychain Access.
+
+## Scripted scenes and screenshots
+
+Debug builds can drive themselves through a scripted set of scenes and save a screenshot of the window after each one, which is handy for checking UI changes without clicking through by hand:
+
+```sh
+CONFIG=debug ./scripts/build-app.sh
+open -g -n --env EXPLORER_SNAPSHOT_DIR=/tmp/shots --env EXPLORER_SNAPSHOT_QUIT=1 \
+    --env "EXPLORER_SCENES=folder:~/Dev;newtab:~/Downloads;recents;search:swift;searchmac:swift;storage:~/Dev" \
+    build/debug/TheExplorer.app
+```
+
+Scenes are separated by `;`. The available scenes are `folder:<path>`, `select:<path>`, `newtab:<path>`, `tab:<n>`, `omnibox:<text>`, `expand:<path>`, `recents`, `new`, `range:<days>` (0 for all time), `more` (load the next page), `search:<text>`, `searchmac:<text>`, `scope:mac|folder`, `create:folder|file`, `drop:<source>><folder>`, `storage[:<path>]`, `settings[:actions|openwith|cloud]` (shows the Settings window, optionally on that tab), `openrule:<types>><bundle id>` (adds an Open With rule for the run, e.g. `openrule:png,jpg>com.apple.Preview`), `actioneditor` (shows the action editor; `type:` scenes after it go to the command field), `editortext` (logs the command field), `runs` (logs every action run's state and output), `stop` (stops the newest running action), `menu:<name>` (logs a menu bar menu's items), `s3:[bucket/prefix/]` (browses the first S3 connection), `transfers` (logs uploads and downloads), `promise:<bucket/key>><folder>` (delivers an S3 item the way a drop on Finder asks for it, and logs what the drag carries), `back`, `reveal:<path>[,<path>…]` (sends the app the reveal event other apps' "Show in Finder" uses), `viewer:<bundle id>` (sets the file viewer and logs it back; pass the current one to change nothing) and `wait:<seconds>`.
+
+Scenes can also drive the app with real input:
+
+- `key:<combo>`: a key press such as `key:cmd+k`, `key:down` or `key:esc`.
+- `type:<text>`: types the text into whatever has focus.
+- `click:<row name>`, `dblclick:<row name>`, `cmdclick:<row name>`: clicks a row in the list. Rows inside a zip in the inspector are named `debug-rows/<path in the zip>`.
+- `chevron:<row name>`: clicks a folder's expand arrow.
+- `rclick:<row name>[:<submenu>]`: right-clicks a row and logs its context menu (or one submenu, such as `Open With`), then closes it.
+- `scroll[:<points>]`: scrolls the list one step per frame and reports frame times, hitches, and the longest wait at the bottom for the next page. Leave out the distance to scroll until the list stops growing; negative distances scroll up.
+
+The events go only to the app's own window (see `App/InputDriver.swift`), so they never touch your mouse or keyboard and need no permissions. Launch with `open -g` so the app never takes focus; running the binary directly can leave the app without a window. To run fully hidden and just read the log, add `-j` and `--env EXPLORER_NO_CAPTURE=1`. Don't double-click file rows in scenes: opening a file launches its app.
+
+**README screenshots** come from demo mode. `EXPLORER_DEMO=1` shows only the startup disk in the sidebar and puts the window on a Retina screen, so captures are sharp. `EXPLORER_DEMO_PINS` sets the pinned folders (paths separated by `;`), and demo pins are never saved over your own. Point the scenes at a demo folder rather than your own files. `EXPLORER_ACTIONS_FILE`, `EXPLORER_S3_FILE`, `EXPLORER_VISITS_FILE` and `EXPLORER_INDEX_FILE` give a run its own actions, S3 connections, recent folders and search index, so tests never touch yours. Demo mode also shows the command bar's dropdowns even though the app is in the background. `drop:` accepts `s3:bucket/key` for S3 items.
+
+## Measuring speed
+
+Scripted runs also watch the main thread. After each scene the log reports how long the scene took to show something, plus the worst main-thread stall during it. Anything over 250ms is also logged on its own line as `[hang]`:
+
+```
+[snapshot] recents timing: first content 0.08s, worst main-thread stall 49ms, stalls>100ms 0 · …
+```
+
+Debug builds aren't optimized, so build with `SWIFT_FLAGS="-Xswiftc -O" CONFIG=debug ./scripts/build-app.sh` to get numbers that match the release app. A folder with tens of thousands of files makes a good stress test.
+
+## App icon
+
+The icon is drawn in code. After changing `scripts/make-icon.swift`, regenerate it with:
+
+```sh
+swift scripts/make-icon.swift   # writes Resources/AppIcon.icns
+sips -s format png -z 256 256 Resources/AppIcon.icns --out docs/icon.png
+```
+
+## Testing S3 without AWS
+
+The S3 client's integration tests run against any S3-compatible server; they're skipped unless one is set:
+
+```sh
+python3 -m venv /tmp/motoenv && /tmp/motoenv/bin/pip install "moto[server]"
+/tmp/motoenv/bin/moto_server -p 5055 &
+EXPLORER_S3_TEST_ENDPOINT=http://127.0.0.1:5055 swift test --filter S3
+```
+
+## Contributing
+
+Issues and pull requests are welcome. Before opening a PR, run `make test`. For UI changes, check them with the scripted scenes, and refresh the screenshots in `docs/screenshots/` if the look changed.

@@ -316,6 +316,14 @@ struct Omnibox: View {
     @State private var clickMonitor: Any?
     @Environment(\.controlActiveState) private var controlActiveState
 
+    private var isKeyWindow: Bool {
+        #if DEBUG
+        // README screenshots are taken with the app in the background.
+        if DemoMode.isOn { return true }
+        #endif
+        return controlActiveState == .key
+    }
+
     private var isPathMode: Bool { query.hasPrefix("/") || query.hasPrefix("~") }
     private var showsField: Bool { editing || focused || !query.isEmpty }
     /// What the dropdown lists: path completions, or your recent folders before you type.
@@ -376,7 +384,7 @@ struct Omnibox: View {
         .onTapGesture { if !showsField { begin("") } }
         .overlay(alignment: .topLeading) {
             // Only in the window you're using: switching away leaves no dropdown behind.
-            if focused && !listed.isEmpty && controlActiveState == .key {
+            if focused && !listed.isEmpty && isKeyWindow {
                 SuggestionList(title: isPathMode ? nil : "Recent folders", suggestions: listed, highlighted: highlighted) { go(to: $0) }
                     .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { listFrame = $0 }
                     .offset(y: 34)
