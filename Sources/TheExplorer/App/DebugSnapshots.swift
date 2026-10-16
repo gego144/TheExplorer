@@ -217,6 +217,10 @@ enum DebugSnapshots {
                 let ends = argument.components(separatedBy: ">")
                 if let item = FileItem(url: URL(fileURLWithPath: ends[0])) { model.rename(item, to: ends[1]) }
             case "mkdir": model.create(.folder, named: argument)
+            case "openrule":
+                // openrule:png,jpg>com.apple.Preview adds a default-app rule (in memory for scripted runs).
+                let rule = argument.split(separator: ">", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+                OpenWithRules.shared.add(extensions: FileAction.parseExtensions(rule[0]), appID: rule.count > 1 ? rule[1] : "")
             case "indexbench":
                 // indexbench:q1,q2 logs the index's size and build time, then each query's time and best hits.
                 await FileIndex.shared.waitUntilReady()
@@ -253,6 +257,24 @@ enum DebugSnapshots {
                 } else {
                     log("menuprobe: no menu named \(fields[0])")
                 }
+            case "rclick":
+                // rclick:<row name>[:Submenu] right-clicks a row and logs its context menu (or that
+                // submenu, with what's inside it), then closes it.
+                let fields = argument.components(separatedBy: ":")
+                if let (url, frame) = RowGeometry.frame(named: fields[0]) {
+                    let depth = CGFloat(RowGeometry.depths[url] ?? 0)
+                    let observer = NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil) { note in
+                        guard let menu = note.object as? NSMenu else { return }
+                        let shown = fields.count > 1 ? menu.items.first { $0.title == fields[1] }?.submenu : menu
+                        MainActor.assumeIsolated { Self.logMenu(shown ?? menu, depth: 0) }
+                        RunLoop.main.perform(inModes: [.eventTracking, .common]) { menu.cancelTracking() }
+                    }
+                    await InputDriver.rightClick(at: CGPoint(x: frame.minX + 80 + depth * 16, y: frame.midY))
+                    try? await Task.sleep(for: .milliseconds(300))
+                    NotificationCenter.default.removeObserver(observer)
+                } else {
+                    log("\(scene): no row on screen with that name")
+                }
             case "menuitem":
                 // menuitem:Edit>Undo fires the first item in that menu whose title starts so.
                 let names = argument.components(separatedBy: ">")
@@ -265,7 +287,14 @@ enum DebugSnapshots {
                 if let run = ActionRunner.shared.runs.first(where: { $0.state == .running }) { ActionRunner.shared.cancel(run.id) }
             case "settings", "actionruns", "actioneditor", "connectioneditor", "transferlist":
                 // A window ordered in behind, so capture() picks it up. settings:actions opens that tab.
-                if parts[0] == "settings" { Prefs.shared.settingsTab = argument == "actions" ? .actions : (argument == "cloud" ? .cloud : .general) }
+                if parts[0] == "settings" {
+                    Prefs.shared.settingsTab = switch argument {
+                    case "actions": .actions
+                    case "cloud": .cloud
+                    case "openwith": .openWith
+                    default: .general
+                    }
+                }
                 let root: AnyView = switch parts[0] {
                 case "actionruns": AnyView(ActionRunsView(onClear: {}))
                 case "actioneditor": AnyView(ActionEditor(action: FileAction.templates[0]) {})
@@ -375,6 +404,16 @@ enum DebugSnapshots {
     private static func textViews(in view: NSView?) -> [NSTextView] {
         guard let view else { return [] }
         return (view as? NSTextView).map { [$0] } ?? view.subviews.flatMap(textViews)
+    }
+
+    private static func logMenu(_ menu: NSMenu, depth: Int) {
+        menu.delegate?.menuNeedsUpdate?(menu)
+        menu.update()
+        for item in menu.items {
+            let mark = item.state == .on ? "✓ " : ""
+            log(String(repeating: "  ", count: depth) + (item.isSeparatorItem ? "—" : "\(mark)\(item.title)\(item.image == nil ? "" : " [icon]")"))
+            if let submenu = item.submenu, depth < 2 { logMenu(submenu, depth: depth + 1) }
+        }
     }
 
     private static func log(_ message: String) {

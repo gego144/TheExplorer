@@ -112,6 +112,19 @@ enum InputDriver {
         }
     }
 
+    /// A right-click at a point in the window, for context menus.
+    static func rightClick(at point: CGPoint) async {
+        guard let window, let content = window.contentView else { return }
+        let location = NSPoint(x: point.x, y: content.bounds.height - point.y)
+        for type in [NSEvent.EventType.rightMouseDown, .rightMouseUp] {
+            guard let event = NSEvent.mouseEvent(
+                with: type, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil, eventNumber: nextEventNumber(), clickCount: 1, pressure: 1
+            ) else { continue }
+            NSApp.sendEvent(event)
+        }
+    }
+
     /// Moves the pointer over a point (hover) and then presses, drags and releases there, all
     /// as events to the app's own window. Nothing moves the real cursor.
     static func pressAndDrag(at point: CGPoint) async {

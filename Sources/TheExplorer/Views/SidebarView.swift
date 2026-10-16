@@ -229,7 +229,8 @@ private struct PinnedRow: View {
                 Button("Open in New Tab") { openTab(favorite.url) }
                 Button(FileActions.openInTerminalTitle) { FileActions.openInTerminal(favorite.url) }
             } else {
-                Button("Open") { NSWorkspace.shared.open(favorite.url) }
+                Button("Open") { FileOpener.open([favorite.url]) }
+                OpenWithMenu(urls: [favorite.url])
             }
             Button("Show in Enclosing Folder") { model.reveal(favorite.url) }
             Button("Copy Path") { FileActions.copyPaths([favorite.url]) }

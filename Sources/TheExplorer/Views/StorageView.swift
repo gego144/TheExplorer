@@ -247,7 +247,7 @@ private struct BreakdownView: View {
                                 .onTapGesture { storage.selection = node.id }
                                 .simultaneousGesture(TapGesture(count: 2).onEnded {
                                     if node.isFolder { storage.drill(into: node) }
-                                    else if node.kind == .file { NSWorkspace.shared.open(node.url) }
+                                    else if node.kind == .file { FileOpener.open([node.url]) }
                                 })
                                 .contextMenu { StorageContextMenu(node: node, model: model, storage: storage) }
                         }
@@ -323,7 +323,8 @@ private struct StorageContextMenu: View {
                 Button("Open in Browser") { model.navigate(to: node.url) }
                 Button("Open in New Tab") { openTab(node.url) }
             } else {
-                Button("Open") { NSWorkspace.shared.open(node.url) }
+                Button("Open") { FileOpener.open([node.url]) }
+                OpenWithMenu(urls: [node.url])
                 Button("Show in Enclosing Folder") { model.reveal(node.url) }
             }
             Button("Quick Look") { model.quickLook([node.url]) }
@@ -355,7 +356,7 @@ private struct LargestFilesView: View {
             selection: $selection,
             showLocation: true,
             empty: EmptyState(symbol: "doc", title: "No files found"),
-            onOpen: { urls, _ in urls.forEach { NSWorkspace.shared.open($0) } },
+            onOpen: { urls, _ in FileOpener.open(Array(urls)) },
             onQuickLook: { model.quickLook($0, in: $1) },
             rowMenu: { FileContextMenu(urls: $0, model: model) },
             backgroundMenu: { EmptyView() }

@@ -91,7 +91,7 @@ struct S3View: View {
             if newTab || targets.count > 1 { openTab(row.id) } else { model.navigate(to: row.id) }
         }
         for row in targets where !row.item.isFolder {
-            S3Transfers.shared.fetchForViewing(row.id) { NSWorkspace.shared.open($0) }
+            S3Transfers.shared.fetchForViewing(row.id) { FileOpener.open([$0]) }
         }
     }
 }
@@ -109,7 +109,7 @@ private struct S3RowMenu: View {
         let isFile = single.map { !$0.absoluteString.hasSuffix("/") } ?? false
         if let single {
             Button("Open") {
-                if isFile { S3Transfers.shared.fetchForViewing(single) { NSWorkspace.shared.open($0) } } else { model.navigate(to: single) }
+                if isFile { S3Transfers.shared.fetchForViewing(single) { FileOpener.open([$0]) } } else { model.navigate(to: single) }
             }
             if !isFile { Button("Open in New Tab") { openTab(single) } }
             if isFile { Button("Quick Look") { model.quickLook([single]) } }

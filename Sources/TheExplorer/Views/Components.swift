@@ -12,6 +12,9 @@ struct FileContextMenu: View {
         if !urls.isEmpty {
             let single = urls.count == 1 ? urls.first : nil
             Button("Open") { open() }
+            if urls.allSatisfy(\.isFileURL) {
+                OpenWithMenu(urls: urls)
+            }
             let folders = urls.filter { FileItem(url: $0)?.isFolder == true }
             if !folders.isEmpty {
                 Button(folders.count == 1 ? "Open in New Tab" : "Open \(folders.count) Folders in New Tabs") {
@@ -63,14 +66,10 @@ struct FileContextMenu: View {
     }
 
     private func open() {
-        for url in urls {
-            if let item = FileItem(url: url) {
-                if item.isFolder && urls.count == 1 {
-                    model.navigate(to: url)
-                } else {
-                    NSWorkspace.shared.open(url)
-                }
-            }
+        if urls.count == 1, let url = urls.first, FileItem(url: url)?.isFolder == true {
+            model.navigate(to: url)
+        } else {
+            FileOpener.open(urls.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending })
         }
     }
 }

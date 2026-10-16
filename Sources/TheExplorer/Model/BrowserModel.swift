@@ -541,7 +541,7 @@ final class BrowserModel: Identifiable {
         if item.isFolder {
             navigate(to: item.url)
         } else {
-            NSWorkspace.shared.open(item.url)
+            FileOpener.open([item.url])
             FolderVisits.shared.record(item.url.deletingLastPathComponent())
         }
     }
@@ -551,7 +551,7 @@ final class BrowserModel: Identifiable {
         if targets.count == 1, let only = targets.first {
             open(only)
         } else {
-            targets.forEach { NSWorkspace.shared.open($0.url) }
+            FileOpener.open(targets.map(\.url))
         }
     }
 

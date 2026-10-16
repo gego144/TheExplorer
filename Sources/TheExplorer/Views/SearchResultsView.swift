@@ -85,7 +85,7 @@ struct SearchResultsView: View {
         } else if items.count == 1, let item = items.first {
             model.open(item)
         } else {
-            items.forEach { NSWorkspace.shared.open($0.url) }
+            FileOpener.open(items.map(\.url))
         }
     }
 
