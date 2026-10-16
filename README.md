@@ -92,7 +92,7 @@ ffmpeg -nostdin -hide_banner -y -i "$FILE" -codec copy -start_number 0 \
   -hls_time 10 -hls_list_size 0 -f hls "$NAME-hls/$NAME.m3u8"
 ```
 
-Commands run in zsh with your login profile, so Homebrew tools like `ffmpeg` are found, and they run in the item's folder, so new files appear right next to it. They get `$FILE`, `$FILENAME`, `$NAME`, `$EXT` and `$DIR`, or every selected path as `"$@"` for actions that run once with all items. A status-bar indicator shows progress; click it for each run's output, or to stop one. Stopping ends everything the command started. Templates for HLS, Zip and Copy SHA-256 get you started.
+Commands run in zsh with your login profile, so Homebrew tools like `ffmpeg` are found, and they run in the item's folder, so new files appear right next to it. They get `$FILE`, `$FILENAME`, `$NAME`, `$EXT` and `$DIR`, or every selected path as `"$@"` for actions that run once with all items. A status-bar indicator shows progress; click it for each run's output, or to stop one. Stopping ends everything the command started. Templates for HLS, WebP (80% quality, with cwebp), Zip and Copy SHA-256 get you started.
 
 <p align="center"><img src="docs/screenshots/actions.png" alt="The Actions tab in Settings" width="520"></p>
 

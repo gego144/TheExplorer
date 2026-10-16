@@ -65,6 +65,11 @@ struct FileAction: Codable, Identifiable, Hashable {
             """,
             extensions: ["mp4", "mov", "m4v"]
         ),
+        FileAction(
+            name: "Convert to WebP (80%)",
+            command: #"cwebp -quiet -q 80 "$FILE" -o "$NAME.webp""#,
+            extensions: ["png", "jpg", "jpeg", "tif", "tiff"]
+        ),
         FileAction(name: "Zip", command: #"zip -qry "$NAME.zip" "$FILENAME""#, target: .filesAndFolders),
         FileAction(name: "Copy SHA-256", command: #"shasum -a 256 "$@" | tee /dev/stderr | pbcopy"#, mode: .allItems),
     ]
