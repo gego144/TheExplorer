@@ -55,6 +55,8 @@ struct FolderBackgroundMenu: View {
         Button("New Folder…") { model.creating = .folder }
         Button("New File…") { model.creating = .file }
         Divider()
+        PasteItems(model: model)
+        Divider()
         Button(FileActions.openInTerminalTitle) { FileActions.openInTerminal(folder) }
         Button("Copy Path") { FileActions.copyPaths([folder]) }
         Button(FileActions.revealTitle) { FileActions.revealInFinder([folder]) }

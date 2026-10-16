@@ -252,7 +252,9 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
 
     private func rowView(_ row: ListRow, maxSize: Int64) -> some View {
         let isSelected = selection.contains(row.id)
+        let cut = FileClipboard.shared.cutItems
         return RowContent(row: row, isSelected: isSelected, listFocused: focused, isDropTarget: dropTarget == row.id,
+                          isCut: !cut.isEmpty && cut.contains(row.id.standardizedFileURL),
                           maxSize: maxSize, showLocation: showLocation,
                           onToggle: row.expansion != nil ? onToggleExpand.map { toggle in { toggle(row.id) } } : nil)
             .equatable()
@@ -355,6 +357,8 @@ private struct RowContent: View, Equatable {
     let isSelected: Bool
     let listFocused: Bool
     let isDropTarget: Bool
+    /// Cut with ⌘X and waiting to be pasted: shown faded.
+    let isCut: Bool
     let maxSize: Int64
     let showLocation: Bool
     /// Expands or collapses this folder. Not part of equality.
@@ -366,6 +370,7 @@ private struct RowContent: View, Equatable {
 
     static func == (lhs: RowContent, rhs: RowContent) -> Bool {
         lhs.isSelected == rhs.isSelected && lhs.listFocused == rhs.listFocused && lhs.isDropTarget == rhs.isDropTarget
+            && lhs.isCut == rhs.isCut
             && lhs.maxSize == rhs.maxSize && lhs.showLocation == rhs.showLocation
             && lhs.row.item == rhs.row.item && lhs.row.size == rhs.row.size && lhs.row.date == rhs.row.date
             && lhs.row.location == rhs.row.location && lhs.row.liveFolderSize == rhs.row.liveFolderSize
@@ -413,6 +418,7 @@ private struct RowContent: View, Equatable {
                 .frame(width: Column.date, alignment: .trailing)
                 .help(Format.date(row.date))
         }
+        .opacity(isCut ? 0.4 : 1)
         .padding(.horizontal, Column.inset)
         .frame(height: 28)
         .background(background, in: .rect(cornerRadius: 6))

@@ -15,14 +15,15 @@ enum FileTransfer {
         var undo: [FileHistory.Step] = []
     }
 
-    /// Drops that make sense: not onto itself, not into its own subfolder, not already there.
-    static func validSources(_ urls: [URL], into folder: URL) -> [URL] {
+    /// Transfers that make sense: not onto itself, not into its own subfolder, and not into
+    /// the folder it's already in (unless `duplicating`, where that makes a copy beside it).
+    static func validSources(_ urls: [URL], into folder: URL, duplicating: Bool = false) -> [URL] {
         let destination = folder.standardizedFileURL.path
         return urls.map(\.standardizedFileURL).filter { source in
             let path = source.path
             return path != destination
                 && !destination.hasPrefix(path + "/")
-                && source.deletingLastPathComponent().path != destination
+                && (duplicating || source.deletingLastPathComponent().path != destination)
         }
     }
 
@@ -31,13 +32,14 @@ enum FileTransfer {
         return volumeID(source) == volumeID(folder) ? .move : .copy
     }
 
-    static func perform(_ sources: [URL], into folder: URL, optionHeld: Bool) -> Outcome {
+    /// `forced` overrides the drop rules (paste decides copy or move itself).
+    static func perform(_ sources: [URL], into folder: URL, optionHeld: Bool, forced: Mode? = nil) -> Outcome {
         var outcome = Outcome()
         let fm = FileManager.default
         for source in sources {
             let destination = uniqueDestination(for: source.lastPathComponent, in: folder)
             do {
-                switch mode(for: source, into: folder, optionHeld: optionHeld) {
+                switch forced ?? mode(for: source, into: folder, optionHeld: optionHeld) {
                 case .move:
                     try fm.moveItem(at: source, to: destination)
                     outcome.undo.append(.move(destination, to: source))

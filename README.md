@@ -54,7 +54,14 @@ Search works like a launcher's rather than Spotlight's. TheExplorer keeps its ow
 
 ### Previews and zip archives
 
-Selecting a document, image, PDF, video, audio or code file shows a live preview in the inspector. Space opens Quick Look, and ↑/↓ then step through every file in the list. Selecting a zip lists what's inside as a tree with sizes, without unpacking it: only the archive's table of contents is read, so even huge zips list instantly. Double-click a file inside to preview it, or drag files and folders out to unpack just those.
+Selecting a document, image, PDF, video, audio or code file shows a live preview in the inspector, along with what's inside it:
+- **Images:** dimensions, aspect ratio, color profile, and frame count and length for animations. Camera, lens and exposure appear for photos.
+- **SVGs:** size and viewBox.
+- **Video:** resolution, length, codec (H.264, HEVC, ProRes, AV1…), frame rate, HDR and bitrates.
+- **Audio:** length, codec, sample rate and channels.
+- **HLS playlists:** length and segments, or the variants.
+- **Everything else:** page count and paper size for PDFs, family and styles for fonts, and line count for text and code.
+ Space opens Quick Look, and ↑/↓ then step through every file in the list. Selecting a zip lists what's inside as a tree with sizes, without unpacking it: only the archive's table of contents is read, so even huge zips list instantly. Double-click a file inside to preview it, or drag files and folders out to unpack just those.
 
 <table>
   <tr>
@@ -121,6 +128,8 @@ Commands run in zsh with your login profile, so Homebrew tools like `ffmpeg` are
 
 - **Tabs.** Browser-style tabs, each with its own folder, history and search. Drop files on a tab to move them there. Tabs come back where you left them after you quit.
 - **Pinned.** Pin files or folders to the sidebar with ⌘D or by dropping them on the "Pinned" heading. Dropping onto a pinned folder moves items into it.
+- **Cut, copy and paste.** ⌘X, ⌘C and ⌘V for files, including with Finder in either direction. Cut items fade until you paste them, ⌥⌘V moves whatever was copied, and Duplicate is in the right-click menu. Pasting into an S3 folder uploads.
+- **Undo.** ⌘Z undoes the last move, copy, paste, rename, new item or Move to Trash, from any tab or window.
 - **Drag and drop.** Between tabs, windows and Finder. Like Finder, it moves within a disk and copies across disks; hold ⌥ to copy. Name clashes keep both items and never overwrite.
 - **Right-click anywhere.** New folder or file, open in Terminal, copy path, pin, rename, Quick Look and more.
 - **Keyboard first.** Back/forward history, ⌘↑ for the enclosing folder, arrow keys and type-to-select in every list.
@@ -164,6 +173,9 @@ For the storage scan to include protected folders like Mail and Messages, grant 
 | Home / Desktop / Documents / Downloads / Applications | ⇧⌘H / ⇧⌘D / ⇧⌘O / ⌥⌘L / ⇧⌘A |
 | Pin or unpin in the sidebar | ⌘D |
 | Show in enclosing folder / Reveal in Finder | ⌘R / ⌥⌘R |
+| Cut / copy / paste files | ⌘X / ⌘C / ⌘V |
+| Paste and move here | ⌥⌘V |
+| Select all | ⌘A |
 | Copy path | ⌥⌘C |
 | New folder / New file / Rename | ⇧⌘N / ⌥⌘N / ⇧⌘↩ |
 | Open current folder in Terminal | ⌃⌘T |

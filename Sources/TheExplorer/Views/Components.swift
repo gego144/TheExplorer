@@ -29,6 +29,16 @@ struct FileContextMenu: View {
             Button("Quick Look") { model.quickLook(urls) }
             ActionsMenu(urls: urls)
             Divider()
+            let sorted = urls.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+            if urls.allSatisfy(\.isFileURL) {
+                Button("Cut") { FileClipboard.shared.cut(sorted) }
+            }
+            Button("Copy") { FileClipboard.shared.copy(sorted) }
+            if urls.allSatisfy(\.isFileURL) {
+                Button("Duplicate") { model.duplicate(urls) }
+            }
+            PasteItems(model: model, folder: single.flatMap { FileItem(url: $0)?.isFolder == true ? $0 : nil })
+            Divider()
             if let single {
                 Button(favorites.contains(single) ? "Unpin" : "Pin to Sidebar") {
                     favorites.toggle(single)
@@ -61,6 +71,26 @@ struct FileContextMenu: View {
                     NSWorkspace.shared.open(url)
                 }
             }
+        }
+    }
+}
+
+/// Paste into the folder being shown, and into a right-clicked folder.
+struct PasteItems: View {
+    let model: BrowserModel
+    /// A folder that was right-clicked, offered as somewhere to paste too.
+    var folder: URL?
+
+    var body: some View {
+        let count = FileClipboard.shared.urls.count
+        let noun = count > 1 ? " \(count) Items" : ""
+        if model.pasteTarget != nil {
+            Button("Paste\(noun)") { model.paste() }
+                .disabled(count == 0)
+        }
+        if let folder {
+            Button("Paste\(noun) into “\(folder.lastPathComponent)”") { model.paste(into: folder) }
+                .disabled(count == 0)
         }
     }
 }

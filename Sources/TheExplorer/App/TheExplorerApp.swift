@@ -181,6 +181,10 @@ struct ExplorerCommands: Commands {
             HistoryCommands(workspace: workspace)
         }
 
+        CommandGroup(replacing: .pasteboard) {
+            ClipboardCommands(workspace: workspace)
+        }
+
         CommandGroup(after: .pasteboard) {
             Divider()
             Button("Copy Path") { model.map { FileActions.copyPaths(pathTargets($0)) } }
@@ -365,6 +369,60 @@ private struct HistoryCommands: View {
             }
             model?.historyApplied(outcome, undo: undo)
         }
+    }
+}
+
+/// Cut, Copy, Paste and Select All: for files in the list, or for text while you're typing.
+private struct ClipboardCommands: View {
+    let workspace: Workspace?
+
+    var body: some View {
+        Button("Cut") { perform("cut:") { model in
+            let urls = sorted(model.activeSelection)
+            guard !urls.isEmpty else { return false }
+            FileClipboard.shared.cut(urls)
+            return true
+        } }
+        .keyboardShortcut("x")
+        Button("Copy") { perform("copy:") { model in
+            let urls = sorted(model.activeSelection)
+            guard !urls.isEmpty else { return false }
+            FileClipboard.shared.copy(urls)
+            return true
+        } }
+        .keyboardShortcut("c")
+        Button("Paste") { perform("paste:") { $0.paste() } }
+            .keyboardShortcut("v")
+        Button("Paste and Move Here") { perform(nil) { $0.paste(move: true) } }
+            .keyboardShortcut("v", modifiers: [.command, .option])
+        Button("Duplicate") { perform(nil) { model in
+            let urls = model.activeSelection.filter(\.isFileURL)
+            guard !urls.isEmpty else { return false }
+            model.duplicate(urls)
+            return true
+        } }
+        Button("Select All") { perform("selectAll:") { model in
+            model.selectAll()
+            return true
+        } }
+        .keyboardShortcut("a")
+    }
+
+    /// Text editing gets `textAction`; otherwise `fileAction` runs on the tab showing now
+    /// (menu bar items aren't rebuilt when it changes), with a beep if it couldn't.
+    private func perform(_ textAction: String?, _ fileAction: (BrowserModel) -> Bool) {
+        if NSApp.keyWindow?.firstResponder is NSTextView {
+            if let textAction { NSApp.sendAction(Selector(textAction), to: nil, from: nil) }
+            return
+        }
+        guard let model = (workspace ?? Session.scriptedWorkspace)?.selected, fileAction(model) else {
+            NSSound.beep()
+            return
+        }
+    }
+
+    private func sorted(_ urls: Set<URL>) -> [URL] {
+        urls.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
     }
 }
 

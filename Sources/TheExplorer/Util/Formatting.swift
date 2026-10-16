@@ -50,6 +50,25 @@ enum Format {
         (path as NSString).abbreviatingWithTildeInPath
     }
 
+    /// "0:42", "3:07", "1:02:05"; `precise` keeps tenths under a minute ("0:04.3").
+    static func duration(_ seconds: Double, precise: Bool = false) -> String {
+        guard seconds.isFinite, seconds >= 0 else { return "—" }
+        if precise && seconds < 60 && seconds.rounded() != seconds {
+            return String(format: "0:%04.1f", seconds)
+        }
+        let total = Int(seconds.rounded())
+        let hours = total / 3600
+        let minutes = total / 60 % 60
+        let secs = total % 60
+        return hours > 0 ? String(format: "%d:%02d:%02d", hours, minutes, secs) : String(format: "%d:%02d", minutes, secs)
+    }
+
+    /// "8.2 Mbps", "320 kbps".
+    static func bitrate(_ bitsPerSecond: Double) -> String {
+        if bitsPerSecond >= 1_000_000 { return String(format: "%.1f Mbps", bitsPerSecond / 1_000_000) }
+        return "\(Int((bitsPerSecond / 1000).rounded())) kbps"
+    }
+
     static func percent(_ part: Int64, of whole: Int64) -> String {
         guard whole > 0 else { return "" }
         let value = Double(part) / Double(whole)

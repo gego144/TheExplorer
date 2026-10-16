@@ -664,6 +664,14 @@ final class BrowserModel: Identifiable {
         #if DEBUG
         FileHandle.standardError.write(Data("[snapshot] receiveDrop \(urls.map(\.path)) into \(folder.path)\n".utf8))
         #endif
+        return transfer(urls, into: folder)
+    }
+
+    /// Moves or copies items into `folder`: by the drop rules (move on the same disk, copy
+    /// across disks or with ⌥), or as `mode` says. Uploads into S3 folders and downloads S3
+    /// items. Returns false when there's nothing that can go there.
+    @discardableResult
+    func transfer(_ urls: [URL], into folder: URL, mode: FileTransfer.Mode? = nil, done: (() -> Void)? = nil) -> Bool {
         // Dropping onto an S3 folder (or anything showing one) uploads.
         if let target = S3Location(url: folder) {
             let files = urls.filter(\.isFileURL)
@@ -681,18 +689,19 @@ final class BrowserModel: Identifiable {
             }
             if fromS3.count == urls.count { return true }
         }
-        let sources = FileTransfer.validSources(urls.filter(\.isFileURL), into: folder)
+        let sources = FileTransfer.validSources(urls.filter(\.isFileURL), into: folder, duplicating: mode == .copy)
         guard !sources.isEmpty else { return false }
-        let optionHeld = NSEvent.modifierFlags.contains(.option)
-        let copying = sources.contains { FileTransfer.mode(for: $0, into: folder, optionHeld: optionHeld) == .copy }
+        let optionHeld = mode == nil && NSEvent.modifierFlags.contains(.option)
+        let copying = sources.contains { (mode ?? FileTransfer.mode(for: $0, into: folder, optionHeld: optionHeld)) == .copy }
         let noun = sources.count == 1 ? "“\(sources[0].lastPathComponent)”" : "\(sources.count) items"
         transferStatus = "\(copying ? "Copying" : "Moving") \(noun) to “\(folder.lastPathComponent)”…"
 
         Task {
             let outcome = await Task.detached(priority: .userInitiated) {
-                FileTransfer.perform(sources, into: folder, optionHeld: optionHeld)
+                FileTransfer.perform(sources, into: folder, optionHeld: optionHeld, forced: mode)
             }.value
             transferStatus = nil
+            done?()
             FileHistory.shared.record("\(copying ? "Copy" : "Move") of \(FileHistory.describe(outcome.placed))", undo: outcome.undo)
             if !outcome.failures.isEmpty {
                 loadError = "Some items couldn't be \(copying ? "copied" : "moved"): " + outcome.failures.joined(separator: "; ")
@@ -711,6 +720,54 @@ final class BrowserModel: Identifiable {
     }
 
     var canCreateItems: Bool { destination == .folder && !isSearching }
+
+    // MARK: - Clipboard
+
+    /// Where ⌘V puts things: the folder being shown, or the S3 folder.
+    var pasteTarget: URL? {
+        guard !isSearching else { return nil }
+        switch destination {
+        case .folder: return currentURL
+        case .s3: return s3.location.flatMap { $0.bucket == nil ? nil : $0.url }
+        default: return nil
+        }
+    }
+
+    /// Pastes the pasteboard's files here (or into `folder`): moved if they were cut (or
+    /// `move`), else copied. Returns false when there's nothing to paste or nowhere to put it.
+    @discardableResult
+    func paste(move: Bool = false, into folder: URL? = nil, from clipboard: FileClipboard? = nil) -> Bool {
+        let clipboard = clipboard ?? .shared
+        let urls = clipboard.urls
+        guard !urls.isEmpty, let folder = folder ?? pasteTarget else { return false }
+        let moving = (move || clipboard.isCut(urls)) && folder.isFileURL
+        return transfer(urls, into: folder, mode: moving ? .move : .copy) {
+            if moving { clipboard.finishCut() }
+        }
+    }
+
+    /// Copies items beside themselves ("Report 2.pdf").
+    func duplicate(_ urls: Set<URL>) {
+        let byFolder = Dictionary(grouping: urls.filter(\.isFileURL)) { $0.deletingLastPathComponent() }
+        for (folder, items) in byFolder {
+            transfer(items, into: folder, mode: .copy)
+        }
+    }
+
+    /// Selects everything listed in the view that's showing.
+    func selectAll() {
+        if isSearching {
+            search.selection = Set(search.visibleHits.map(\.id))
+            return
+        }
+        switch destination {
+        case .folder: selection = Set(rows.map(\.id))
+        case .recents: recents.selection = Set(recents.rows.map(\.id))
+        case .newFiles: newFiles.selection = Set(newFiles.rows.map(\.id))
+        case .s3: s3.selection = Set(s3.rows.map(\.id))
+        case .storage: break
+        }
+    }
 
     /// Briefly says what ⌘Z or ⇧⌘Z just did, since it often happens in a folder out of view.
     private(set) var historyStatus: String?

@@ -77,6 +77,8 @@ private struct ItemDetails: View {
     let item: FileItem
     let model: BrowserModel
     let isCurrentFolder: Bool
+    /// Dimensions, duration, codecs… read from the file once it's selected.
+    @State private var media: MediaInfo?
 
     private var sizes: FolderSizeStore { .shared }
     private var favorites: FavoritesStore { .shared }
@@ -103,6 +105,13 @@ private struct ItemDetails: View {
                             .font(.system(size: 11))
                             .foregroundStyle(Theme.textTertiary)
                             .lineLimit(1)
+                    }
+                    if let summary = media?.summary {
+                        Text(summary)
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(Theme.accent)
+                            .lineLimit(1)
+                            .textSelection(.enabled)
                     }
                 }
             }
@@ -131,6 +140,13 @@ private struct ItemDetails: View {
             if preview == .archive {
                 Rectangle().fill(Theme.border).frame(height: 1)
                 FilePreview(item: item, model: model)
+            }
+
+            if let media, !media.rows.isEmpty {
+                Rectangle().fill(Theme.border).frame(height: 1)
+                VStack(spacing: 6) {
+                    ForEach(media.rows, id: \.self) { DetailRow(label: $0.label, value: $0.value) }
+                }
             }
 
             Rectangle().fill(Theme.border).frame(height: 1)
@@ -162,6 +178,10 @@ private struct ItemDetails: View {
         }
         .onAppear {
             if item.isFolder { sizes.request([item.path]) }
+        }
+        .task(id: item.url) {
+            guard !item.isFolder || item.isPackage else { return }
+            media = await MediaInfoReader.read(item.url, type: item.contentType, modified: item.modified)
         }
     }
 

@@ -128,6 +128,12 @@ private struct S3RowMenu: View {
             }
             Divider()
         }
+        if !isBucketList {
+            // Pasted into a local folder, these download.
+            Button("Copy") { FileClipboard.shared.copy(urls.sorted { $0.absoluteString < $1.absoluteString }) }
+            PasteItems(model: model, folder: isFile ? nil : single)
+            Divider()
+        }
         Button(urls.count == 1 ? "Copy S3 URI" : "Copy S3 URIs") {
             let uris = targets.map(\.uri).sorted().joined(separator: "\n")
             NSPasteboard.general.clearContents()
@@ -151,6 +157,9 @@ private struct S3BackgroundMenu: View {
         if let location = model.s3.location, location.bucket != nil {
             Button("New Folder…") { naming = true }
             Button("Upload Files…") { upload(to: location) }
+            let files = FileClipboard.shared.urls.filter(\.isFileURL)
+            Button(files.count > 1 ? "Paste \(files.count) Items (Upload)" : "Paste (Upload)") { model.paste() }
+                .disabled(files.isEmpty)
             Divider()
             Button("Copy S3 URI") {
                 NSPasteboard.general.clearContents()
