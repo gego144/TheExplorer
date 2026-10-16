@@ -34,6 +34,7 @@ enum DemoMode {
 enum DebugSnapshots {
     private static var hasRun = false
     private static var settingsWindow: NSWindow?
+    private static var eventLogMonitor: Any?
 
     static func runIfRequested(workspace: Workspace) async {
         let env = ProcessInfo.processInfo.environment
@@ -54,7 +55,12 @@ enum DebugSnapshots {
             var wait = 2.5
             switch parts[0] {
             case "folder": model.navigate(to: URL(fileURLWithPath: argument))
-            case "select": model.selection = Set(argument.split(separator: ",").map { URL(fileURLWithPath: String($0)).standardizedFileURL })
+            case "select":
+                // The listed rows themselves (listings say /private/tmp where you'd type /tmp),
+                // falling back to the paths as given.
+                let wanted = Set(argument.split(separator: ",").map { URL(fileURLWithPath: String($0)).standardizedFileURL.path })
+                let rows = model.rows.filter { wanted.contains($0.id.standardizedFileURL.path) }.map(\.id)
+                model.selection = rows.isEmpty ? Set(wanted.map { URL(fileURLWithPath: $0) }) : Set(rows)
             case "recents": model.show(.recents)
             case "new": model.show(.newFiles)
             case "expand": model.toggleExpanded(URL(fileURLWithPath: argument, isDirectory: true).standardizedFileURL)
@@ -87,6 +93,52 @@ enum DebugSnapshots {
                 // The raw argument: tilde expansion would drop the trailing "/" that marks a folder.
                 if let url = S3Location(url: Self.debugURL("s3:" + (parts.count > 1 ? parts[1] : ""))) { model.showS3(url) }
             case "back": model.goBack()
+            case "eventlog":
+                // Logs mouse events the app receives (for real-mouse tests).
+                eventLogMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]) { event in
+                    if event.type != .leftMouseDragged || Int.random(in: 0..<8) == 0 {
+                        log("event \(event.type.rawValue) at \(event.locationInWindow) window=\(event.window?.title ?? "nil")")
+                    }
+                    return event
+                }
+            case "place":
+                // place:x,y puts the window's top-left there, in screen coordinates (top-left origin).
+                let xy = argument.split(separator: ",").compactMap { Double($0) }
+                if xy.count == 2, let window = InputDriver.window, let primary = NSScreen.screens.first {
+                    window.setFrameTopLeftPoint(NSPoint(x: xy[0], y: primary.frame.height - xy[1]))
+                }
+            case "activate":
+                // For tests with the real mouse (only when you've agreed to them): bring the window forward.
+                NSApp.activate()
+                InputDriver.window?.makeKeyAndOrderFront(nil)
+            case "watchframes":
+                // Logs every visible row's center in screen coordinates (top-left origin, as
+                // CGEvent uses) twice a second, for an outside tool driving the real mouse.
+                let until = Date().addingTimeInterval(Double(argument) ?? 30)
+                while Date() < until {
+                    if let window = InputDriver.window, let primary = NSScreen.screens.first {
+                        let rows = RowGeometry.frames.map { url, frame -> String in
+                            let x = window.frame.minX + frame.midX
+                            let y = primary.frame.height - (window.frame.maxY - frame.midY)
+                            return "\(url.lastPathComponent)=\(Int(x)),\(Int(y))"
+                        }
+                        log("frames " + rows.sorted().joined(separator: ";") + " selected=" + workspace.selected.selection.map(\.lastPathComponent).sorted().joined(separator: ","))
+                    }
+                    try? await Task.sleep(for: .milliseconds(500))
+                }
+            case "droptypes":
+                // Views in the window that accept drags, and which view a point hits.
+                func visit(_ view: NSView, depth: Int) {
+                    if !view.registeredDraggedTypes.isEmpty {
+                        log("droptypes \(String(repeating: " ", count: depth))\(view.className) frame=\(view.frame) types=\(view.registeredDraggedTypes.count)")
+                    }
+                    view.subviews.forEach { visit($0, depth: depth + 1) }
+                }
+                if let content = InputDriver.window?.contentView {
+                    visit(content, depth: 0)
+                    let hit = content.hitTest(NSPoint(x: 500, y: content.bounds.height - 200))
+                    log("droptypes hit at (500,200): \(hit.map { $0.className } ?? "nil")")
+                }
             case "transfers":
                 for transfer in S3Transfers.shared.transfers {
                     log("transfer \(transfer.kind) \(transfer.title): \(transfer.state) \(transfer.doneItems)/\(transfer.totalItems) items \(transfer.doneBytes)/\(transfer.totalBytes) bytes")
@@ -184,6 +236,14 @@ enum DebugSnapshots {
                 log("editor text: \(text.debugDescription)")
             case "key": InputDriver.press(parts[1])
             case "type": await InputDriver.type(parts.count > 1 ? parts[1] : "")
+            case "drag":
+                // drag:<row name> presses on a row and drags a little (multi-item drags only log).
+                if let (url, frame) = RowGeometry.frame(named: parts.count > 1 ? parts[1] : "") {
+                    let depth = CGFloat(RowGeometry.depths[url] ?? 0)
+                    await InputDriver.pressAndDrag(at: CGPoint(x: frame.minX + 80 + depth * 16, y: frame.midY))
+                } else {
+                    log("\(scene): no row on screen with that name")
+                }
             case "click", "dblclick", "cmdclick", "chevron":
                 // click:<row name>; chevron clicks the folder arrow instead of the name.
                 if let (url, frame) = RowGeometry.frame(named: parts.count > 1 ? parts[1] : "") {

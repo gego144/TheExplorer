@@ -87,6 +87,13 @@ enum InputDriver {
 
     // MARK: Mouse
 
+    /// Real mouse events are numbered in sequence; SwiftUI's gestures can tell when they aren't.
+    private static var eventNumber = 1000
+    private static func nextEventNumber() -> Int {
+        eventNumber += 1
+        return eventNumber
+    }
+
     /// Clicks at a point in SwiftUI's window coordinates (top-left origin).
     static func click(at point: CGPoint, count: Int = 1, flags: NSEvent.ModifierFlags = []) async {
         guard let window, let content = window.contentView else { return }
@@ -95,13 +102,29 @@ enum InputDriver {
             for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
                 guard let event = NSEvent.mouseEvent(
                     with: type, location: location, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
-                    windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: click, pressure: 1
+                    windowNumber: window.windowNumber, context: nil, eventNumber: nextEventNumber(), clickCount: click, pressure: 1
                 ) else { continue }
                 // Through the app, as a real click is, so NSApp.currentEvent is set (SwiftUI's
                 // double-click recognition depends on it). This never activates the app.
                 NSApp.sendEvent(event)
             }
             try? await Task.sleep(for: .milliseconds(count > 1 ? 60 : 10))
+        }
+    }
+
+    /// Moves the pointer over a point (hover) and then presses, drags and releases there, all
+    /// as events to the app's own window. Nothing moves the real cursor.
+    static func pressAndDrag(at point: CGPoint) async {
+        guard let window, let content = window.contentView else { return }
+        let location = NSPoint(x: point.x, y: content.bounds.height - point.y)
+        for (type, offset) in [(NSEvent.EventType.mouseMoved, 0.0), (.leftMouseDown, 0), (.leftMouseDragged, 6), (.leftMouseDragged, 14), (.leftMouseUp, 14)] {
+            guard let event = NSEvent.mouseEvent(
+                with: type, location: NSPoint(x: location.x + offset, y: location.y - offset), modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                eventNumber: nextEventNumber(), clickCount: type == .mouseMoved ? 0 : 1, pressure: 1
+            ) else { continue }
+            NSApp.sendEvent(event)
+            try? await Task.sleep(for: .milliseconds(type == .mouseMoved ? 150 : 30))
         }
     }
 

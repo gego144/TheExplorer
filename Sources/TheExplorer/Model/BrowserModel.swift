@@ -653,6 +653,9 @@ final class BrowserModel: Identifiable {
     /// Returns false when nothing could be dropped there, so the drop is rejected.
     @discardableResult
     func receiveDrop(_ urls: [URL], into folder: URL) -> Bool {
+        #if DEBUG
+        FileHandle.standardError.write(Data("[snapshot] receiveDrop \(urls.map(\.path)) into \(folder.path)\n".utf8))
+        #endif
         // Dropping onto an S3 folder (or anything showing one) uploads.
         if let target = S3Location(url: folder) {
             let files = urls.filter(\.isFileURL)

@@ -77,11 +77,16 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
     @State private var cursor: URL?
     @State private var dropTarget: URL?
     @State private var backgroundTargeted = false
+    /// Where each row on screen is, for finding the row under a drop.
+    @State private var rowFrames = RowFrames()
+    @State private var multiDrag = MultiDragSource()
+    private static var listSpace: String { "fileList" }
     @State private var typeBuffer = ""
     @State private var lastTypeTime = Date.distantPast
 
     var body: some View {
         let maxSize = self.maxSize ?? rows.lazy.compactMap(\.size).max() ?? 0
+        let _ = multiDrag.update(rows: rows, selection: selection)
         GeometryReader { proxy in
             ScrollViewReader { scroller in
                 ScrollView {
@@ -120,9 +125,17 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
                         selection = []
                     }
                     .contextMenu { backgroundMenu() }
-                    .dropDestination(for: URL.self) { urls, _ in
-                        onDropBackground?(urls) ?? false
-                    } isTargeted: { backgroundTargeted = $0 && onDropBackground != nil }
+                    // One drop target for the whole list, which works out the row under the
+                    // cursor itself. SwiftUI gives a list-wide drop target every drop, even over
+                    // rows with their own, so folder rows never received theirs.
+                    .coordinateSpace(.named(Self.listSpace))
+                    .onDrop(of: [.fileURL, .url], delegate: ListDropDelegate(
+                        frames: rowFrames, folders: { url in rows.first { $0.id == url }?.item.isFolder == true },
+                        canDropInto: onDropInto != nil, canDropOnBackground: onDropBackground != nil,
+                        dropTarget: $dropTarget, backgroundTargeted: $backgroundTargeted,
+                        onDropInto: { urls, folder in onDropInto?(urls, folder) ?? false },
+                        onDropBackground: { urls in onDropBackground?(urls) ?? false }
+                    ))
                 }
                 .scrollContentBackground(.hidden)
                 .onChange(of: cursor) { _, target in
@@ -176,7 +189,10 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
             // Lists appear mid-typing (search results replace the folder after the first
             // character); never pull focus out of a text field you're typing in.
             if !NSApp.windows.contains(where: { $0.isVisible && $0.firstResponder is NSText }) { focused = true }
+            multiDrag.install()
         }
+        .onDisappear { multiDrag.uninstall() }
+        .background(WindowReader { multiDrag.window = $0 })
     }
 
     // MARK: - Header
@@ -246,7 +262,13 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
                 onOpen([row.id], NSEvent.modifierFlags.contains(.command))
             })
             .draggable(row.item.url)
-            .modifier(FolderDropModifier(row: row, onDropInto: onDropInto, dropTarget: $dropTarget))
+            // Frames for drops (list coordinates) and for multi-item drags (window coordinates).
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.listSpace)) } action: { rowFrames.frames[row.id] = $0 }
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { multiDrag.frames[row.id] = $0 }
+            .onDisappear {
+                rowFrames.frames[row.id] = nil
+                multiDrag.frames[row.id] = nil
+            }
             #if DEBUG
             .debugRowFrame(row)
             #endif
@@ -467,20 +489,77 @@ private struct RowContent: View, Equatable {
 }
 
 /// Folder rows accept drops (items go inside); other rows don't.
-private struct FolderDropModifier: ViewModifier {
-    let row: ListRow
-    let onDropInto: (([URL], URL) -> Bool)?
-    @Binding var dropTarget: URL?
+/// Row frames in the list's coordinate space. Not observed: they change on every scroll.
+final class RowFrames {
+    var frames: [URL: CGRect] = [:]
 
-    func body(content: Content) -> some View {
-        if row.item.isFolder, let onDropInto {
-            content.dropDestination(for: URL.self) { urls, _ in
-                onDropInto(urls, row.id)
-            } isTargeted: { targeted in
-                if targeted { dropTarget = row.id } else if dropTarget == row.id { dropTarget = nil }
+    func row(at point: CGPoint) -> URL? {
+        frames.first { $0.value.contains(point) }?.key
+    }
+}
+
+/// Drops onto the list: into the folder row under the cursor, or else into the folder shown.
+private struct ListDropDelegate: DropDelegate {
+    let frames: RowFrames
+    let folders: (URL) -> Bool
+    let canDropInto: Bool
+    let canDropOnBackground: Bool
+    @Binding var dropTarget: URL?
+    @Binding var backgroundTargeted: Bool
+    let onDropInto: ([URL], URL) -> Bool
+    let onDropBackground: ([URL]) -> Bool
+
+    /// The folder row under the cursor, if drops can go into rows.
+    private func folder(at info: DropInfo) -> URL? {
+        guard canDropInto, let url = frames.row(at: info.location), folders(url) else { return nil }
+        return url
+    }
+
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [.fileURL, .url]) && (canDropInto || canDropOnBackground)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        let target = folder(at: info)
+        if dropTarget != target { dropTarget = target }
+        let onBackground = target == nil && canDropOnBackground
+        if backgroundTargeted != onBackground { backgroundTargeted = onBackground }
+        guard target != nil || canDropOnBackground else { return DropProposal(operation: .forbidden) }
+        return DropProposal(operation: NSEvent.modifierFlags.contains(.option) ? .copy : .move)
+    }
+
+    func dropExited(info: DropInfo) {
+        dropTarget = nil
+        backgroundTargeted = false
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        let target = folder(at: info)
+        dropTarget = nil
+        backgroundTargeted = false
+        guard target != nil || canDropOnBackground else { return false }
+        let providers = info.itemProviders(for: [.fileURL, .url])
+        Self.load(providers) { urls in
+            guard !urls.isEmpty else { return }
+            if let target { _ = onDropInto(urls, target) } else { _ = onDropBackground(urls) }
+        }
+        return true
+    }
+
+    /// Reads every dropped URL (files, and S3 items, which are plain URLs), then calls back on main.
+    private static func load(_ providers: [NSItemProvider], then use: @escaping ([URL]) -> Void) {
+        let group = DispatchGroup()
+        let lock = NSLock()
+        var urls: [(Int, URL)] = []
+        for (index, provider) in providers.enumerated() {
+            group.enter()
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                if let url { lock.withLock { urls.append((index, url)) } }
+                group.leave()
             }
-        } else {
-            content
+        }
+        group.notify(queue: .main) {
+            use(urls.sorted { $0.0 < $1.0 }.map(\.1))
         }
     }
 }
