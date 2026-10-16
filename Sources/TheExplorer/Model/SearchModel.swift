@@ -119,9 +119,9 @@ final class SearchModel {
     // MARK: - Folder walk
 
     private func runFolderWalk(terms: [String], folder: URL, includeHidden: Bool) async {
-        let lowered = terms.map { $0.lowercased() }
+        let tokens = FuzzyMatcher.tokens(terms.joined(separator: " "))
         let limit = Self.maxResults
-        let stream = AsyncStream<([FileItem], Int)> { continuation in
+        let stream = AsyncStream<([SearchHit], Int)> { continuation in
             let walker = Task.detached(priority: .userInitiated) {
                 var options: FileManager.DirectoryEnumerationOptions = [.skipsPackageDescendants]
                 if !includeHidden { options.insert(.skipsHiddenFiles) }
@@ -131,17 +131,18 @@ final class SearchModel {
                     continuation.finish()
                     return
                 }
-                var batch: [FileItem] = []
+                var batch: [SearchHit] = []
                 var seen = 0
                 var found = 0
                 var lastFlush = Date()
                 while let url = enumerator.nextObject() as? URL {
                     if Task.isCancelled { break }
                     seen += 1
-                    let name = url.lastPathComponent.lowercased()
-                    if lowered.allSatisfy(name.contains) {
+                    // The same matching as the index, typos and all; lower ranks sort first.
+                    if let score = FuzzyMatcher.score(tokens, name: url.lastPathComponent) {
                         let values = (try? url.resourceValues(forKeys: Set(FileItem.resourceKeys))) ?? URLResourceValues()
-                        batch.append(FileItem(url: url, values: values))
+                        let item = FileItem(url: url, values: values)
+                        batch.append(SearchHit(item: item, rank: -score + (PathNoise.isNoisy(item.path) ? 200 : 0)))
                         found += 1
                     }
                     if Date().timeIntervalSince(lastFlush) > 0.15 {
@@ -160,7 +161,7 @@ final class SearchModel {
         var collected: [SearchHit] = []
         for await (batch, seen) in stream {
             guard !Task.isCancelled else { return }
-            collected += batch.map { SearchHit(item: $0, rank: Self.rank($0, terms: terms)) }
+            collected += batch
             scannedCount = seen
             publish(collected)
         }
@@ -183,31 +184,6 @@ final class SearchModel {
             if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
             return (lhs.item.modified ?? .distantPast) > (rhs.item.modified ?? .distantPast)
         }
-    }
-
-    /// Lower is better: exact name, then prefix, then word start, then anywhere.
-    /// Items buried in Library, caches or dependency folders sink to the bottom.
-    nonisolated static func rank(_ item: FileItem, terms: [String]) -> Int {
-        rank(name: item.name, terms: terms.map { $0.lowercased() }) + (PathNoise.isNoisy(item.path) ? 10 : 0)
-    }
-
-    /// Name-only part of the rank; `terms` must be lowercased.
-    nonisolated static func rank(name: String, terms: [String]) -> Int {
-        guard let first = terms.first else { return 3 }
-        let name = name.lowercased()
-        if name == first { return 0 }
-        let stem = name.lastIndex(of: ".").map { name[..<$0] } ?? name[...]
-        if stem == first[...] { return 0 }
-        if name.hasPrefix(first) { return 1 }
-        // A match right after a separator is a word start ("my-report" for "report").
-        var searchStart = name.startIndex
-        while let match = name.range(of: first, range: searchStart..<name.endIndex) {
-            if match.lowerBound > name.startIndex, " _-.".contains(name[name.index(before: match.lowerBound)]) {
-                return 2
-            }
-            searchStart = name.index(after: match.lowerBound)
-        }
-        return 3
     }
 }
 

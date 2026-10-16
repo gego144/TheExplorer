@@ -32,11 +32,16 @@ struct RowSorterTests {
 }
 
 struct SearchRankTests {
-    @Test func exactThenPrefixThenWordStartThenAnywhere() {
-        #expect(SearchModel.rank(name: "Report.pdf", terms: ["report"]) == 0)
-        #expect(SearchModel.rank(name: "reports", terms: ["report"]) == 1)
-        #expect(SearchModel.rank(name: "q3-report.pdf", terms: ["report"]) == 2)
-        #expect(SearchModel.rank(name: "misreported", terms: ["report"]) == 3)
+    @Test func folderWalkScoresLikeTheIndex() throws {
+        let tokens = FuzzyMatcher.tokens("report")
+        let stem = try #require(FuzzyMatcher.score(tokens, name: "Report.pdf"))
+        let prefix = try #require(FuzzyMatcher.score(tokens, name: "reports"))
+        let wordStart = try #require(FuzzyMatcher.score(tokens, name: "q3-report.pdf"))
+        let middle = try #require(FuzzyMatcher.score(tokens, name: "misreported"))
+        #expect(stem > prefix && prefix > wordStart && wordStart > middle)
+        // Every word has to match.
+        #expect(FuzzyMatcher.score(FuzzyMatcher.tokens("report q3"), name: "q3-report.pdf") != nil)
+        #expect(FuzzyMatcher.score(FuzzyMatcher.tokens("report zebra"), name: "q3-report.pdf") == nil)
     }
 
     @Test func noisyPathsRankLower() {

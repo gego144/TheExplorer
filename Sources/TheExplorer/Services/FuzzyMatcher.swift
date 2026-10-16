@@ -4,6 +4,7 @@ import Foundation
 /// names beat prefixes, prefixes beat word starts ("report" in "q3-report.pdf"), those beat
 /// matches mid-word, and below that the letters can be spread out ("tex" finds "TheExplorer",
 /// "qrp" finds "q3-report.pdf") as long as they land on word starts rather than anywhere.
+/// Typos are forgiven too: "audit" finds "audting.mp4" and "reciept" finds "receipt.pdf".
 ///
 /// Everything works on lowercased, accent-free UTF-8 bytes, so it's fast enough to run over
 /// every name in the index on each keystroke.
@@ -14,6 +15,9 @@ enum FuzzyMatcher {
     static let wordStart = 650
     static let substring = 450
     static let fuzzyBase = 300
+    /// A word with a typo in it, at the start of the name or of a later word.
+    static let typoAtStart = 520
+    static let typoInWord = 420
 
     /// Lowercased, accent-free, precomposed UTF-8, for matching.
     static func fold(_ text: String) -> [UInt8] {
@@ -26,12 +30,31 @@ enum FuzzyMatcher {
         query.split(whereSeparator: \.isWhitespace).map { fold(String($0)) }.filter { !$0.isEmpty }
     }
 
+    /// The total score of every word against a name, or nil unless they all match. For names
+    /// that aren't in the index (the folder walk); the index matches its stored names directly.
+    static func score(_ tokens: [[UInt8]], name: String) -> Int? {
+        let folded = fold(name)
+        var stored = Array(name.utf8)
+        if stored.count != folded.count { stored = folded }
+        return folded.withUnsafeBufferPointer { folded in
+            stored.withUnsafeBufferPointer { original in
+                var total = 0
+                for token in tokens {
+                    guard let score = token.withUnsafeBufferPointer({ score($0, name: folded, original: original) }) else { return nil }
+                    total += score
+                }
+                return total
+            }
+        }
+    }
+
     /// How well `token` matches a name, or nil if it doesn't. `name` is the folded name;
     /// `original` the name as stored (for spotting camelCase word starts), same length.
     static func score(_ token: UnsafeBufferPointer<UInt8>, name: UnsafeBufferPointer<UInt8>, original: UnsafeBufferPointer<UInt8>) -> Int? {
         let m = token.count
         let n = name.count
-        guard m > 0, m <= n else { return nil }
+        guard m > 0 else { return nil }
+        guard m <= n else { return typo(token, name: name, original: original) }
         // Longer names rank a little lower for the same kind of match.
         let lengthPenalty = min(60, n - m)
 
@@ -50,7 +73,69 @@ enum FuzzyMatcher {
             return substring - lengthPenalty
         }
         guard m >= 2 else { return nil }
-        return fuzzy(token, name: name, original: original)
+        let spread = fuzzy(token, name: name, original: original)
+        guard let typo = typo(token, name: name, original: original) else { return spread }
+        return max(spread ?? 0, typo)
+    }
+
+    /// A word typed with a slip: two letters swapped, one missing, one extra or one wrong (two
+    /// slips in words of eight letters or more). The match has to start at a word start with the
+    /// right first letter, which people rarely get wrong, so this finds "audting" for "audit"
+    /// without turning every short query into noise. Words under four letters must be exact.
+    private static func typo(_ token: UnsafeBufferPointer<UInt8>, name: UnsafeBufferPointer<UInt8>, original: UnsafeBufferPointer<UInt8>) -> Int? {
+        let m = token.count
+        let n = name.count
+        guard m >= 4, m <= 32 else { return nil }
+        let allowed = m >= 8 ? 2 : 1
+        var best = allowed + 1
+        var bestStart = 0
+        for start in 0..<n where name[start] == token[0] && isBoundary(start, name: name, original: original) {
+            let width = min(n - start, m + allowed)
+            guard width >= m - allowed else { continue }
+            let edits = slips(token, name: name, from: start, width: width, limit: allowed)
+            if edits < best {
+                best = edits
+                bestStart = start
+                if edits <= 1 && start == 0 { break }
+            }
+        }
+        guard best <= allowed else { return nil }
+        let base = bestStart == 0 ? typoAtStart : typoInWord
+        return base - 120 * (max(1, best) - 1) - min(60, max(0, n - bestStart - m))
+    }
+
+    /// The fewest edits (swapping neighbours counts as one) turning `token` into the start of
+    /// `name` from `start`, looking at most `width` letters in; more than `limit` if it's further.
+    private static func slips(_ token: UnsafeBufferPointer<UInt8>, name: UnsafeBufferPointer<UInt8>,
+                              from start: Int, width: Int, limit: Int) -> Int {
+        let m = token.count
+        let columns = width + 1
+        return withUnsafeTemporaryAllocation(of: Int.self, capacity: 3 * columns) { rows in
+            // Three rows of the edit-distance table: two back (for swaps), the last, and this one.
+            var older = 0
+            var previous = columns
+            var current = 2 * columns
+            for j in 0..<columns { rows[previous + j] = j }
+            for i in 1...m {
+                rows[current] = i
+                var rowBest = i
+                for j in 1..<columns {
+                    let same = token[i - 1] == name[start + j - 1]
+                    var value = min(rows[previous + j] + 1, rows[current + j - 1] + 1, rows[previous + j - 1] + (same ? 0 : 1))
+                    if i > 1 && j > 1 && token[i - 1] == name[start + j - 2] && token[i - 2] == name[start + j - 1] {
+                        value = min(value, rows[older + j - 2] + 1)
+                    }
+                    rows[current + j] = value
+                    rowBest = min(rowBest, value)
+                }
+                if rowBest > limit { return limit + 1 }
+                (older, previous, current) = (previous, current, older)
+            }
+            // The token can end anywhere: the rest of the word doesn't count against it.
+            var best = limit + 1
+            for j in max(0, m - limit)..<columns { best = min(best, rows[previous + j]) }
+            return best
+        }
     }
 
     /// Letters in order but not together. Each letter continues the current run if it can,

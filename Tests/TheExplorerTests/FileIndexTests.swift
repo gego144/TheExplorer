@@ -43,6 +43,36 @@ struct FuzzyMatcherTests {
         #expect(score("RESUME", "resume.pdf") == FuzzyMatcher.stem)
     }
 
+    @Test func forgivesTypos() throws {
+        // Swapped, missing, extra and wrong letters.
+        #expect(score("audit", "audting.mp4") != nil)
+        #expect(score("auditing", "audting.mp4") != nil)
+        #expect(score("reciept", "receipt.pdf") != nil)
+        #expect(score("invoce", "invoice-march.pdf") != nil)
+        #expect(score("budgett", "budget.xlsx") != nil)
+        #expect(score("scrnshot", "Screenshot 2026-10-01.png") != nil)
+        #expect(score("raport", "q3-report.pdf") != nil)
+        // In a later word, and against names shorter than the query.
+        #expect(score("audit", "team audting notes.txt") != nil)
+        #expect(score("audit", "audt") != nil)
+    }
+
+    @Test func typosStayStrict() throws {
+        // Short words must be exact, the first letter must be right, and one slip is the limit
+        // under eight letters.
+        #expect(score("cat", "cot.txt") == nil)
+        #expect(score("audit", "xaudting") == nil)
+        #expect(score("audit", "baudting") == nil)
+        #expect(score("audit", "adtiu.txt") == nil)
+        #expect(score("report", "rpeotr.pdf") == nil)
+        // A real match beats a typo, and a typo at the start beats one later on.
+        let exact = try #require(score("audit", "audit.mp4"))
+        let typo = try #require(score("audit", "audting.mp4"))
+        let laterTypo = try #require(score("audit", "team audting.mp4"))
+        #expect(exact > typo && typo > laterTypo)
+        #expect(typo > FuzzyMatcher.fuzzyBase + 100)
+    }
+
     @Test func shorterNamesWinTies() throws {
         #expect(try #require(score("budget", "budget-2024.xlsx")) > #require(score("budget", "budget-2024-final-final-v3-copy.xlsx")))
     }
