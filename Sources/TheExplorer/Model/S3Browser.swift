@@ -270,10 +270,14 @@ final class S3Transfers {
     }
 
     /// Downloads objects and folders (keeping their structure) into a local folder.
-    /// `completion` gets the top-level items that landed there.
-    func download(_ urls: [URL], into folder: URL, completion: (([URL]) -> Void)? = nil) {
+    /// `completion` gets the top-level items that landed there; `failed` hears about errors,
+    /// including a stop or a connection that's gone.
+    func download(_ urls: [URL], into folder: URL, completion: (([URL]) -> Void)? = nil, failed: ((Error) -> Void)? = nil) {
         let targets = urls.compactMap(S3Location.init(url:)).filter { $0.bucket != nil }
-        guard let first = targets.first, let client = S3Store.shared.client(for: first.connectionID), let bucket = first.bucket else { return }
+        guard let first = targets.first, let client = S3Store.shared.client(for: first.connectionID), let bucket = first.bucket else {
+            failed?(CocoaError(.fileReadNoSuchFile))
+            return
+        }
         let id = start(.download, title: "\(Self.noun(urls)) to “\(folder.lastPathComponent)”")
         tasks[id] = Task {
             do {
@@ -321,6 +325,7 @@ final class S3Transfers {
                 completion?(placed)
             } catch {
                 finish(id, Self.state(for: error))
+                failed?(error)
             }
         }
     }
@@ -369,7 +374,7 @@ final class S3Transfers {
     }
 
     private static func noun(_ urls: [URL]) -> String {
-        urls.count == 1 ? "“\(S3Location(url: urls[0])?.name.nilIfEmpty ?? urls[0].lastPathComponent)”" : "\(urls.count) items"
+        urls.count == 1 ? "“\(S3Location(url: urls[0])?.itemName.nilIfEmpty ?? urls[0].lastPathComponent)”" : "\(urls.count) items"
     }
 
     /// A key from the archive-style relative path, kept inside `folder` (no "..").

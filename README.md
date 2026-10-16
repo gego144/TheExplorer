@@ -86,13 +86,13 @@ Scan your home folder, the whole Mac, or any folder. Drill into a treemap and a 
 Connect S3 in Settings › Cloud and your buckets show up in the sidebar. Browse them like any folder, with the same list, breadcrumbs, back/forward, filtering and inspector.
 
 - **Upload:** drop files or folders onto an S3 folder, a folder row, a breadcrumb or the sidebar connection. Folders upload with everything in them, and big files upload in parallel parts.
-- **Download:** drag S3 items onto any local folder, tab, sidebar place or breadcrumb, or right-click › Download. Double-click opens a file and Space previews it.
+- **Download:** drag S3 items onto Finder, the desktop, or any folder, tab, sidebar place or breadcrumb in TheExplorer, or right-click › Download. Folders come down with everything in them, and a name that's taken gets a number instead of being overwritten. Double-click opens a file and Space previews it.
 - **Share and manage:** right-click to copy an `s3://` URI or a share link that works for 7 days, create folders, or delete.
 - **Progress:** the status bar shows progress with Stop for every transfer.
 - **Credentials:** use your AWS CLI profiles as they are. That includes SSO and assumed roles, through `aws configure export-credentials`. Or add access keys, which are kept in your Keychain.
 - **Other providers:** S3-compatible services (Cloudflare R2, MinIO, Backblaze B2, Wasabi…) work with a custom endpoint.
 
-The app signs requests itself (AWS Signature Version 4, checked against AWS's published examples) and talks to S3 directly, with no SDK. One limit: S3 items can be dragged onto folders inside TheExplorer, but not straight to Finder or the desktop yet; use Download for those.
+The app signs requests itself (AWS Signature Version 4, checked against AWS's published examples) and talks to S3 directly, with no SDK.
 
 <img src="docs/screenshots/s3.png" alt="Browsing an S3 bucket" width="100%">
 
@@ -248,7 +248,7 @@ open -g -n --env EXPLORER_SNAPSHOT_DIR=/tmp/shots --env EXPLORER_SNAPSHOT_QUIT=1
     build/debug/TheExplorer.app
 ```
 
-Scenes are separated by `;`. The available scenes are `folder:<path>`, `select:<path>`, `newtab:<path>`, `tab:<n>`, `omnibox:<text>`, `expand:<path>`, `recents`, `new`, `range:<days>` (0 for all time), `more` (load the next page), `search:<text>`, `searchmac:<text>`, `scope:mac|folder`, `create:folder|file`, `drop:<source>><folder>`, `storage[:<path>]`, `settings[:actions]` (shows the Settings window, optionally on its Actions tab), `actioneditor` (shows the action editor; `type:` scenes after it go to the command field), `editortext` (logs the command field), `runs` (logs every action run's state and output), `stop` (stops the newest running action), `menu:<name>` (logs a menu bar menu's items), `s3:[bucket/prefix/]` (browses the first S3 connection), `transfers` (logs uploads and downloads), `back`, `reveal:<path>[,<path>…]` (sends the app the reveal event other apps' "Show in Finder" uses), `viewer:<bundle id>` (sets the file viewer and logs it back; pass the current one to change nothing) and `wait:<seconds>`.
+Scenes are separated by `;`. The available scenes are `folder:<path>`, `select:<path>`, `newtab:<path>`, `tab:<n>`, `omnibox:<text>`, `expand:<path>`, `recents`, `new`, `range:<days>` (0 for all time), `more` (load the next page), `search:<text>`, `searchmac:<text>`, `scope:mac|folder`, `create:folder|file`, `drop:<source>><folder>`, `storage[:<path>]`, `settings[:actions]` (shows the Settings window, optionally on its Actions tab), `actioneditor` (shows the action editor; `type:` scenes after it go to the command field), `editortext` (logs the command field), `runs` (logs every action run's state and output), `stop` (stops the newest running action), `menu:<name>` (logs a menu bar menu's items), `s3:[bucket/prefix/]` (browses the first S3 connection), `transfers` (logs uploads and downloads), `promise:<bucket/key>><folder>` (delivers an S3 item the way a drop on Finder asks for it, and logs what the drag carries), `back`, `reveal:<path>[,<path>…]` (sends the app the reveal event other apps' "Show in Finder" uses), `viewer:<bundle id>` (sets the file viewer and logs it back; pass the current one to change nothing) and `wait:<seconds>`.
 
 Scenes can also drive the app with real input:
 

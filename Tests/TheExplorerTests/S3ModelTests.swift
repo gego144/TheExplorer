@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import Testing
 @testable import TheExplorer
 
@@ -68,5 +68,32 @@ struct S3ModelTests {
         let custom = S3Client.url(config: .init(region: "auto", endpoint: URL(string: "https://acct.r2.cloudflarestorage.com")), region: "auto",
                                   bucket: "media", key: "x.txt", query: [("list-type", "2")])
         #expect(custom?.absoluteString == "https://acct.r2.cloudflarestorage.com/media/x.txt?list-type=2")
+    }
+}
+
+struct S3ItemNameTests {
+    private let id = UUID()
+
+    @Test func namesFilesFoldersAndBuckets() {
+        #expect(S3Location(connectionID: id, bucket: "media", prefix: "videos/teaser cut.mp4").itemName == "teaser cut.mp4")
+        #expect(S3Location(connectionID: id, bucket: "media", prefix: "videos/clips/").itemName == "clips")
+        #expect(S3Location(connectionID: id, bucket: "media").itemName == "media")
+    }
+
+    @Test @MainActor func promisesFilesAndFoldersAndCarriesTheURL() throws {
+        let file = S3Location.url(connectionID: id, bucket: "media", key: "videos/teaser cut.mp4")
+        let promise = try #require(S3FilePromise(file))
+        #expect(promise.fileType == "public.mpeg-4")
+        #expect(promise.delegate?.filePromiseProvider(promise, fileNameForType: promise.fileType) == "teaser cut.mp4")
+        let folder = try #require(S3FilePromise(S3Location.url(connectionID: id, bucket: "media", key: "videos/")))
+        #expect(folder.fileType == "public.folder")
+        // Drops inside the app still read the S3 address off the drag.
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("S3ItemNameTests-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        pasteboard.writeObjects([promise])
+        #expect(pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] == [file])
+        // A connection's top level (no bucket) can't be dropped as a file.
+        #expect(S3FilePromise(S3Location.url(connectionID: id, bucket: nil, key: "")) == nil)
     }
 }

@@ -83,6 +83,11 @@ struct S3Location: Hashable, Sendable {
         prefix.isEmpty ? (bucket ?? "") : String(prefix.dropLast().split(separator: "/").last ?? "")
     }
 
+    /// What the item is called: the file name for an object, otherwise the folder or bucket name.
+    var itemName: String {
+        prefix.isEmpty || prefix.hasSuffix("/") ? name : (prefix as NSString).lastPathComponent
+    }
+
     var parent: S3Location? {
         guard bucket != nil else { return nil }
         guard !prefix.isEmpty else { return S3Location(connectionID: connectionID, bucket: nil) }

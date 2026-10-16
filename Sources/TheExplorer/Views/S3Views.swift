@@ -71,7 +71,7 @@ struct S3View: View {
 
     private var deleteTitle: String {
         let count = deleting?.count ?? 0
-        return count == 1 ? "Delete “\(deleting?.first.flatMap(S3Location.init(url:))?.name ?? "")” from S3?" : "Delete \(count) items from S3?"
+        return count == 1 ? "Delete “\(deleting?.first.flatMap(S3Location.init(url:))?.itemName ?? "")” from S3?" : "Delete \(count) items from S3?"
     }
 
     private var emptyState: EmptyState? {

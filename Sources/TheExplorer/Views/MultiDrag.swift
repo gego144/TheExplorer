@@ -5,7 +5,11 @@ import SwiftUI
 /// several selected rows would only move the one under the mouse. When a press lands on a row
 /// that's part of a selection of several, this holds back the mouse movement (so `.draggable`
 /// never starts a second drag; macOS allows one session at a time) and starts an AppKit
-/// session with every selected item. Every other drag is left to `.draggable`.
+/// session with every selected item.
+///
+/// S3 rows always drag this way, one or several: each goes on the drag as a file promise (see
+/// S3FilePromise), which `.draggable` can't carry, so Finder and the Desktop can take them.
+/// Every other drag is left to `.draggable`.
 @MainActor
 final class MultiDragSource: NSObject, NSDraggingSource {
     /// The list's rows in order and its selection, refreshed every time the list redraws.
@@ -15,7 +19,7 @@ final class MultiDragSource: NSObject, NSDraggingSource {
     /// window, so a press can be matched to a row.
     var frames: [URL: CGRect] = [:]
     weak var window: NSWindow?
-    private var pressed: (url: URL, location: NSPoint, window: NSWindow)?
+    private var pressed: (urls: [URL], location: NSPoint, window: NSWindow)?
     private var monitor: Any?
 
     /// How far the mouse moves before a press becomes a drag, so clicks stay clicks.
@@ -45,10 +49,13 @@ final class MultiDragSource: NSObject, NSDraggingSource {
         switch event.type {
         case .leftMouseDown:
             pressed = nil
-            guard selection.count > 1, let window, event.window === window, let content = window.contentView else { return event }
+            guard let window, event.window === window, let content = window.contentView else { return event }
             let point = CGPoint(x: event.locationInWindow.x, y: content.bounds.height - event.locationInWindow.y)
-            if let url = frames.first(where: { $0.value.contains(point) })?.key, selection.contains(url) {
-                pressed = (url, event.locationInWindow, window)
+            guard let url = frames.first(where: { $0.value.contains(point) })?.key else { return event }
+            if selection.count > 1 && selection.contains(url) {
+                pressed = (Self.dragged(rows: rows, selection: selection), event.locationInWindow, window)
+            } else if url.scheme == S3Location.scheme {
+                pressed = (selection.contains(url) ? Self.dragged(rows: rows, selection: selection) : [url], event.locationInWindow, window)
             }
             return event
         case .leftMouseDragged:
@@ -57,7 +64,7 @@ final class MultiDragSource: NSObject, NSDraggingSource {
             let distance = hypot(event.locationInWindow.x - pressed.location.x, event.locationInWindow.y - pressed.location.y)
             guard distance >= Self.threshold else { return nil }
             self.pressed = nil
-            beginSession(with: event, from: pressed.window)
+            beginSession(pressed.urls, with: event, from: pressed.window)
             return nil
         default:
             pressed = nil
@@ -70,15 +77,15 @@ final class MultiDragSource: NSObject, NSDraggingSource {
         rows.lazy.map(\.id).filter(selection.contains)
     }
 
-    private func beginSession(with event: NSEvent, from window: NSWindow) {
-        guard let view = window.contentView else { return }
-        let urls = Self.dragged(rows: rows, selection: selection)
+    private func beginSession(_ urls: [URL], with event: NSEvent, from window: NSWindow) {
+        guard let view = window.contentView, !urls.isEmpty else { return }
         let point = view.convert(event.locationInWindow, from: nil)
         let generic = NSWorkspace.shared.icon(for: .data)
         let items = urls.enumerated().map { index, url in
-            let item = NSDraggingItem(pasteboardWriter: url as NSURL)
+            let promise = S3FilePromise(url)
+            let item = NSDraggingItem(pasteboardWriter: promise ?? url as NSURL)
             // A small fanned pile under the cursor; real icons for the first few.
-            let image = index < 8 && url.isFileURL ? NSWorkspace.shared.icon(forFile: url.path) : generic
+            let image = index >= 8 ? generic : promise?.icon ?? (url.isFileURL ? NSWorkspace.shared.icon(forFile: url.path) : generic)
             let offset = CGFloat(min(index, 4)) * 3
             item.setDraggingFrame(NSRect(x: point.x - 16 + offset, y: point.y - 16 - offset, width: 32, height: 32), contents: image)
             return item

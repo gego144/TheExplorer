@@ -92,6 +92,26 @@ enum DebugSnapshots {
                 // s3: shows the first connection; s3:bucket/prefix/ a folder in it.
                 // The raw argument: tilde expansion would drop the trailing "/" that marks a folder.
                 if let url = S3Location(url: Self.debugURL("s3:" + (parts.count > 1 ? parts[1] : ""))) { model.showS3(url) }
+            case "promise":
+                // promise:bucket/key>/dest/folder does what a drop on Finder does with an S3 item:
+                // logs what the drag carries, then asks for the file in that folder.
+                let ends = argument.components(separatedBy: ">")
+                guard ends.count == 2, let promise = S3FilePromise(Self.debugURL("s3:" + ends[0])) else {
+                    log("promise: not an S3 item")
+                    break
+                }
+                let pasteboard = NSPasteboard(name: NSPasteboard.Name("TheExplorer.debug.drag.\(ProcessInfo.processInfo.processIdentifier)"))
+                pasteboard.clearContents()
+                pasteboard.writeObjects([promise])
+                let carried = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] ?? []
+                log("promise types=\(pasteboard.types?.map(\.rawValue) ?? []) url=\(carried.map(\.absoluteString))")
+                let delegate = promise.delegate
+                let name = delegate?.filePromiseProvider(promise, fileNameForType: promise.fileType) ?? "?"
+                let destination = URL(fileURLWithPath: ends[1]).appendingPathComponent(name)
+                let result: Error?? = await withCheckedContinuation { continuation in
+                    delegate?.filePromiseProvider(promise, writePromiseTo: destination) { continuation.resume(returning: .some($0)) }
+                }
+                log("promise name=\(name) type=\(promise.fileType) error=\(String(describing: result ?? nil))")
             case "back": model.goBack()
             case "eventlog":
                 // Logs mouse events the app receives (for real-mouse tests).
