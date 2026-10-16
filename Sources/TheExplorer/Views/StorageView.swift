@@ -16,7 +16,7 @@ struct StorageView: View {
 
         VStack(spacing: 0) {
             PaneHeader {
-                Menu {
+                ChromeMenu {
                     Picker("Scan", selection: $storage.target) {
                         Text(ScanTarget.home.label).tag(ScanTarget.home)
                         Text(ScanTarget.mac.label).tag(ScanTarget.mac)
@@ -32,12 +32,8 @@ struct StorageView: View {
                     Divider()
                     Button("Choose Folder…", action: chooseFolder)
                 } label: {
-                    MenuLabel(title: storage.target.label)
+                    Text(storage.target.label)
                 }
-                .menuStyle(.button)
-                .buttonStyle(.plain)
-                .menuIndicator(.hidden)
-                .fixedSize()
                 if storage.isScanning {
                     Button("Stop") { storage.cancel() }
                         .buttonStyle(SubtleButtonStyle())
@@ -216,13 +212,11 @@ private struct BreakdownView: View {
                 IconButton(systemImage: "chevron.left", help: "Up one level (⌘↑)") { storage.focusParent() }
                     .disabled(focus.parent == nil)
                 ForEach(Array(storage.focusTrail.enumerated()), id: \.element.id) { index, node in
-                    if index > 0 { Text("/").foregroundStyle(Theme.textTertiary) }
+                    if index > 0 { Text("/").font(.system(size: 11)).foregroundStyle(Theme.textTertiary.opacity(0.7)) }
                     Button { storage.drill(into: node) } label: {
                         Text(node.name)
-                            .font(.system(size: 12, weight: node === focus ? .semibold : .regular))
-                            .foregroundStyle(node === focus ? Theme.accent : Theme.textSecondary)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(CrumbStyle(isCurrent: node === focus))
                 }
                 Spacer()
                 Text("\(Format.bytes(focus.size)) · \(focus.fileCount.formatted()) files")
@@ -271,7 +265,7 @@ private struct StorageRow: View {
     let node: SizeNode
     let parentSize: Int64
     let isSelected: Bool
-    @State private var hovering = false
+    @State private var hovering = HoverPreview.on
 
     var body: some View {
         HStack(spacing: 10) {
@@ -309,9 +303,10 @@ private struct StorageRow: View {
         }
         .padding(.horizontal, 8)
         .frame(height: 30)
-        .background(isSelected ? Theme.accentSoft : (hovering ? Theme.hover : .clear), in: .rect(cornerRadius: 6))
-        .contentShape(.rect)
-        .onHover { hovering = $0 }
+        .background(isSelected ? Theme.accentSoft : (hovering ? Theme.hoverFill : .clear), in: .rect(cornerRadius: Theme.controlRadius))
+        .hoverTracking { hovering = $0 }
+        .clickable()
+        .animation(Theme.hoverAnimation, value: hovering)
     }
 }
 

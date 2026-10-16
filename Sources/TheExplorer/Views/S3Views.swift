@@ -229,22 +229,12 @@ private struct S3Chip: View {
     let isCurrent: Bool
     let model: BrowserModel
     @State private var targeted = false
-    @State private var hovered = false
 
     var body: some View {
-        let active = isCurrent || targeted
         Button { model.showS3(location) } label: {
             Text(title)
-                .font(.system(size: 12, weight: isCurrent ? .semibold : .regular))
-                .lineLimit(1)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 2.5)
-                .foregroundStyle(active ? Theme.accent : (hovered ? Theme.text : Theme.textSecondary))
-                .background(active ? Theme.accentSoft : (hovered ? Theme.fieldBorder : Theme.raised), in: .rect(cornerRadius: 5))
-                .contentShape(.rect)
         }
-        .buttonStyle(.plain)
-        .onHover { hovered = $0 }
+        .buttonStyle(CrumbStyle(isCurrent: isCurrent, highlighted: targeted))
         .dropDestination(for: URL.self) { urls, _ in model.receiveDrop(urls, into: location.url) } isTargeted: { targeted = $0 }
         .help(location.uri)
     }
@@ -324,7 +314,6 @@ struct S3Inspector: View {
 struct TransferActivity: View {
     private var transfers: S3Transfers { .shared }
     @State private var showing = false
-    @State private var hovering = false
     @State private var dismissedBefore = Date.distantPast
 
     var body: some View {
@@ -342,13 +331,8 @@ struct TransferActivity: View {
                     Text(label(shown, others: running.count - 1)).lineLimit(1).truncationMode(.middle)
                 }
                 .foregroundStyle(isFailure(shown) ? Theme.danger : (shown.state == .running ? Theme.text : Theme.textSecondary))
-                .padding(.horizontal, 7)
-                .frame(height: 18)
-                .background(hovering ? Theme.hover : .clear, in: .rect(cornerRadius: 5))
-                .contentShape(.rect)
             }
-            .buttonStyle(.plain)
-            .onHover { hovering = $0 }
+            .buttonStyle(PillButtonStyle())
             .frame(maxWidth: 360)
             .help("Show transfers")
             .popover(isPresented: $showing, arrowEdge: .top) {
@@ -455,7 +439,7 @@ struct CloudSettings: View {
             HStack {
                 SectionCaption(title: "S3 connections")
                 Spacer()
-                Menu {
+                ChromeMenu(style: .button) {
                     let profiles = AWSProfiles.names()
                     if !profiles.isEmpty {
                         Section("AWS profiles") {
@@ -470,10 +454,6 @@ struct CloudSettings: View {
                     Label("Add Connection", systemImage: "plus")
                         .font(.system(size: 11.5, weight: .semibold))
                 }
-                .menuStyle(.button)
-                .buttonStyle(SubtleButtonStyle())
-                .menuIndicator(.hidden)
-                .fixedSize()
             }
             VStack(spacing: 0) {
                 if store.connections.isEmpty {
@@ -498,10 +478,9 @@ struct CloudSettings: View {
                             }
                             Spacer()
                             Button { store.remove(connection) } label: {
-                                Image(systemName: "trash").font(.system(size: 10, weight: .semibold)).frame(width: 20, height: 20)
+                                Image(systemName: "trash").font(.system(size: 10, weight: .semibold)).frame(width: 16, height: 16)
                             }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(Theme.textSecondary)
+                            .buttonStyle(GhostButtonStyle(padding: 2, tint: Theme.textSecondary, destructive: true))
                             .help("Remove this connection (nothing in S3 is touched)")
                             Button("Edit") { editing = ConnectionDraft(connection) }.buttonStyle(SubtleButtonStyle())
                         }
@@ -584,33 +563,33 @@ struct ConnectionEditor: View {
         VStack(alignment: .leading, spacing: 13) {
             Text(draft.isNew ? "New S3 Connection" : "Edit Connection").font(.system(size: 14, weight: .semibold))
 
-            field("Name") { TextField("AWS", text: $draft.connection.name).textFieldStyle(.plain).modifier(EditorField()) }
+            field("Name") { TextField("AWS", text: $draft.connection.name).textFieldStyle(.plain).formField() }
 
             field("Sign in with") {
                 Segmented(selection: $draft.usesProfile, options: [(true, "AWS Profile"), (false, "Access Keys")]).fixedSize()
             }
             if draft.usesProfile {
                 field("Profile", hint: "From ~/.aws/config and ~/.aws/credentials.") {
-                    Picker("", selection: $draft.profile) {
-                        ForEach(Array(Set(AWSProfiles.names() + [draft.profile])).sorted(), id: \.self) { Text($0).tag($0) }
+                    ChromeMenu(draft.profile) {
+                        ForEach(Array(Set(AWSProfiles.names() + [draft.profile])).sorted(), id: \.self) { profile in
+                            Button(profile) { draft.profile = profile }
+                        }
                     }
-                    .labelsHidden()
-                    .fixedSize()
                 }
             } else {
                 field("Access key ID") {
-                    TextField("AKIA…", text: $draft.accessKeyID).textFieldStyle(.plain).modifier(EditorField())
+                    TextField("AKIA…", text: $draft.accessKeyID).textFieldStyle(.plain).formField()
                 }
                 field("Secret access key", hint: draft.isNew ? "Saved in your Keychain." : "Leave empty to keep the saved one.") {
-                    SecureField(draft.isNew ? "" : "••••••••", text: $draft.secret).textFieldStyle(.plain).modifier(EditorField())
+                    SecureField(draft.isNew ? "" : "••••••••", text: $draft.secret).textFieldStyle(.plain).formField()
                 }
             }
             HStack(spacing: 10) {
-                field("Region") { TextField("us-east-1", text: $draft.connection.region).textFieldStyle(.plain).modifier(EditorField()) }
-                field("Bucket (optional)") { TextField("open straight into it", text: $draft.connection.bucket).textFieldStyle(.plain).modifier(EditorField()) }
+                field("Region") { TextField("us-east-1", text: $draft.connection.region).textFieldStyle(.plain).formField() }
+                field("Bucket (optional)") { TextField("open straight into it", text: $draft.connection.bucket).textFieldStyle(.plain).formField() }
             }
             field("Endpoint (optional)", hint: "For S3-compatible services: Cloudflare R2, MinIO, Backblaze B2, Wasabi… Leave empty for AWS.") {
-                TextField("https://<account>.r2.cloudflarestorage.com", text: $draft.connection.endpoint).textFieldStyle(.plain).modifier(EditorField())
+                TextField("https://<account>.r2.cloudflarestorage.com", text: $draft.connection.endpoint).textFieldStyle(.plain).formField()
             }
 
             if let testResult {
@@ -684,13 +663,3 @@ struct ConnectionEditor: View {
     }
 }
 
-private struct EditorField: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .font(.system(size: 12))
-            .padding(.horizontal, 8)
-            .frame(height: 26)
-            .background(Theme.field, in: .rect(cornerRadius: 7))
-            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Theme.fieldBorder))
-    }
-}

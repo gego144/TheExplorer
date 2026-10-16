@@ -36,7 +36,6 @@ private struct InlineQuickLook: View {
     let url: URL
     let onExpand: () -> Void
     @State private var ready = false
-    @State private var hovering = false
 
     var body: some View {
         ZStack {
@@ -50,21 +49,17 @@ private struct InlineQuickLook: View {
         }
         .frame(height: 200)
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border))
-        .overlay(alignment: .topTrailing) {
+        .overlay(alignment: .bottomTrailing) {
+            // Always shown: the preview is an AppKit view, which swallows hover, so a
+            // hover-only button would rarely appear.
             Button(action: onExpand) {
                 Image(systemName: "arrow.up.left.and.arrow.down.right")
                     .font(.system(size: 10, weight: .bold))
-                    .frame(width: 22, height: 22)
-                    .background(Theme.raised.opacity(0.92), in: .rect(cornerRadius: 5))
-                    .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Theme.fieldBorder))
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(Theme.text)
+            .buttonStyle(FloatingIconStyle())
             .padding(6)
-            .opacity(hovering ? 1 : 0)
             .help("Quick Look (Space)")
         }
-        .onHover { hovering = $0 }
         .task(id: url) {
             ready = false
             try? await Task.sleep(for: .milliseconds(140))
@@ -283,7 +278,7 @@ private struct ArchiveRow: View, Equatable {
     let isSelected: Bool
     let isOpening: Bool
     let onToggle: () -> Void
-    @State private var hovering = false
+    @State private var hovering = HoverPreview.on
 
     static func == (a: Self, b: Self) -> Bool {
         a.node.path == b.node.path && a.depth == b.depth && a.isExpanded == b.isExpanded
@@ -326,9 +321,9 @@ private struct ArchiveRow: View, Equatable {
         .padding(.leading, CGFloat(depth) * 12 + 2)
         .padding(.trailing, 6)
         .frame(height: 22)
-        .background(isSelected ? Theme.accentSoft : (hovering ? Theme.hover : .clear), in: .rect(cornerRadius: 5))
-        .contentShape(.rect)
-        .onHover { hovering = $0 }
+        .background(isSelected ? Theme.accentSoft : (hovering ? Theme.hoverFill : .clear), in: .rect(cornerRadius: Theme.chipRadius))
+        .hoverTracking { hovering = $0 }
+        .clickable()
     }
 }
 

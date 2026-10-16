@@ -200,8 +200,7 @@ private struct ItemDetails: View {
                     } label: {
                         Image(systemName: "arrow.clockwise").font(.system(size: 9, weight: .bold))
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Theme.textTertiary)
+                    .buttonStyle(GhostButtonStyle(padding: 3))
                     .help("Recalculate")
                 } else {
                     ProgressView().controlSize(.mini)

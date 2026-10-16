@@ -21,18 +21,14 @@ struct RecentsView: View {
                         .fixedSize()
                         .help("Created: when it was made. Modified: last content change. Added: when it arrived in its folder (downloads, copies, moves).")
                 }
-                Menu {
+                ChromeMenu {
                     Picker("Within", selection: $recents.range) {
                         ForEach(RecentsRange.options(for: recents.mode)) { Text($0.title).tag($0) }
                     }
                     .pickerStyle(.inline)
                 } label: {
-                    MenuLabel(title: recents.range.title)
+                    Text(recents.range.title)
                 }
-                .menuStyle(.button)
-                .buttonStyle(.plain)
-                .menuIndicator(.hidden)
-                .fixedSize()
                 if recents.mode == .new {
                     Segmented(selection: $recents.kindFilter, options: [(.all, "All"), (.folders, "Dirs"), (.files, "Files")])
                         .fixedSize()
@@ -142,20 +138,3 @@ struct RecentsView: View {
     }
 }
 
-/// Menu button label in the Workbench style.
-struct MenuLabel: View {
-    let title: String
-
-    var body: some View {
-        HStack(spacing: 5) {
-            Text(title)
-            Image(systemName: "chevron.up.chevron.down").font(.system(size: 8, weight: .bold))
-        }
-        .font(.system(size: 11, weight: .medium))
-        .foregroundStyle(Theme.text)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 4)
-        .background(Theme.field, in: .rect(cornerRadius: 7))
-        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Theme.fieldBorder))
-    }
-}

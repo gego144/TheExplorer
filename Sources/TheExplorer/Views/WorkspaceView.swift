@@ -138,12 +138,8 @@ struct TabStrip: View {
                 workspace.newTab()
             } label: {
                 Image(systemName: "plus")
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(Theme.textTertiary)
-                    .frame(width: 24, height: Self.tabHeight)
-                    .contentShape(.rect)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(IconButtonStyle(size: Self.tabHeight, symbolSize: 10.5))
             .help("New tab (⌘T)")
             Spacer(minLength: 0)
         }
@@ -163,7 +159,7 @@ private struct TabItem: View {
     let tab: BrowserModel
     let index: Int
     let workspace: Workspace
-    @State private var hovering = false
+    @State private var hovering = HoverPreview.on
     @State private var dropTargeted = false
     @State private var springLoad: Task<Void, Never>?
 
@@ -186,11 +182,9 @@ private struct TabItem: View {
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(Theme.textTertiary)
-                        .frame(width: 16, height: 16)
-                        .background(hovering ? Theme.raised : .clear, in: .rect(cornerRadius: 4))
+                        .frame(width: 12, height: 12)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(GhostButtonStyle(padding: 2))
                 .opacity(hovering || isSelected ? 1 : 0)
                 .help("Close tab (⌘W)")
             }
@@ -199,14 +193,15 @@ private struct TabItem: View {
         .padding(.trailing, workspace.tabs.count > 1 ? 4 : 10)
         .frame(height: TabStrip.tabHeight)
         .fixedSize(horizontal: true, vertical: false)
-        .background(isSelected ? Theme.raised : (hovering ? Theme.hover : .clear), in: .rect(cornerRadius: 7))
+        .background(isSelected ? Theme.raised : (hovering ? Theme.hoverFill : .clear), in: .rect(cornerRadius: Theme.controlRadius + 1))
         .overlay {
-            RoundedRectangle(cornerRadius: 7)
+            RoundedRectangle(cornerRadius: Theme.controlRadius + 1)
                 .strokeBorder(dropTargeted ? Theme.accent : (isSelected ? Theme.fieldBorder : .clear),
                               style: StrokeStyle(lineWidth: 1, dash: dropTargeted ? [4, 3] : []))
         }
-        .contentShape(.rect)
-        .onHover { hovering = $0 }
+        .hoverTracking { hovering = $0 }
+        .clickable(!isSelected)
+        .animation(Theme.hoverAnimation, value: hovering)
         .onTapGesture { workspace.select(index) }
         .help(Format.path(tab.currentURL.path))
         .dropDestination(for: URL.self) { urls, _ in
@@ -238,7 +233,7 @@ private struct TabItem: View {
     private var icon: String {
         if tab.isSearching { return "magnifyingglass" }
         switch tab.destination {
-        case .folder: return "diamond.fill"
+        case .folder: return "folder.fill"
         case .recents: return "clock.fill"
         case .newFiles: return "sparkles"
         case .storage: return "chart.pie.fill"
@@ -255,7 +250,7 @@ struct CommandBar: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            HStack(spacing: 3) {
+            HStack(spacing: 2) {
                 IconButton(systemImage: "chevron.left", help: "Back (⌘[)") { model.goBack() }
                     .disabled(model.backStack.isEmpty)
                 IconButton(systemImage: "chevron.right", help: "Forward (⌘])") { model.goForward() }
@@ -268,7 +263,7 @@ struct CommandBar: View {
                 Segmented(selection: $model.kindFilter, options: [(.all, "All"), (.folders, "Dirs"), (.files, "Files")])
                     .fixedSize()
             }
-            Menu {
+            ChromeMenu(style: .icon) {
                 Toggle("Folders First", isOn: $model.foldersFirst)
                 Toggle("Show Hidden Files", isOn: $model.showHidden)
                 Divider()
@@ -281,21 +276,15 @@ struct CommandBar: View {
                 Button(FileActions.openInTerminalTitle) { FileActions.openInTerminal(model.currentURL) }
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Theme.textSecondary)
-                    .frame(width: 26, height: 26)
-                    .background(Theme.raised, in: .rect(cornerRadius: 6))
             }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .fixedSize()
             .help("View options")
-            IconButton(systemImage: "sidebar.left", help: "Sidebar (⌥⌘S)", isOn: prefs.showSidebar) {
-                prefs.showSidebar.toggle()
-            }
-            IconButton(systemImage: "sidebar.right", help: "Inspector (⌘I)", isOn: prefs.showInspector) {
-                prefs.showInspector.toggle()
+            HStack(spacing: 2) {
+                IconButton(systemImage: "sidebar.left", help: "Sidebar (⌥⌘S)", isOn: prefs.showSidebar) {
+                    prefs.showSidebar.toggle()
+                }
+                IconButton(systemImage: "sidebar.right", help: "Inspector (⌘I)", isOn: prefs.showInspector) {
+                    prefs.showInspector.toggle()
+                }
             }
         }
         .padding(.horizontal, 12)
@@ -318,6 +307,7 @@ struct Omnibox: View {
     @State private var suggestions: [URL] = []
     /// Set when editing begins, so the field exists before it's asked to take focus.
     @State private var editing = false
+    @State private var hovering = HoverPreview.on
 
     private var isPathMode: Bool { query.hasPrefix("/") || query.hasPrefix("~") }
     private var showsField: Bool { editing || focused || !query.isEmpty }
@@ -342,9 +332,10 @@ struct Omnibox: View {
                 }
                 if !query.isEmpty {
                     Button(action: cancel) {
-                        Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.textTertiary)
+                        Image(systemName: "xmark.circle.fill").font(.system(size: 12))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(GhostButtonStyle(padding: 2))
+                    .help("Clear (esc)")
                 }
             } else {
                 Breadcrumbs(model: model)
@@ -364,12 +355,14 @@ struct Omnibox: View {
                 .fixedSize()
             }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 6)
         .frame(height: 30)
-        .background(Theme.field, in: .rect(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8)
-            .strokeBorder(invalid ? Theme.danger : (focused ? Theme.accent.opacity(0.7) : Theme.fieldBorder)))
-        .contentShape(.rect)
+        .background(Theme.field, in: .rect(cornerRadius: Theme.fieldRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.fieldRadius)
+            .strokeBorder(invalid ? Theme.danger : (focused ? Theme.accent.opacity(0.7) : (hovering ? Theme.borderHover : Theme.fieldBorder))))
+        .hoverTracking { hovering = $0 }
+        .pointerStyle(showsField ? nil : .horizontalText)
+        .animation(Theme.hoverAnimation, value: hovering)
         .onTapGesture { if !showsField { begin("") } }
         .overlay(alignment: .topLeading) {
             if focused && isPathMode && !suggestions.isEmpty {
@@ -415,22 +408,8 @@ struct Omnibox: View {
     }
 
     private var scopeChips: some View {
-        HStack(spacing: 2) {
-            ForEach([(SearchScope.folder, "Here"), (.mac, "Everywhere")], id: \.0) { scope, title in
-                Button {
-                    model.searchScope = scope
-                } label: {
-                    Text(title)
-                        .font(.system(size: 10.5, weight: .medium))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 2)
-                        .foregroundStyle(model.searchScope == scope ? Theme.accent : Theme.textSecondary)
-                        .background(model.searchScope == scope ? Theme.accentSoft : Theme.raised, in: .capsule)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .fixedSize()
+        Segmented(selection: $model.searchScope, options: [(.folder, "Here"), (.mac, "Everywhere")])
+            .fixedSize()
     }
 
     // MARK: Actions
@@ -530,9 +509,9 @@ private struct SuggestionList: View {
                     onPick(url)
                 } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 8, weight: .heavy))
-                            .foregroundStyle(Theme.accent)
+                        Image(systemName: "folder.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.textSecondary)
                         Text(url.lastPathComponent)
                             .font(.system(size: 12, weight: .medium))
                         Spacer()
@@ -542,12 +521,8 @@ private struct SuggestionList: View {
                             .lineLimit(1)
                             .truncationMode(.head)
                     }
-                    .padding(.horizontal, 10)
-                    .frame(height: 26)
-                    .background(index == highlighted ? Theme.accentSoft : .clear, in: .rect(cornerRadius: 6))
-                    .contentShape(.rect)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RowButtonStyle(isSelected: index == highlighted))
             }
             Text("↑↓ choose · ⇥ complete · ↩ go")
                 .font(.system(size: 10))
@@ -631,7 +606,7 @@ private struct Breadcrumbs: View {
         if model.destination == .s3 {
             S3Breadcrumbs(model: model)
         } else if model.destination != .folder {
-            Chip(title: model.title, isCurrent: true)
+            Chip(title: model.title)
         } else {
             let trail = trail
             // Full path if it fits; otherwise keep the root and the last folders, folding the middle into "…".
@@ -649,25 +624,21 @@ private struct Breadcrumbs: View {
     private func crumbs(_ trail: [URL], keepLast: Int) -> some View {
         let hidden = keepLast < trail.count - 1 ? Array(trail[1..<(trail.count - keepLast)]) : []
         let visible = hidden.isEmpty ? trail : [trail[0]] + trail.suffix(keepLast)
-        return HStack(spacing: 4) {
+        return HStack(spacing: 2) {
             ForEach(Array(visible.enumerated()), id: \.element) { index, url in
                 if index > 0 {
-                    Text("/").foregroundStyle(Theme.textTertiary)
+                    Text("/").font(.system(size: 11)).foregroundStyle(Theme.textTertiary.opacity(0.7))
                 }
                 if index == 1 && !hidden.isEmpty {
-                    Menu {
+                    ChromeMenu(style: .chip) {
                         ForEach(hidden, id: \.self) { folder in
                             Button(folder.lastPathComponent) { model.navigate(to: folder) }
                         }
                     } label: {
-                        Chip(title: "…", isCurrent: false)
+                        Text("…")
                     }
-                    .menuStyle(.button)
-                    .buttonStyle(.plain)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
                     .help(hidden.map(\.lastPathComponent).joined(separator: " / "))
-                    Text("/").foregroundStyle(Theme.textTertiary)
+                    Text("/").font(.system(size: 11)).foregroundStyle(Theme.textTertiary.opacity(0.7))
                 }
                 BreadcrumbChip(url: url, isCurrent: index == visible.count - 1, model: model, openTab: openTab)
             }
@@ -687,9 +658,9 @@ private struct BreadcrumbChip: View {
         Button {
             model.navigate(to: url)
         } label: {
-            Chip(title: title, isCurrent: isCurrent, highlighted: targeted)
+            Text(title)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CrumbStyle(isCurrent: isCurrent, highlighted: targeted))
         .dropDestination(for: URL.self) { urls, _ in model.receiveDrop(urls, into: url) } isTargeted: { targeted = $0 }
         .contextMenu {
             Button("Open in New Tab") { openTab(url) }
@@ -708,28 +679,16 @@ private struct BreadcrumbChip: View {
     }
 }
 
+/// A label in the path bar for places that aren't folders ("Recents").
 private struct Chip: View {
     let title: String
-    let isCurrent: Bool
-    var highlighted = false
-    @State private var hovered = false
 
     var body: some View {
-        let active = isCurrent || highlighted
         Text(title)
-            .font(.system(size: 12, weight: isCurrent ? .semibold : .regular))
-            .lineLimit(1)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 2.5)
-            .foregroundStyle(active ? Theme.accent : (hovered ? Theme.text : Theme.textSecondary))
-            .background(active ? Theme.accentSoft : (hovered ? Theme.fieldBorder : Theme.raised), in: .rect(cornerRadius: 5))
-            .overlay {
-                RoundedRectangle(cornerRadius: 5)
-                    .strokeBorder(hovered ? (active ? Theme.accent.opacity(0.45) : Theme.textTertiary.opacity(0.6)) : .clear)
-            }
-            .contentShape(.rect)
-            .onHover { hovered = $0 }
-            .animation(.easeOut(duration: 0.12), value: hovered)
+            .font(.system(size: 12, weight: .semibold))
+            .padding(.horizontal, 6)
+            .frame(height: Theme.smallControlHeight)
+            .background(Theme.raised, in: .rect(cornerRadius: Theme.chipRadius))
     }
 }
 
@@ -778,8 +737,15 @@ struct StatusBar: View {
             return "\(count.formatted()) \(count == 1 ? "result" : "results")"
         }
         switch model.destination {
-        case .recents, .newFiles, .storage:
-            return model.title.lowercased()
+        case .recents, .newFiles:
+            let list = model.destination == .recents ? model.recents : model.newFiles
+            let count = list.rows.count
+            var text = "\(count.formatted()) \(count == 1 ? "item" : "items")"
+            if !list.selection.isEmpty { text += " · \(list.selection.count.formatted()) selected" }
+            return text
+        case .storage:
+            guard let result = StorageModel.shared.result else { return "" }
+            return "\(Format.bytes(result.root.size)) · \(result.root.fileCount.formatted()) files scanned"
         case .s3:
             let (folders, files) = model.s3.counts
             var text = "\(folders.formatted()) \(folders == 1 ? "folder" : "folders") · \(files.formatted()) \(files == 1 ? "file" : "files")"

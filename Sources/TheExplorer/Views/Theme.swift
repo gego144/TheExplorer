@@ -115,55 +115,58 @@ struct TypeChip: View {
 
 // MARK: - Controls
 
-/// Small square icon button used in the command bar.
+/// Small square icon button used in bars.
 struct IconButton: View {
     let systemImage: String
     var help: String = ""
     var isOn = false
     let action: () -> Void
-    @State private var hovering = false
-    @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 12, weight: .semibold))
-                .frame(width: 26, height: 26)
-                .foregroundStyle(isOn ? Theme.accent : (isEnabled ? Theme.textSecondary : Theme.textTertiary.opacity(0.6)))
-                .background(isOn ? Theme.accentSoft : (hovering && isEnabled ? Theme.hover.opacity(1.6) : Theme.raised),
-                            in: .rect(cornerRadius: 6))
         }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
+        .buttonStyle(IconButtonStyle(isOn: isOn))
         .help(help)
     }
 }
 
-/// Compact segmented control in the Workbench style.
+/// Compact segmented control: a recessed track with the chosen option raised.
 struct Segmented<Value: Hashable>: View {
     @Binding var selection: Value
     let options: [(Value, String)]
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 2) {
             ForEach(options, id: \.0) { value, title in
                 Button {
                     selection = value
                 } label: {
                     Text(title)
-                        .font(.system(size: 11, weight: .medium))
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 4)
-                        .foregroundStyle(selection == value ? Theme.text : Theme.textSecondary)
-                        .background(selection == value ? Theme.raised : .clear)
-                        .contentShape(.rect)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(SegmentStyle(isSelected: selection == value))
             }
         }
-        .background(Theme.field, in: .rect(cornerRadius: 7))
-        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Theme.fieldBorder))
-        .clipShape(.rect(cornerRadius: 7))
+        .padding(2)
+        .background(Theme.field, in: .rect(cornerRadius: Theme.controlRadius + 1))
+        .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius + 1).strokeBorder(Theme.fieldBorder))
+    }
+
+    private struct SegmentStyle: ButtonStyle {
+        let isSelected: Bool
+
+        func makeBody(configuration: Configuration) -> some View {
+            Hovering { hovering in
+                configuration.label
+                    .font(.system(size: 11, weight: .medium))
+                    .padding(.horizontal, 8)
+                    .frame(height: Theme.smallControlHeight - 4)
+                    .foregroundStyle(isSelected || hovering ? Theme.text : Theme.textSecondary)
+                    .background(isSelected ? Theme.raisedHover : (hovering ? Theme.raised : .clear),
+                                in: .rect(cornerRadius: Theme.controlRadius - 1))
+                    .clickable(!isSelected)
+            }
+        }
     }
 }
 
@@ -185,14 +188,19 @@ struct HeatBar: View {
     var height: CGFloat = 4
     /// Fixed fill; when nil the fill follows the heat scale.
     var color: Color?
+    var track: Color = Theme.border
+    /// Leaves out fills too small to read (in dense lists they'd just be dots).
+    var hidesTiny = false
 
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
-                Capsule().fill(Theme.border)
-                Capsule()
-                    .fill(color ?? Theme.heatColor(fraction))
-                    .frame(width: max(fraction > 0 ? height : 0, proxy.size.width * min(1, fraction)))
+                Capsule().fill(track)
+                if !(hidesTiny && fraction < 0.04) {
+                    Capsule()
+                        .fill(color ?? Theme.heatColor(fraction))
+                        .frame(width: max(fraction > 0 ? height : 0, proxy.size.width * min(1, fraction)))
+                }
             }
         }
         .frame(height: height)

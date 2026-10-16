@@ -302,7 +302,6 @@ enum MediaInfoReader {
         var info = MediaInfo()
         let pages = document.numberOfPages
         info.summary = pages == 1 ? "1 page" : "\(pages) pages"
-        info.rows.append(.init(label: "pages", value: pages.formatted()))
         if let page = document.page(at: 1) {
             let box = page.getBoxRect(.mediaBox)
             let rotated = page.rotationAngle % 180 != 0
@@ -345,7 +344,6 @@ enum MediaInfoReader {
         if let last = data.last, last != 0x0A { lines += 1 }
         var info = MediaInfo()
         info.summary = lines == 1 ? "1 line" : "\(lines.formatted()) lines"
-        info.rows.append(.init(label: "lines", value: lines.formatted()))
         return info
     }
 

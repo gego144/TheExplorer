@@ -239,14 +239,13 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
         }
         .font(.system(size: 9.5, weight: .semibold))
         .tracking(0.7)
-        .foregroundStyle(isActive ? Theme.textSecondary : Theme.textTertiary)
 
         if let key, let onSort {
-            Button { onSort(key) } label: { label.contentShape(.rect) }
-                .buttonStyle(.plain)
+            Button { onSort(key) } label: { label }
+                .buttonStyle(HeaderCellStyle(isActive: isActive))
                 .help("Sort by \(title.lowercased())")
         } else {
-            label
+            label.foregroundStyle(Theme.textTertiary)
         }
     }
 
@@ -262,6 +261,7 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
                           onToggle: row.expansion != nil ? onToggleExpand.map { toggle in { toggle(row.id) } } : nil)
             .equatable()
             .contentShape(.rect)
+            .clickable()
             .onTapGesture { click(row.id) }
             .simultaneousGesture(TapGesture(count: 2).onEnded {
                 onOpen([row.id], NSEvent.modifierFlags.contains(.command))
@@ -390,7 +390,7 @@ private struct RowContent: View, Equatable {
     /// Expands or collapses this folder. Not part of equality.
     var onToggle: (() -> Void)?
 
-    @State private var hovered = false
+    @State private var hovered = HoverPreview.on
 
     private static let indent: CGFloat = 16
 
@@ -459,7 +459,7 @@ private struct RowContent: View, Equatable {
                 RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.accent, lineWidth: 1.5)
             }
         }
-        .onHover { hovered = $0 }
+        .hoverTracking { hovered = $0 }
     }
 
     /// The folder arrow. Where folders can expand inline it's a button with a generous hit area
@@ -468,25 +468,30 @@ private struct RowContent: View, Equatable {
     private var disclosure: some View {
         let arrow = Image(systemName: "chevron.right")
             .font(.system(size: 8, weight: .heavy))
-            .foregroundStyle(isSelected || row.expansion == true ? Theme.accent : Theme.accent.opacity(0.75))
             .rotationEffect(.degrees(row.expansion == true ? 90 : 0))
             .animation(.snappy(duration: 0.15), value: row.expansion)
             .frame(width: Column.marker)
         if let onToggle {
-            arrow
-                .frame(width: Column.marker + 12, height: 26)
-                .contentShape(.rect)
-                .padding(.horizontal, -6)
-                .highPriorityGesture(TapGesture().onEnded(onToggle))
-                .help(row.expansion == true ? "Collapse (←)" : "Expand (→)")
+            Hovering { hovering in
+                arrow
+                    .foregroundStyle(hovering || row.expansion == true ? Theme.text : Theme.textSecondary)
+                    .frame(width: 16, height: 16)
+                    .background(hovering ? Theme.raisedHover : .clear, in: .rect(cornerRadius: 4))
+                    .frame(width: Column.marker + 12, height: 26)
+                    .contentShape(.rect)
+                    .padding(.horizontal, -6)
+                    .clickable()
+            }
+            .highPriorityGesture(TapGesture().onEnded(onToggle))
+            .help(row.expansion == true ? "Collapse (←)" : "Expand (→)")
         } else {
-            arrow
+            arrow.foregroundStyle(Theme.textSecondary)
         }
     }
 
     private var background: Color {
-        if isSelected { return listFocused ? Theme.accentSoft : Theme.accentSoft.opacity(0.55) }
-        return hovered ? Theme.hover : .clear
+        if isSelected { return listFocused ? Theme.accentSoft : Theme.accentSoft.opacity(0.6) }
+        return hovered ? Theme.hoverFill : .clear
     }
 
     /// "▬▬──  12.4 GB": a short bar for scale beside the number.
@@ -497,7 +502,7 @@ private struct RowContent: View, Equatable {
         let partial = measured.map { !$0.complete } ?? false
         HStack(spacing: 8) {
             if let size, maxSize > 0 {
-                HeatBar(fraction: Double(size) / Double(maxSize), height: 3)
+                HeatBar(fraction: Double(size) / Double(maxSize), height: 3, track: Theme.hoverFill, hidesTiny: true)
                     .frame(width: 30)
             } else {
                 Color.clear.frame(width: 30, height: 3)
@@ -517,6 +522,20 @@ private struct RowContent: View, Equatable {
             .font(Theme.mono)
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+}
+
+/// A sortable column title: brightens on hover, brightest while it's the sort column.
+private struct HeaderCellStyle: ButtonStyle {
+    let isActive: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        Hovering { hovering in
+            configuration.label
+                .foregroundStyle(isActive || hovering ? (hovering ? Theme.text : Theme.textSecondary) : Theme.textTertiary)
+                .padding(.vertical, 6)
+                .clickable()
         }
     }
 }

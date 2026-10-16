@@ -171,6 +171,7 @@ struct MediaInfoTests {
         let result = await info(a4)
         #expect(result?.summary == "3 pages")
         #expect(value(result, "page size") == "A4")
+        #expect(value(result, "pages") == nil)
     }
 
     @Test func textLines() async throws {

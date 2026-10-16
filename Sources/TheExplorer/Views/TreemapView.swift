@@ -30,6 +30,7 @@ struct TreemapView: View {
                             .onHover { inside in
                                 if inside { hovered = tile.node?.id } else if hovered == tile.node?.id { hovered = nil }
                             }
+                            .clickable(tile.node != nil)
                             .onTapGesture(count: 2) {
                                 if let node = tile.node { onDrill(node) }
                             }

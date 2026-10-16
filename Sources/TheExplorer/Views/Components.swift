@@ -131,9 +131,10 @@ struct Banner: View {
             }
             if let onDismiss {
                 Button(action: onDismiss) {
-                    Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.textTertiary)
+                    Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(GhostButtonStyle(padding: 4))
+                .help("Dismiss")
             }
         }
         .padding(.horizontal, 12)
@@ -156,51 +157,30 @@ struct ErrorBanner: View {
     }
 }
 
-/// Filled light button for the one primary action in a view.
-struct AccentButtonStyle: ButtonStyle {
-    var large = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: large ? 13 : 11.5, weight: .semibold))
-            .foregroundStyle(Theme.background)
-            .padding(.horizontal, large ? 16 : 11)
-            .padding(.vertical, large ? 7 : 4)
-            .background(Theme.accent.opacity(configuration.isPressed ? 0.75 : 1), in: .rect(cornerRadius: 7))
-    }
-}
-
 /// Monochrome on/off switch: a light track with a dark knob when on, a dim track when off.
 struct WorkbenchSwitchStyle: ToggleStyle {
     func makeBody(configuration: Configuration) -> some View {
-        Button {
-            configuration.isOn.toggle()
-        } label: {
-            Capsule()
-                .fill(configuration.isOn ? Theme.accent : Theme.fieldBorder)
-                .frame(width: 30, height: 17)
-                .overlay(alignment: configuration.isOn ? .trailing : .leading) {
-                    Circle()
-                        .fill(configuration.isOn ? Theme.background : Theme.textSecondary)
-                        .frame(width: 13, height: 13)
-                        .padding(2)
-                }
-                .animation(.easeOut(duration: 0.12), value: configuration.isOn)
-                .contentShape(.capsule)
+        Hovering { hovering in
+            Button {
+                configuration.isOn.toggle()
+            } label: {
+                Capsule()
+                    .fill(configuration.isOn ? Theme.accent : (hovering ? Theme.borderHover : Theme.fieldBorder))
+                    .frame(width: 30, height: 17)
+                    .overlay(alignment: configuration.isOn ? .trailing : .leading) {
+                        Circle()
+                            .fill(configuration.isOn ? Theme.background : (hovering ? Theme.text : Theme.textSecondary))
+                            .frame(width: 13, height: 13)
+                            .padding(2)
+                    }
+                    .opacity(hovering && configuration.isOn ? 0.88 : 1)
+                    .animation(.easeOut(duration: 0.12), value: configuration.isOn)
+                    .contentShape(.capsule)
+            }
+            .buttonStyle(.plain)
+            .clickable()
         }
-        .buttonStyle(.plain)
     }
 }
 
-/// Quiet raised button for secondary actions.
-struct SubtleButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 11.5, weight: .medium))
-            .foregroundStyle(Theme.text)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(configuration.isPressed ? Theme.hover : Theme.raised, in: .rect(cornerRadius: 7))
-            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Theme.fieldBorder))
-    }
-}
+

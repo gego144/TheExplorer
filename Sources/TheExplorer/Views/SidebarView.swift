@@ -137,7 +137,7 @@ private struct SidebarRow: View {
     var model: BrowserModel?
     var trailing: AnyView?
     let action: () -> Void
-    @State private var hovering = false
+    @State private var hovering = HoverPreview.on
     @State private var targeted = false
 
     init(title: String, systemImage: String? = nil, dotColor: Color? = nil, isSelected: Bool, dimmed: Bool = false,
@@ -161,32 +161,33 @@ private struct SidebarRow: View {
             } else if let systemImage {
                 Image(systemName: systemImage)
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(isSelected ? Theme.accent : Theme.textSecondary)
+                    .foregroundStyle(isSelected || hovering ? Theme.text : Theme.textTertiary)
                     .frame(width: 14)
             }
             Text(title)
                 .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
-                .foregroundStyle(isSelected ? Theme.text : (dimmed ? Theme.textTertiary : Theme.textSecondary))
+                .foregroundStyle(isSelected || (hovering && !dimmed) ? Theme.text : (dimmed ? Theme.textTertiary : Theme.textSecondary))
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 0)
             trailing
         }
         .padding(.horizontal, 8)
-        .frame(height: 26)
-        .background(background, in: .rect(cornerRadius: 6))
+        .frame(height: Theme.controlHeight)
+        .background(background, in: .rect(cornerRadius: Theme.controlRadius))
         .overlay {
-            if targeted { RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.accent, lineWidth: 1.2) }
+            if targeted { RoundedRectangle(cornerRadius: Theme.controlRadius).strokeBorder(Theme.accent, lineWidth: 1.2) }
         }
-        .contentShape(.rect)
-        .onHover { hovering = $0 }
+        .hoverTracking { hovering = $0 }
+        .clickable()
+        .animation(Theme.hoverAnimation, value: hovering)
         .onTapGesture(perform: action)
         .modifier(SidebarDrop(url: dropURL, model: model, targeted: $targeted))
     }
 
     private var background: Color {
-        if isSelected { return Theme.raised }
-        return hovering ? Theme.hover : .clear
+        if isSelected { return hovering ? Theme.raisedHover : Theme.raised }
+        return hovering ? Theme.hoverFill : .clear
     }
 }
 
@@ -251,9 +252,8 @@ private struct EjectButton: View {
         } label: {
             Image(systemName: "eject.fill")
                 .font(.system(size: 9))
-                .foregroundStyle(Theme.textTertiary)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(GhostButtonStyle(padding: 3))
         .help("Eject")
     }
 }

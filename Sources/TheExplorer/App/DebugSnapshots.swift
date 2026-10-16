@@ -232,6 +232,25 @@ enum DebugSnapshots {
                     }
                     log("query \"\(query)\" \(String(format: "%.1fms (best %.1fms)", times[0], times.min()!)) hits=\(hits.count): " + hits.prefix(8).map { Format.path($0.path) + "[\($0.score)]" }.joined(separator: " | "))
                 }
+            case "menuprobe":
+                // menuprobe:<menu-style>:<dx>,<dy> clicks a ChromeMenu at that offset from its top-left
+                // corner and logs whether its menu opened (then closes it).
+                let fields = argument.components(separatedBy: ":")
+                let offset = fields.count > 1 ? fields[1].split(separator: ",").compactMap { Double($0) } : [2, 2]
+                if let (_, frame) = RowGeometry.frame(named: fields[0]), offset.count == 2 {
+                    var opened = false
+                    let observer = NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil) { note in
+                        opened = true
+                        let menu = note.object as? NSMenu
+                        RunLoop.main.perform(inModes: [.eventTracking, .common]) { menu?.cancelTracking() }
+                    }
+                    await InputDriver.click(at: CGPoint(x: frame.minX + offset[0], y: frame.minY + offset[1]))
+                    try? await Task.sleep(for: .milliseconds(300))
+                    NotificationCenter.default.removeObserver(observer)
+                    log("menuprobe \(fields[0]) frame=\(frame) at +\(offset) opened=\(opened)")
+                } else {
+                    log("menuprobe: no menu named \(fields[0])")
+                }
             case "menuitem":
                 // menuitem:Edit>Undo fires the first item in that menu whose title starts so.
                 let names = argument.components(separatedBy: ">")

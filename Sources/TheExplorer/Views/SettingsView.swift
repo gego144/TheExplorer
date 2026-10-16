@@ -58,18 +58,14 @@ struct SettingsView: View {
             section("Browsing defaults") {
                 SettingRow("Sort by", hint: "New tabs start with this order; click a column header to change it per tab.") {
                     HStack(spacing: 6) {
-                        Menu {
+                        ChromeMenu {
                             Picker("Sort by", selection: $prefs.defaultSort.key) {
                                 ForEach(Self.sortKeys, id: \.self) { Text(Self.title(for: $0)).tag($0) }
                             }
                             .pickerStyle(.inline)
                         } label: {
-                            MenuLabel(title: Self.title(for: prefs.defaultSort.key))
+                            Text(Self.title(for: prefs.defaultSort.key))
                         }
-                        .menuStyle(.button)
-                        .buttonStyle(.plain)
-                        .menuIndicator(.hidden)
-                        .fixedSize()
                         Segmented(selection: $prefs.defaultSort.ascending,
                                   options: [(false, Self.directionTitle(prefs.defaultSort.key, ascending: false)),
                                             (true, Self.directionTitle(prefs.defaultSort.key, ascending: true))])
@@ -86,18 +82,14 @@ struct SettingsView: View {
 
             section("New") {
                 SettingRow("Time range") {
-                    Menu {
+                    ChromeMenu {
                         Picker("Time range", selection: $prefs.newRange) {
                             ForEach(RecentsRange.options(for: .new)) { Text($0.title).tag($0) }
                         }
                         .pickerStyle(.inline)
                     } label: {
-                        MenuLabel(title: prefs.newRange.title)
+                        Text(prefs.newRange.title)
                     }
-                    .menuStyle(.button)
-                    .buttonStyle(.plain)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
                 }
                 RowDivider()
                 SettingRow("Hide clutter", hint: "Leaves out Library, hidden folders and dependency folders like node_modules.") {
@@ -212,7 +204,7 @@ private struct TerminalPicker: View {
 
     var body: some View {
         let terminals = Terminal.available(including: selection)
-        Menu {
+        ChromeMenu {
             ForEach(terminals) { terminal in
                 Button {
                     selection = terminal.bundleID
@@ -231,13 +223,9 @@ private struct TerminalPicker: View {
                 if let icon = Terminal(bundleID: selection).icon {
                     Image(nsImage: icon).resizable().frame(width: 16, height: 16)
                 }
-                MenuLabel(title: Terminal(bundleID: selection).name)
+                Text(Terminal(bundleID: selection).name)
             }
         }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
     }
 
     private func chooseOther() {
@@ -257,16 +245,12 @@ private struct FileViewerPicker: View {
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 4) {
-            Menu {
+            ChromeMenu {
                 Button { choose(FolderHandler.thisAppID) } label: { AppName.label(for: FolderHandler.thisAppID) }
                 Button { choose(FolderHandler.finderID) } label: { AppName.label(for: FolderHandler.finderID) }
             } label: {
                 AppName(bundleID: prefs.fileViewerID, isMenu: true)
             }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .fixedSize()
             if let error {
                 Text(error)
                     .font(.system(size: 10.5))
@@ -307,7 +291,7 @@ private struct AppName: View {
                 Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(width: 16, height: 16)
             }
             if isMenu {
-                MenuLabel(title: Self.name(bundleID))
+                Text(Self.name(bundleID))
             } else {
                 Text(Self.name(bundleID))
                     .font(.system(size: 12, weight: .medium))
@@ -340,18 +324,14 @@ private struct StartLocationPicker: View {
     @Bindable var prefs: Prefs
 
     var body: some View {
-        Menu {
+        ChromeMenu {
             Button("Last Folder") { prefs.startLocation = .lastFolder }
             Button("Home") { prefs.startLocation = .home }
             Divider()
             Button("Choose Folder…", action: choose)
         } label: {
-            MenuLabel(title: title)
+            Text(title)
         }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
     }
 
     private var title: String {

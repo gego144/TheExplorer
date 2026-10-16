@@ -35,7 +35,6 @@ struct ActionsMenu: View {
 struct ActionActivity: View {
     private var runner: ActionRunner { .shared }
     @State private var showing = false
-    @State private var hovering = false
     /// Finished runs started before this are no longer shown in the bar.
     @State private var dismissedBefore = Date.distantPast
 
@@ -47,13 +46,8 @@ struct ActionActivity: View {
                     Text(label(run)).lineLimit(1).truncationMode(.middle)
                 }
                 .foregroundStyle(color(run))
-                .padding(.horizontal, 7)
-                .frame(height: 18)
-                .background(hovering ? Theme.hover : .clear, in: .rect(cornerRadius: 5))
-                .contentShape(.rect)
             }
-            .buttonStyle(.plain)
-            .onHover { hovering = $0 }
+            .buttonStyle(PillButtonStyle())
             .frame(maxWidth: 320)
             .help("Show action output")
             .popover(isPresented: $showing, arrowEdge: .top) {
@@ -217,7 +211,7 @@ struct ActionsSettings: View {
             HStack {
                 SectionCaption(title: "Actions")
                 Spacer()
-                Menu {
+                ChromeMenu(style: .button) {
                     Button("Blank Action") { editing = FileAction(name: "", command: "") }
                     Divider()
                     ForEach(FileAction.templates, id: \.name) { template in
@@ -231,10 +225,6 @@ struct ActionsSettings: View {
                     Label("New Action", systemImage: "plus")
                         .font(.system(size: 11.5, weight: .semibold))
                 }
-                .menuStyle(.button)
-                .buttonStyle(SubtleButtonStyle())
-                .menuIndicator(.hidden)
-                .fixedSize()
             }
             VStack(spacing: 0) {
                 if store.actions.isEmpty {
@@ -275,7 +265,7 @@ private struct ActionRow: View {
     let isFirst: Bool
     let isLast: Bool
     let onEdit: () -> Void
-    @State private var hovering = false
+    @State private var hovering = HoverPreview.on
 
     var body: some View {
         HStack(spacing: 10) {
@@ -290,24 +280,24 @@ private struct ActionRow: View {
             HStack(spacing: 4) {
                 small("chevron.up", help: "Move up") { ActionsStore.shared.move(action, by: -1) }.disabled(isFirst)
                 small("chevron.down", help: "Move down") { ActionsStore.shared.move(action, by: 1) }.disabled(isLast)
-                small("trash", help: "Delete") { ActionsStore.shared.remove(action) }
+                small("trash", help: "Delete", destructive: true) { ActionsStore.shared.remove(action) }
             }
-            .opacity(hovering ? 1 : 0.35)
+            .opacity(hovering ? 1 : 0.5)
             Button("Edit", action: onEdit).buttonStyle(SubtleButtonStyle())
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
-        .contentShape(.rect)
-        .onHover { hovering = $0 }
+        .background(hovering ? Theme.hoverFill.opacity(0.6) : .clear)
+        .hoverTracking { hovering = $0 }
+        .animation(Theme.hoverAnimation, value: hovering)
         .onTapGesture(count: 2, perform: onEdit)
     }
 
-    private func small(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
+    private func small(_ symbol: String, help: String, destructive: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 10, weight: .semibold)).frame(width: 20, height: 20)
+            Image(systemName: symbol).font(.system(size: 10, weight: .semibold)).frame(width: 16, height: 16)
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(Theme.textSecondary)
+        .buttonStyle(GhostButtonStyle(padding: 2, tint: Theme.textSecondary, destructive: destructive))
         .help(help)
     }
 }
@@ -332,7 +322,7 @@ struct ActionEditor: View {
             field("Name") {
                 TextField("Convert to HLS", text: $action.name)
                     .textFieldStyle(.plain)
-                    .modifier(FieldChrome())
+                    .formField()
             }
 
             field("Runs on") {
@@ -344,7 +334,7 @@ struct ActionEditor: View {
                 field("File types", hint: "Extensions, separated by commas. Leave empty for any file.") {
                     TextField("mp4, mov", text: $extensions)
                         .textFieldStyle(.plain)
-                        .modifier(FieldChrome())
+                        .formField()
                 }
             }
 
@@ -354,11 +344,14 @@ struct ActionEditor: View {
             }
 
             field("Command") {
-                CommandEditor(text: $action.command)
-                    .padding(6)
-                    .frame(height: 130)
-                    .background(Theme.field, in: .rect(cornerRadius: 7))
-                    .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Theme.fieldBorder))
+                Hovering { hovering in
+                    CommandEditor(text: $action.command)
+                        .padding(6)
+                        .frame(height: 130)
+                        .background(Theme.field, in: .rect(cornerRadius: Theme.controlRadius + 1))
+                        .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius + 1)
+                            .strokeBorder(hovering ? Theme.borderHover : Theme.fieldBorder))
+                }
             }
 
             VStack(alignment: .leading, spacing: 3) {
@@ -460,16 +453,6 @@ private struct CommandEditor: NSViewRepresentable {
     }
 }
 
-private struct FieldChrome: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .font(.system(size: 12))
-            .padding(.horizontal, 8)
-            .frame(height: 26)
-            .background(Theme.field, in: .rect(cornerRadius: 7))
-            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Theme.fieldBorder))
-    }
-}
 
 extension ActionRunner.Run {
     var name: String { action.name }
