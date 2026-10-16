@@ -310,6 +310,11 @@ struct Omnibox: View {
     /// Set when editing begins, so the field exists before it's asked to take focus.
     @State private var editing = false
     @State private var hovering = HoverPreview.on
+    /// Where the bar and its dropdown are, so a click anywhere else can close them.
+    @State private var barFrame = CGRect.zero
+    @State private var listFrame = CGRect.zero
+    @State private var clickMonitor: Any?
+    @Environment(\.controlActiveState) private var controlActiveState
 
     private var isPathMode: Bool { query.hasPrefix("/") || query.hasPrefix("~") }
     private var showsField: Bool { editing || focused || !query.isEmpty }
@@ -365,12 +370,15 @@ struct Omnibox: View {
         .overlay(RoundedRectangle(cornerRadius: Theme.fieldRadius)
             .strokeBorder(invalid ? Theme.danger : (focused ? Theme.accent.opacity(0.7) : (hovering ? Theme.borderHover : Theme.fieldBorder))))
         .hoverTracking { hovering = $0 }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { barFrame = $0 }
         .pointerStyle(showsField ? nil : .horizontalText)
         .animation(Theme.hoverAnimation, value: hovering)
         .onTapGesture { if !showsField { begin("") } }
         .overlay(alignment: .topLeading) {
-            if focused && !listed.isEmpty {
+            // Only in the window you're using: switching away leaves no dropdown behind.
+            if focused && !listed.isEmpty && controlActiveState == .key {
                 SuggestionList(title: isPathMode ? nil : "Recent folders", suggestions: listed, highlighted: highlighted) { go(to: $0) }
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { listFrame = $0 }
                     .offset(y: 34)
             }
         }
@@ -398,11 +406,13 @@ struct Omnibox: View {
             }
         }
         .onChange(of: focused) {
+            watchClicks(focused)
             guard !focused else { return }
             editing = false
             // An unfinished path is a draft; drop it when you leave the field.
             if isPathMode { query = "" }
         }
+        .onDisappear { watchClicks(false) }
         .onChange(of: model.currentURL) { if !focused && isPathMode { query = "" } }
         .onChange(of: model.destination) { if !focused && isPathMode { query = "" } }
         .onChange(of: model.omniboxRequest) {
@@ -413,6 +423,31 @@ struct Omnibox: View {
             editing = false
             focused = false
         }
+    }
+
+    /// While the field has focus, a click anywhere outside the bar and its dropdown ends editing,
+    /// as in Spotlight or Raycast. Clicks on the list or sidebar don't take focus by themselves.
+    /// The click still goes through to whatever was under it.
+    private func watchClicks(_ on: Bool) {
+        if let clickMonitor { NSEvent.removeMonitor(clickMonitor) }
+        clickMonitor = nil
+        // The field just took focus, so its window is the key one (or, in a run that never
+        // came forward, the one whose text field is editing).
+        guard on, let home = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isVisible && $0.firstResponder is NSTextView }) else { return }
+        clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak home] event in
+            guard let home, let content = home.contentView else { return event }
+            let point = CGPoint(x: event.locationInWindow.x, y: content.bounds.height - event.locationInWindow.y)
+            let inside = event.window === home && (barFrame.contains(point) || (!listed.isEmpty && listFrame.contains(point)))
+            if !inside { DispatchQueue.main.async { endEditing() } }
+            return event
+        }
+    }
+
+    /// Leaves the field: an unfinished path is dropped, but a search stays up.
+    private func endEditing() {
+        guard focused || editing else { return }
+        focused = false
+        editing = false
     }
 
     private var scopeChips: some View {
