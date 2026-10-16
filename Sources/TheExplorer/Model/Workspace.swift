@@ -43,7 +43,9 @@ final class Workspace {
 
     /// Opens `url` in a new tab right after the current one.
     func newTab(_ url: URL? = nil, select: Bool = true) {
-        let tab = BrowserModel(url: url ?? selected.currentURL)
+        let s3 = url.flatMap(S3Location.init(url:))
+        let tab = BrowserModel(url: s3 == nil ? url ?? selected.currentURL : selected.currentURL)
+        if let s3 { tab.showS3(s3, recordHistory: false) }
         let index = selectedIndex + 1
         tabs.insert(tab, at: index)
         if select { self.select(index) } else { tab.start() }

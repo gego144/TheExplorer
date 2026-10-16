@@ -11,6 +11,16 @@ struct InspectorView: View {
     }
 
     var body: some View {
+        if model.destination == .s3 {
+            ScrollView { S3Inspector(model: model) }
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
+        } else {
+            local
+        }
+    }
+
+    @ViewBuilder private var local: some View {
         let urls = model.activeSelection
         let focusURL = urls.first ?? (model.destination == .folder && !model.isSearching ? model.currentURL : nil)
         ScrollView {

@@ -9,6 +9,8 @@ enum Destination: Hashable {
     /// Files and folders that appeared recently.
     case newFiles
     case storage
+    /// A connection's buckets, or a folder in an S3 bucket (see `s3`).
+    case s3
 }
 
 enum NewItemKind {
@@ -144,6 +146,7 @@ final class BrowserModel: Identifiable {
 
     let search = SearchModel()
     let recents = RecentsModel(mode: .opened)
+    let s3 = S3Browser()
     let newFiles = RecentsModel(mode: .new)
     @ObservationIgnored private var started = false
     @ObservationIgnored private var pendingSelection: Set<String>?
@@ -177,7 +180,8 @@ final class BrowserModel: Identifiable {
 
     // MARK: - Derived state
 
-    var isSearching: Bool { !searchText.trimmingCharacters(in: .whitespaces).isEmpty }
+    /// Searching files. In S3, the same text filters the folder instead (see S3View).
+    var isSearching: Bool { destination != .s3 && !searchText.trimmingCharacters(in: .whitespaces).isEmpty }
 
     private func rebuildRows() {
         var folders = 0
@@ -301,6 +305,8 @@ final class BrowserModel: Identifiable {
         case .recents: "Recents"
         case .newFiles: "New"
         case .storage: "Storage"
+        case .s3:
+            if let location = s3.location, location.bucket != nil { location.name } else { s3.connection?.name ?? "S3" }
         case .folder: FileManager.default.displayName(atPath: currentURL.path)
         }
     }
@@ -312,6 +318,7 @@ final class BrowserModel: Identifiable {
         case .folder: return selection
         case .recents: return recents.selection
         case .newFiles: return newFiles.selection
+        case .s3: return s3.selection
         case .storage:
             let storage = StorageModel.shared
             guard let id = storage.selection, let node = storage.focus?.children.first(where: { $0.id == id }),
@@ -320,7 +327,9 @@ final class BrowserModel: Identifiable {
         }
     }
 
-    var canGoUp: Bool { destination == .folder && !currentURL.isRoot }
+    var canGoUp: Bool {
+        destination == .s3 ? s3.location?.parent != nil : destination == .folder && !currentURL.isRoot
+    }
 
     // MARK: - Navigation
 
@@ -334,14 +343,20 @@ final class BrowserModel: Identifiable {
     }
 
     func navigate(to url: URL, selecting: [URL], recordHistory: Bool = true) {
+        if let location = S3Location(url: url) {
+            showS3(location, recordHistory: recordHistory)
+            return
+        }
         let url = url.standardizedFileURL
         searchText = ""
+        let leaving = historyURL
+        let wasS3 = destination == .s3
         destination = .folder
+        if recordHistory && (url != currentURL || wasS3) {
+            backStack.append(leaving)
+            forwardStack.removeAll()
+        }
         if url != currentURL {
-            if recordHistory {
-                backStack.append(currentURL)
-                forwardStack.removeAll()
-            }
             currentURL = url
             expanded = []
             children = [:]
@@ -353,20 +368,41 @@ final class BrowserModel: Identifiable {
         reload(selecting: selecting.isEmpty ? nil : selecting.map(\.standardizedFileURL))
     }
 
+    /// Where history records you are: the S3 location when browsing S3, otherwise the folder.
+    private var historyURL: URL {
+        destination == .s3 ? s3.location?.url ?? currentURL : currentURL
+    }
+
+    /// Browses a connection's buckets or a folder in a bucket.
+    func showS3(_ location: S3Location, recordHistory: Bool = true) {
+        searchText = ""
+        if recordHistory, historyURL != location.url || destination != .s3 {
+            backStack.append(historyURL)
+            forwardStack.removeAll()
+        }
+        destination = .s3
+        s3.show(location)
+    }
+
     func goBack() {
         guard let previous = backStack.popLast() else { return }
-        forwardStack.append(currentURL)
-        navigate(to: previous, select: currentURL, recordHistory: false)
+        let leaving = historyURL
+        forwardStack.append(leaving)
+        navigate(to: previous, selecting: leaving.isFileURL ? [leaving] : [], recordHistory: false)
     }
 
     func goForward() {
         guard let next = forwardStack.popLast() else { return }
-        backStack.append(currentURL)
+        backStack.append(historyURL)
         navigate(to: next, recordHistory: false)
     }
 
     func goUp() {
         guard canGoUp else { return }
+        if destination == .s3, let parent = s3.location?.parent {
+            showS3(parent)
+            return
+        }
         navigate(to: currentURL.deletingLastPathComponent(), select: currentURL)
     }
 
@@ -493,6 +529,13 @@ final class BrowserModel: Identifiable {
         }
         let target = urls ?? activeSelection
         guard !target.isEmpty else { return }
+        if let first = target.first, first.scheme == S3Location.scheme {
+            // S3 objects are downloaded to a cache first (only the first of a selection).
+            if !first.absoluteString.hasSuffix("/") {
+                S3Transfers.shared.fetchForViewing(first) { [weak self] file in self?.preview(file) }
+            }
+            return
+        }
         let rows = rows ?? (destination == .folder && !isSearching ? self.rows : [])
         let ordered = rows.map(\.id).filter(target.contains)
         let items = ordered.count == target.count ? ordered : target.sorted { $0.path < $1.path }
@@ -535,7 +578,7 @@ final class BrowserModel: Identifiable {
         case .folder: selection = [url]
         case .recents: recents.selection = [url]
         case .newFiles: newFiles.selection = [url]
-        case .storage: break
+        case .storage, .s3: break
         }
     }
 
@@ -610,8 +653,24 @@ final class BrowserModel: Identifiable {
     /// Returns false when nothing could be dropped there, so the drop is rejected.
     @discardableResult
     func receiveDrop(_ urls: [URL], into folder: URL) -> Bool {
+        // Dropping onto an S3 folder (or anything showing one) uploads.
+        if let target = S3Location(url: folder) {
+            let files = urls.filter(\.isFileURL)
+            guard target.bucket != nil, !files.isEmpty else { return false }
+            S3Transfers.shared.upload(files, to: target)
+            return true
+        }
         let folder = folder.standardizedFileURL
-        let sources = FileTransfer.validSources(urls, into: folder)
+        // Items dragged from S3 download into the folder.
+        let fromS3 = urls.filter { $0.scheme == S3Location.scheme }
+        if !fromS3.isEmpty {
+            S3Transfers.shared.download(fromS3, into: folder) { [weak self] placed in
+                guard let self, folder == self.currentURL else { return }
+                self.reload(selecting: placed)
+            }
+            if fromS3.count == urls.count { return true }
+        }
+        let sources = FileTransfer.validSources(urls.filter(\.isFileURL), into: folder)
         guard !sources.isEmpty else { return false }
         let optionHeld = NSEvent.modifierFlags.contains(.option)
         let copying = sources.contains { FileTransfer.mode(for: $0, into: folder, optionHeld: optionHeld) == .copy }

@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 
 /// The Settings window's tabs.
 enum SettingsTab: Hashable {
-    case general, actions
+    case general, actions, cloud
 }
 
 /// Where new windows start.

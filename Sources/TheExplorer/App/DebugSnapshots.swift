@@ -78,9 +78,19 @@ enum DebugSnapshots {
             case "tab": workspace.select((Int(argument) ?? 1) - 1)
             case "omnibox": model.omniboxRequest = OmniboxRequest(text: parts.count > 1 ? parts[1] : "")
             case "drop":
-                // drop:<source>><destination folder>, the same path a real drop takes.
-                let ends = argument.components(separatedBy: ">").map { ($0 as NSString).expandingTildeInPath }
-                model.receiveDrop([URL(fileURLWithPath: ends[0])], into: URL(fileURLWithPath: ends[1]))
+                // drop:<sources, comma-separated>><destination folder>, the same path a real drop
+                // takes. "s3:bucket/key" names an S3 item in the first connection.
+                let ends = (parts.count > 1 ? parts[1] : "").components(separatedBy: ">")
+                model.receiveDrop(ends[0].split(separator: ",").map { Self.debugURL(String($0)) }, into: Self.debugURL(ends[1]))
+            case "s3":
+                // s3: shows the first connection; s3:bucket/prefix/ a folder in it.
+                // The raw argument: tilde expansion would drop the trailing "/" that marks a folder.
+                if let url = S3Location(url: Self.debugURL("s3:" + (parts.count > 1 ? parts[1] : ""))) { model.showS3(url) }
+            case "back": model.goBack()
+            case "transfers":
+                for transfer in S3Transfers.shared.transfers {
+                    log("transfer \(transfer.kind) \(transfer.title): \(transfer.state) \(transfer.doneItems)/\(transfer.totalItems) items \(transfer.doneBytes)/\(transfer.totalBytes) bytes")
+                }
             case "probe":
                 // Which protected locations can this build read? (Full Disk Access diagnostics)
                 let home = URL.home.path
@@ -145,12 +155,14 @@ enum DebugSnapshots {
             case "stop":
                 // Stops the newest running action, as its Stop button does.
                 if let run = ActionRunner.shared.runs.first(where: { $0.state == .running }) { ActionRunner.shared.cancel(run.id) }
-            case "settings", "actionruns", "actioneditor":
+            case "settings", "actionruns", "actioneditor", "connectioneditor", "transferlist":
                 // A window ordered in behind, so capture() picks it up. settings:actions opens that tab.
-                if parts[0] == "settings" { Prefs.shared.settingsTab = argument == "actions" ? .actions : .general }
+                if parts[0] == "settings" { Prefs.shared.settingsTab = argument == "actions" ? .actions : (argument == "cloud" ? .cloud : .general) }
                 let root: AnyView = switch parts[0] {
                 case "actionruns": AnyView(ActionRunsView(onClear: {}))
                 case "actioneditor": AnyView(ActionEditor(action: FileAction.templates[0]) {})
+                case "connectioneditor": AnyView(ConnectionEditor(draft: S3Store.shared.connections.first.map { ConnectionDraft($0) } ?? .keys()) {})
+                case "transferlist": AnyView(TransfersView(onClear: {}))
                 default: AnyView(SettingsView())
                 }
                 let window = NSWindow(contentViewController: NSHostingController(rootView: root))
@@ -199,7 +211,7 @@ enum DebugSnapshots {
             log("\(scene) timing: first content \(firstContent.map { String(format: "%.2fs", $0) } ?? "never"), worst main-thread stall \(HangWatchdog.worst)ms, stalls>100ms \(HangWatchdog.stalls) · recents=\(shown.recents.rows.count) new=\(shown.newFiles.rows.count) total=\(shown.newFiles.totalCount.map(String.init) ?? "nil") more=\(shown.newFiles.hasMore) gathering=\(shown.newFiles.isGathering) hits=\(shown.search.hits.count)")
             let names = shown.rows.prefix(40).map { "\($0.item.name)@\(RelativeTime.short($0.item.modified))" }.joined(separator: ",")
             let selected = shown.selection.map(\.lastPathComponent).sorted().joined(separator: ",")
-            log("\(scene) -> tabs=\(workspace.tabs.count) view=\(shown.destination) search=\"\(shown.searchText)\" expanded=\(shown.expanded.map(\.lastPathComponent).sorted()) firstResponder=\(InputDriver.window?.firstResponder.map { String(describing: type(of: $0)) } ?? "nil") key=\(InputDriver.window?.isKeyWindow ?? false) active=\(NSApp.isActive) url=\(shown.currentURL.path) items=[\(names)] selected=[\(selected)] error=\(shown.loadError ?? "none") preview=\(shown.previewURL?.lastPathComponent ?? "nil")/\(shown.previewItems.count) windows=\(NSApp.windows.filter { $0.isVisible && $0.canBecomeMain }.map(\.title))")
+            log("\(scene) -> tabs=\(workspace.tabs.count) view=\(shown.destination) search=\"\(shown.searchText)\" expanded=\(shown.expanded.map(\.lastPathComponent).sorted()) firstResponder=\(InputDriver.window?.firstResponder.map { String(describing: type(of: $0)) } ?? "nil") key=\(InputDriver.window?.isKeyWindow ?? false) active=\(NSApp.isActive) url=\(shown.currentURL.path) items=[\(names)] selected=[\(selected)] error=\(shown.loadError ?? "none") preview=\(shown.previewURL?.lastPathComponent ?? "nil")/\(shown.previewItems.count) s3=\(shown.destination == .s3 ? (shown.s3.location?.uri ?? "?") + " rows=\(shown.s3.rows.map(\.item.name))" + (shown.s3.error.map { " error=\($0)" } ?? "") : "-") windows=\(NSApp.windows.filter { $0.isVisible && $0.canBecomeMain }.map(\.title))")
             if env["EXPLORER_NO_CAPTURE"] == nil { capture(to: "\(dir)/\(index)-\(parts[0]).png") }
         }
         if env["EXPLORER_SNAPSHOT_QUIT"] != nil { NSApp.terminate(nil) }
@@ -212,7 +224,20 @@ enum DebugSnapshots {
         case .newFiles: return !model.newFiles.rows.isEmpty
         case .folder: return !model.items.isEmpty
         case .storage: return StorageModel.shared.focus != nil
+        case .s3: return !model.s3.rows.isEmpty || model.s3.error != nil
         }
+    }
+
+    /// A file path, or "s3:bucket/key" for an item in the first S3 connection.
+    private static func debugURL(_ text: String) -> URL {
+        if text.hasPrefix("s3:"), let connection = S3Store.shared.connections.first {
+            let path = text.dropFirst(3)
+            guard let slash = path.firstIndex(of: "/") else {
+                return path.isEmpty ? connection.root.url : S3Location.url(connectionID: connection.id, bucket: String(path), key: "")
+            }
+            return S3Location.url(connectionID: connection.id, bucket: String(path[..<slash]), key: String(path[path.index(after: slash)...]))
+        }
+        return URL(fileURLWithPath: (text as NSString).expandingTildeInPath)
     }
 
     private static func textViews(in view: NSView?) -> [NSTextView] {

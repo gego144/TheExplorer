@@ -7,12 +7,13 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Segmented(selection: $prefs.settingsTab, options: [(.general, "General"), (.actions, "Actions")])
+            Segmented(selection: $prefs.settingsTab, options: [(.general, "General"), (.actions, "Actions"), (.cloud, "Cloud")])
                 .fixedSize()
                 .frame(maxWidth: .infinity)
             switch prefs.settingsTab {
             case .general: general
             case .actions: ActionsSettings()
+            case .cloud: CloudSettings()
             }
         }
         .toggleStyle(WorkbenchSwitchStyle())

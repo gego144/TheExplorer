@@ -66,6 +66,7 @@ struct WorkspaceView: View {
             case .recents: RecentsView(model: model, recents: model.recents)
             case .newFiles: RecentsView(model: model, recents: model.newFiles)
             case .storage: StorageView(model: model)
+            case .s3: S3View(model: model)
             }
         }
     }
@@ -241,6 +242,7 @@ private struct TabItem: View {
         case .recents: return "clock.fill"
         case .newFiles: return "sparkles"
         case .storage: return "chart.pie.fill"
+        case .s3: return "cloud.fill"
         }
     }
 }
@@ -336,7 +338,7 @@ struct Omnibox: View {
                     .onKeyPress(.upArrow) { moveHighlight(-1) }
                     .onKeyPress(.tab) { complete() }
                 if !isPathMode && !query.isEmpty {
-                    scopeChips
+                    if model.destination != .s3 { scopeChips }
                 }
                 if !query.isEmpty {
                     Button(action: cancel) {
@@ -348,7 +350,7 @@ struct Omnibox: View {
                 Breadcrumbs(model: model)
                 Spacer(minLength: 8)
                 HStack(spacing: 6) {
-                    Text("search or go to path")
+                    Text(model.destination == .s3 ? "filter this folder" : "search or go to path")
                     Text("⌘K")
                         .font(.system(size: 10, weight: .medium))
                         .padding(.horizontal, 4)
@@ -565,7 +567,7 @@ private struct Breadcrumbs: View {
 
     private var trail: [URL] {
         switch model.destination {
-        case .recents, .newFiles, .storage: return []
+        case .recents, .newFiles, .storage, .s3: return []
         case .folder:
             var urls: [URL] = []
             var url = model.currentURL
@@ -580,7 +582,9 @@ private struct Breadcrumbs: View {
     }
 
     var body: some View {
-        if model.destination != .folder {
+        if model.destination == .s3 {
+            S3Breadcrumbs(model: model)
+        } else if model.destination != .folder {
             Chip(title: model.title, isCurrent: true)
         } else {
             let trail = trail
@@ -701,6 +705,7 @@ struct StatusBar: View {
                 ProgressView().controlSize(.mini)
             }
             Spacer()
+            TransferActivity()
             ActionActivity()
             if let volume = model.volume {
                 Text(volume.name).foregroundStyle(Theme.textSecondary)
@@ -726,6 +731,12 @@ struct StatusBar: View {
         switch model.destination {
         case .recents, .newFiles, .storage:
             return model.title.lowercased()
+        case .s3:
+            let (folders, files) = model.s3.counts
+            var text = "\(folders.formatted()) \(folders == 1 ? "folder" : "folders") · \(files.formatted()) \(files == 1 ? "file" : "files")"
+            if model.s3.hasMore { text += "+" }
+            if !model.s3.selection.isEmpty { text += " · \(model.s3.selection.count.formatted()) selected" }
+            return text
         case .folder:
             let folders = model.folderCount, files = model.fileCount
             var text = "\(folders.formatted()) \(folders == 1 ? "dir" : "dirs") · \(files.formatted()) \(files == 1 ? "file" : "files")"

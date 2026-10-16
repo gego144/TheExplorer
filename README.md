@@ -67,6 +67,21 @@ Scan your home folder, the whole Mac, or any folder. Drill into a treemap and a 
 
 <img src="docs/screenshots/storage.png" alt="The storage treemap and ranked folder list" width="100%">
 
+### S3, like a folder
+
+Connect S3 in Settings › Cloud and your buckets show up in the sidebar. Browse them like any folder, with the same list, breadcrumbs, back/forward, filtering and inspector.
+
+- **Upload:** drop files or folders onto an S3 folder, a folder row, a breadcrumb or the sidebar connection. Folders upload with everything in them, and big files upload in parallel parts.
+- **Download:** drag S3 items onto any local folder, tab, sidebar place or breadcrumb, or right-click › Download. Double-click opens a file and Space previews it.
+- **Share and manage:** right-click to copy an `s3://` URI or a share link that works for 7 days, create folders, or delete.
+- **Progress:** the status bar shows progress with Stop for every transfer.
+- **Credentials:** use your AWS CLI profiles as they are. That includes SSO and assumed roles, through `aws configure export-credentials`. Or add access keys, which are kept in your Keychain.
+- **Other providers:** S3-compatible services (Cloudflare R2, MinIO, Backblaze B2, Wasabi…) work with a custom endpoint.
+
+The app signs requests itself (AWS Signature Version 4, checked against AWS's published examples) and talks to S3 directly, with no SDK. One limit: S3 items can be dragged onto folders inside TheExplorer, but not straight to Finder or the desktop yet; use Download for those.
+
+<img src="docs/screenshots/s3.png" alt="Browsing an S3 bucket" width="100%">
+
 ### Actions
 
 Turn the shell commands you run on files into one-click actions. Define one in Settings › Actions (a name, the file types it applies to, and the command), then run it from the right-click menu or the Actions menu, where the first nine get ⌃⌥1–9. For example, converting a video to HLS:
@@ -158,7 +173,7 @@ For the storage scan to include protected folders like Mail and Messages, grant 
 Sources/TheExplorer/
   App/        App entry point, menu commands, tabs and session restore, debug scenes and input
   Model/      Per-window browser state, search, recents, storage, settings, actions
-  Services/   Disk scanner, folder size cache, favorites, Spotlight wrapper, zip reader, directory watcher
+  Services/   Disk scanner, folder size cache, favorites, Spotlight wrapper, zip reader, S3 client and signer, directory watcher
   Views/      SwiftUI views (file list, sidebar, search, recents, storage and treemap, inspector, previews, settings)
   Util/       Formatting and icon caching
 Resources/    Info.plist and app icon
@@ -211,7 +226,7 @@ open -g -n --env EXPLORER_SNAPSHOT_DIR=/tmp/shots --env EXPLORER_SNAPSHOT_QUIT=1
     build/debug/TheExplorer.app
 ```
 
-Scenes are separated by `;`. The available scenes are `folder:<path>`, `select:<path>`, `newtab:<path>`, `tab:<n>`, `omnibox:<text>`, `expand:<path>`, `recents`, `new`, `range:<days>` (0 for all time), `more` (load the next page), `search:<text>`, `searchmac:<text>`, `scope:mac|folder`, `create:folder|file`, `drop:<source>><folder>`, `storage[:<path>]`, `settings[:actions]` (shows the Settings window, optionally on its Actions tab), `actioneditor` (shows the action editor; `type:` scenes after it go to the command field), `editortext` (logs the command field), `runs` (logs every action run's state and output), `stop` (stops the newest running action), `menu:<name>` (logs a menu bar menu's items), `reveal:<path>[,<path>…]` (sends the app the reveal event other apps' "Show in Finder" uses), `viewer:<bundle id>` (sets the file viewer and logs it back; pass the current one to change nothing) and `wait:<seconds>`.
+Scenes are separated by `;`. The available scenes are `folder:<path>`, `select:<path>`, `newtab:<path>`, `tab:<n>`, `omnibox:<text>`, `expand:<path>`, `recents`, `new`, `range:<days>` (0 for all time), `more` (load the next page), `search:<text>`, `searchmac:<text>`, `scope:mac|folder`, `create:folder|file`, `drop:<source>><folder>`, `storage[:<path>]`, `settings[:actions]` (shows the Settings window, optionally on its Actions tab), `actioneditor` (shows the action editor; `type:` scenes after it go to the command field), `editortext` (logs the command field), `runs` (logs every action run's state and output), `stop` (stops the newest running action), `menu:<name>` (logs a menu bar menu's items), `s3:[bucket/prefix/]` (browses the first S3 connection), `transfers` (logs uploads and downloads), `back`, `reveal:<path>[,<path>…]` (sends the app the reveal event other apps' "Show in Finder" uses), `viewer:<bundle id>` (sets the file viewer and logs it back; pass the current one to change nothing) and `wait:<seconds>`.
 
 Scenes can also drive the app with real input:
 
@@ -223,7 +238,7 @@ Scenes can also drive the app with real input:
 
 The events go only to the app's own window (see `App/InputDriver.swift`), so they never touch your mouse or keyboard and need no permissions. Launch with `open -g` so the app never takes focus; running the binary directly can leave the app without a window. To run fully hidden and just read the log, add `-j` and `--env EXPLORER_NO_CAPTURE=1`. Don't double-click file rows in scenes: opening a file launches its app.
 
-**README screenshots** come from demo mode. `EXPLORER_DEMO=1` shows only the startup disk in the sidebar and puts the window on a Retina screen, so captures are sharp. `EXPLORER_DEMO_PINS` sets the pinned folders (paths separated by `;`), and demo pins are never saved over your own. Point the scenes at a demo folder rather than your own files. `EXPLORER_ACTIONS_FILE` gives a run its own action list, so tests never touch yours.
+**README screenshots** come from demo mode. `EXPLORER_DEMO=1` shows only the startup disk in the sidebar and puts the window on a Retina screen, so captures are sharp. `EXPLORER_DEMO_PINS` sets the pinned folders (paths separated by `;`), and demo pins are never saved over your own. Point the scenes at a demo folder rather than your own files. `EXPLORER_ACTIONS_FILE` and `EXPLORER_S3_FILE` give a run its own action list and S3 connections, so tests never touch yours. `drop:` accepts `s3:bucket/key` for S3 items.
 
 </details>
 
@@ -252,6 +267,21 @@ The icon is drawn in code. After changing `scripts/make-icon.swift`, regenerate 
 ```sh
 swift scripts/make-icon.swift   # writes Resources/AppIcon.icns
 sips -s format png -z 256 256 Resources/AppIcon.icns --out docs/icon.png
+```
+
+</details>
+
+<details>
+<summary><b>Testing S3 without AWS</b></summary>
+
+<br>
+
+The S3 client's integration tests run against any S3-compatible server; they're skipped unless one is set:
+
+```sh
+python3 -m venv /tmp/motoenv && /tmp/motoenv/bin/pip install "moto[server]"
+/tmp/motoenv/bin/moto_server -p 5055 &
+EXPLORER_S3_TEST_ENDPOINT=http://127.0.0.1:5055 swift test --filter S3
 ```
 
 </details>

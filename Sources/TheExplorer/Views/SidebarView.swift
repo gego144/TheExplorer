@@ -34,6 +34,8 @@ struct SidebarView: View {
                 SidebarRow(title: "New", systemImage: "sparkles", isSelected: isShowing(.newFiles)) { model.show(.newFiles) }
                 SidebarRow(title: "Storage", systemImage: "chart.pie", isSelected: isShowing(.storage)) { model.show(.storage) }
 
+                CloudSection(model: model)
+
                 caption("Places")
                 ForEach(Self.places, id: \.url) { place in
                     SidebarRow(title: place.title, systemImage: place.symbol, isSelected: isShowing(place.url), dropURL: place.url, model: model) {
@@ -253,5 +255,40 @@ private struct EjectButton: View {
         }
         .buttonStyle(.plain)
         .help("Eject")
+    }
+}
+
+/// S3 connections: click to browse, drop files on one (with a bucket set) to upload.
+private struct CloudSection: View {
+    let model: BrowserModel
+    @Environment(\.openSettings) private var openSettings
+    @Environment(\.openTab) private var openTab
+
+    var body: some View {
+        SectionCaption(title: "Cloud")
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 8)
+            .padding(.top, 12)
+            .padding(.bottom, 4)
+        let connections = S3Store.shared.connections
+        if connections.isEmpty {
+            SidebarRow(title: "Connect S3…", systemImage: "plus.circle", isSelected: false, dimmed: true) { showSettings() }
+        }
+        ForEach(connections) { connection in
+            let isCurrent = model.destination == .s3 && model.s3.location?.connectionID == connection.id
+            SidebarRow(title: connection.name, systemImage: "cloud", isSelected: isCurrent,
+                       dropURL: connection.bucket.isEmpty ? nil : connection.root.url, model: model) {
+                model.showS3(connection.root)
+            }
+            .contextMenu {
+                Button("Open in New Tab") { openTab(connection.root.url) }
+                Button("Edit Connection…") { showSettings() }
+            }
+        }
+    }
+
+    private func showSettings() {
+        Prefs.shared.settingsTab = .cloud
+        openSettings()
     }
 }
