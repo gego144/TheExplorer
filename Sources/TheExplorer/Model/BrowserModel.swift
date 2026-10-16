@@ -152,6 +152,9 @@ final class BrowserModel: Identifiable {
     @ObservationIgnored private var pendingSelection: Set<String>?
     @ObservationIgnored private var listingFailed = false
     @ObservationIgnored private var loadTask: Task<Void, Never>?
+    /// The git repository the folder is in, if any; rows show their status from it.
+    private(set) var git: GitRepository?
+    @ObservationIgnored private var gitTask: Task<Void, Never>?
     @ObservationIgnored private lazy var watcher = DirectoryWatcher { [weak self] in self?.reload(keepSelection: true) }
     @ObservationIgnored private var sizeObserver: NSObjectProtocol?
 
@@ -483,6 +486,25 @@ final class BrowserModel: Identifiable {
                 self.listingFailed = true
             }
             self.watcher.watch(url)
+        }
+        findRepository()
+    }
+
+    /// Picks up the repository the current folder is in (shared with other tabs in it).
+    private func findRepository() {
+        // A few stats up the path; repositories nested in others count as their own.
+        let top = currentURL.isFileURL ? Git.enclosingRepository(of: currentURL.standardizedFileURL.path) : nil
+        if top == git?.root { return }
+        gitTask?.cancel()
+        guard top != nil else {
+            git = nil
+            return
+        }
+        let url = currentURL
+        gitTask = Task { [weak self] in
+            let repository = await GitRepositories.repository(containing: url)
+            guard let self, !Task.isCancelled, url == self.currentURL else { return }
+            self.git = repository
         }
     }
 

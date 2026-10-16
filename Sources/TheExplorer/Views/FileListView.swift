@@ -69,6 +69,8 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
     var onReachEnd: (() -> Void)?
     /// Shown below the last row.
     var footer: AnyView?
+    /// Git status for a row, in a repository.
+    var gitMark: ((URL) -> GitMark?)?
     @ViewBuilder let rowMenu: (Set<URL>) -> RowMenu
     @ViewBuilder let backgroundMenu: () -> BackgroundMenu
 
@@ -255,6 +257,7 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
         let cut = FileClipboard.shared.cutItems
         return RowContent(row: row, isSelected: isSelected, listFocused: focused, isDropTarget: dropTarget == row.id,
                           isCut: !cut.isEmpty && cut.contains(row.id.standardizedFileURL),
+                          git: gitMark?(row.id),
                           maxSize: maxSize, showLocation: showLocation,
                           onToggle: row.expansion != nil ? onToggleExpand.map { toggle in { toggle(row.id) } } : nil)
             .equatable()
@@ -352,6 +355,28 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
 
 /// What a row draws. Equatable, so when the selection moves SwiftUI only redraws the rows whose
 /// state changed; hover is local for the same reason.
+/// A row's git status: a letter for a changed file, a dot for a folder with changes inside.
+private struct GitBadge: View {
+    let mark: GitMark
+
+    var body: some View {
+        switch mark {
+        case .changed(let change):
+            Text(change.letter)
+                .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                .foregroundStyle(change.color)
+                .help(change.title)
+        case .contains(let change, let count):
+            Circle()
+                .fill(change.color)
+                .frame(width: 5, height: 5)
+                .help(count == 1 ? "1 change inside" : "\(count) changes inside")
+        case .ignored:
+            EmptyView()
+        }
+    }
+}
+
 private struct RowContent: View, Equatable {
     let row: ListRow
     let isSelected: Bool
@@ -359,6 +384,7 @@ private struct RowContent: View, Equatable {
     let isDropTarget: Bool
     /// Cut with ⌘X and waiting to be pasted: shown faded.
     let isCut: Bool
+    let git: GitMark?
     let maxSize: Int64
     let showLocation: Bool
     /// Expands or collapses this folder. Not part of equality.
@@ -370,7 +396,7 @@ private struct RowContent: View, Equatable {
 
     static func == (lhs: RowContent, rhs: RowContent) -> Bool {
         lhs.isSelected == rhs.isSelected && lhs.listFocused == rhs.listFocused && lhs.isDropTarget == rhs.isDropTarget
-            && lhs.isCut == rhs.isCut
+            && lhs.isCut == rhs.isCut && lhs.git == rhs.git
             && lhs.maxSize == rhs.maxSize && lhs.showLocation == rhs.showLocation
             && lhs.row.item == rhs.row.item && lhs.row.size == rhs.row.size && lhs.row.date == rhs.row.date
             && lhs.row.location == rhs.row.location && lhs.row.liveFolderSize == rhs.row.liveFolderSize
@@ -387,7 +413,7 @@ private struct RowContent: View, Equatable {
             HStack(spacing: 5) {
                 Text(item.name)
                     .font(.system(size: 12.5, weight: item.isFolder ? .semibold : .regular))
-                    .foregroundStyle(item.isHidden ? Theme.textTertiary : Theme.text)
+                    .foregroundStyle(item.isHidden || git == .ignored ? Theme.textTertiary : Theme.text)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 if item.isSymlink {
@@ -396,6 +422,7 @@ private struct RowContent: View, Equatable {
                         .foregroundStyle(Theme.textTertiary)
                         .help("Alias or symbolic link")
                 }
+                if let git { GitBadge(mark: git) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             if showLocation {

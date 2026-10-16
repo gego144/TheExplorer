@@ -348,6 +348,9 @@ struct Omnibox: View {
                 }
             } else {
                 Breadcrumbs(model: model)
+                if model.destination == .folder, let snapshot = model.git?.snapshot {
+                    GitBranchChip(snapshot: snapshot)
+                }
                 Spacer(minLength: 8)
                 HStack(spacing: 6) {
                     Text(model.destination == .s3 ? "filter this folder" : "search or go to path")
@@ -557,6 +560,49 @@ private struct SuggestionList: View {
         .background(Theme.surface, in: .rect(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.fieldBorder))
         .shadow(color: .black.opacity(0.5), radius: 18, y: 8)
+    }
+}
+
+/// The branch the folder's repository is on: "⎇ dev ↑2 · 8 changed".
+private struct GitBranchChip: View {
+    let snapshot: GitSnapshot
+
+    var body: some View {
+        let changes = snapshot.changeCount
+        HStack(spacing: 5) {
+            Image(systemName: "arrow.triangle.branch")
+                .font(.system(size: 9.5, weight: .semibold))
+            Text(Self.shortened(snapshot.branch ?? snapshot.commit ?? "detached"))
+            if snapshot.ahead > 0 { Text("↑\(snapshot.ahead)") }
+            if snapshot.behind > 0 { Text("↓\(snapshot.behind)") }
+            if changes > 0 {
+                Text("· \(changes)").foregroundStyle(Theme.warning)
+            }
+        }
+        .font(.system(size: 11, design: .monospaced))
+        .foregroundStyle(Theme.textSecondary)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 2)
+        .background(Theme.raised, in: .capsule)
+        .fixedSize()
+        .help(help)
+    }
+
+    /// Long branch names keep their start and end: "david/campaign…banner-fix".
+    static func shortened(_ name: String) -> String {
+        name.count > 30 ? name.prefix(14) + "…" + name.suffix(14) : name
+    }
+
+    private var help: String {
+        var lines = [snapshot.branch.map { "On branch \($0)" } ?? "Detached at \(snapshot.commit ?? "?")"]
+        if let upstream = snapshot.upstream {
+            var tracking = "Tracking \(upstream)"
+            if snapshot.ahead > 0 || snapshot.behind > 0 { tracking += ": \(snapshot.ahead) ahead, \(snapshot.behind) behind" }
+            lines.append(tracking)
+        }
+        let changes = snapshot.changeCount
+        lines.append(changes == 0 ? "No changes" : (changes == 1 ? "1 changed file" : "\(changes) changed files"))
+        return lines.joined(separator: "\n")
     }
 }
 

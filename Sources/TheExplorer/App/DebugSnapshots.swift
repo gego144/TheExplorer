@@ -306,10 +306,19 @@ enum DebugSnapshots {
             log("\(scene) timing: first content \(firstContent.map { String(format: "%.2fs", $0) } ?? "never"), worst main-thread stall \(HangWatchdog.worst)ms, stalls>100ms \(HangWatchdog.stalls) · recents=\(shown.recents.rows.count) new=\(shown.newFiles.rows.count) total=\(shown.newFiles.totalCount.map(String.init) ?? "nil") more=\(shown.newFiles.hasMore) gathering=\(shown.newFiles.isGathering) hits=\(shown.search.hits.count)")
             let names = shown.rows.prefix(40).map { "\($0.item.name)@\(RelativeTime.short($0.item.modified))" }.joined(separator: ",")
             let selected = shown.selection.map(\.lastPathComponent).sorted().joined(separator: ",")
-            log("\(scene) -> tabs=\(workspace.tabs.count) view=\(shown.destination) search=\"\(shown.searchText)\" expanded=\(shown.expanded.map(\.lastPathComponent).sorted()) firstResponder=\(InputDriver.window?.firstResponder.map { String(describing: type(of: $0)) } ?? "nil") key=\(InputDriver.window?.isKeyWindow ?? false) active=\(NSApp.isActive) url=\(shown.currentURL.path) items=[\(names)] selected=[\(selected)] error=\(shown.loadError ?? "none") preview=\(shown.previewURL?.lastPathComponent ?? "nil")/\(shown.previewItems.count) s3=\(shown.destination == .s3 ? (shown.s3.location?.uri ?? "?") + " rows=\(shown.s3.rows.map(\.item.name))" + (shown.s3.error.map { " error=\($0)" } ?? "") : "-") windows=\(NSApp.windows.filter { $0.isVisible && $0.canBecomeMain }.map(\.title)) undoMenu=\(undoMenuTitles()) history=\(FileHistory.shared.undoStack.map(\.name))/\(FileHistory.shared.redoStack.map(\.name))")
+            log("\(scene) -> tabs=\(workspace.tabs.count) view=\(shown.destination) search=\"\(shown.searchText)\" expanded=\(shown.expanded.map(\.lastPathComponent).sorted()) firstResponder=\(InputDriver.window?.firstResponder.map { String(describing: type(of: $0)) } ?? "nil") key=\(InputDriver.window?.isKeyWindow ?? false) active=\(NSApp.isActive) url=\(shown.currentURL.path) items=[\(names)] selected=[\(selected)] error=\(shown.loadError ?? "none") preview=\(shown.previewURL?.lastPathComponent ?? "nil")/\(shown.previewItems.count) s3=\(shown.destination == .s3 ? (shown.s3.location?.uri ?? "?") + " rows=\(shown.s3.rows.map(\.item.name))" + (shown.s3.error.map { " error=\($0)" } ?? "") : "-") windows=\(NSApp.windows.filter { $0.isVisible && $0.canBecomeMain }.map(\.title)) git=\(gitSummary(shown)) undoMenu=\(undoMenuTitles()) history=\(FileHistory.shared.undoStack.map(\.name))/\(FileHistory.shared.redoStack.map(\.name))")
             if env["EXPLORER_NO_CAPTURE"] == nil { capture(to: "\(dir)/\(index)-\(parts[0]).png") }
         }
         if env["EXPLORER_SNAPSHOT_QUIT"] != nil { NSApp.terminate(nil) }
+    }
+
+    /// "main/2 a.txt:changed(modified),…": the branch, change count and each row's mark.
+    private static func gitSummary(_ model: BrowserModel) -> String {
+        guard let snapshot = model.git?.snapshot else { return "none" }
+        let marks = model.rows.compactMap { row in
+            snapshot.mark(for: row.id.standardizedFileURL.path).map { "\(row.item.name):\($0)" }
+        }
+        return "\(snapshot.branch ?? "?")/\(snapshot.changeCount) " + marks.joined(separator: ",")
     }
 
     /// What the Edit menu's ⌘Z and ⇧⌘Z items say right now.

@@ -29,6 +29,7 @@ struct FolderView: View {
                 onDropInto: { urls, folder in model.receiveDrop(urls, into: folder) },
                 onDropBackground: { model.receiveDrop($0, into: model.currentURL) },
                 onToggleExpand: { model.toggleExpanded($0) },
+                gitMark: model.git?.snapshot.map { snapshot in { snapshot.mark(for: $0.standardizedFileURL.path) } },
                 rowMenu: { FileContextMenu(urls: $0, model: model) },
                 backgroundMenu: { FolderBackgroundMenu(model: model) }
             )
