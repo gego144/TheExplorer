@@ -200,9 +200,29 @@ enum DebugSnapshots {
             case "menu":
                 // Logs a menu bar menu's items: title, enabled, shortcut.
                 let menu = NSApp.mainMenu?.items.first { $0.title == argument }?.submenu
-                menu?.update()
+                // As when it opens, so SwiftUI brings its items up to date.
+                if let menu {
+                    menu.delegate?.menuNeedsUpdate?(menu)
+                    menu.delegate?.menuWillOpen?(menu)
+                    menu.update()
+                    menu.delegate?.menuDidClose?(menu)
+                }
                 for item in menu?.items ?? [] where !item.isSeparatorItem {
                     log("menu \(argument) › \(item.title) enabled=\(item.isEnabled) key=\(item.keyEquivalent) mods=\(item.keyEquivalentModifierMask.rawValue)")
+                }
+            case "trash":
+                // What Move to Trash, Rename… and New Folder… do once confirmed.
+                model.trash([URL(fileURLWithPath: argument)])
+            case "rename":
+                let ends = argument.components(separatedBy: ">")
+                if let item = FileItem(url: URL(fileURLWithPath: ends[0])) { model.rename(item, to: ends[1]) }
+            case "mkdir": model.create(.folder, named: argument)
+            case "menuitem":
+                // menuitem:Edit>Undo fires the first item in that menu whose title starts so.
+                let names = argument.components(separatedBy: ">")
+                if let menu = NSApp.mainMenu?.items.first(where: { $0.title == names[0] })?.submenu,
+                   let index = menu.items.firstIndex(where: { $0.title.hasPrefix(names[1]) }) {
+                    menu.performActionForItem(at: index)
                 }
             case "stop":
                 // Stops the newest running action, as its Stop button does.
@@ -271,10 +291,17 @@ enum DebugSnapshots {
             log("\(scene) timing: first content \(firstContent.map { String(format: "%.2fs", $0) } ?? "never"), worst main-thread stall \(HangWatchdog.worst)ms, stalls>100ms \(HangWatchdog.stalls) · recents=\(shown.recents.rows.count) new=\(shown.newFiles.rows.count) total=\(shown.newFiles.totalCount.map(String.init) ?? "nil") more=\(shown.newFiles.hasMore) gathering=\(shown.newFiles.isGathering) hits=\(shown.search.hits.count)")
             let names = shown.rows.prefix(40).map { "\($0.item.name)@\(RelativeTime.short($0.item.modified))" }.joined(separator: ",")
             let selected = shown.selection.map(\.lastPathComponent).sorted().joined(separator: ",")
-            log("\(scene) -> tabs=\(workspace.tabs.count) view=\(shown.destination) search=\"\(shown.searchText)\" expanded=\(shown.expanded.map(\.lastPathComponent).sorted()) firstResponder=\(InputDriver.window?.firstResponder.map { String(describing: type(of: $0)) } ?? "nil") key=\(InputDriver.window?.isKeyWindow ?? false) active=\(NSApp.isActive) url=\(shown.currentURL.path) items=[\(names)] selected=[\(selected)] error=\(shown.loadError ?? "none") preview=\(shown.previewURL?.lastPathComponent ?? "nil")/\(shown.previewItems.count) s3=\(shown.destination == .s3 ? (shown.s3.location?.uri ?? "?") + " rows=\(shown.s3.rows.map(\.item.name))" + (shown.s3.error.map { " error=\($0)" } ?? "") : "-") windows=\(NSApp.windows.filter { $0.isVisible && $0.canBecomeMain }.map(\.title))")
+            log("\(scene) -> tabs=\(workspace.tabs.count) view=\(shown.destination) search=\"\(shown.searchText)\" expanded=\(shown.expanded.map(\.lastPathComponent).sorted()) firstResponder=\(InputDriver.window?.firstResponder.map { String(describing: type(of: $0)) } ?? "nil") key=\(InputDriver.window?.isKeyWindow ?? false) active=\(NSApp.isActive) url=\(shown.currentURL.path) items=[\(names)] selected=[\(selected)] error=\(shown.loadError ?? "none") preview=\(shown.previewURL?.lastPathComponent ?? "nil")/\(shown.previewItems.count) s3=\(shown.destination == .s3 ? (shown.s3.location?.uri ?? "?") + " rows=\(shown.s3.rows.map(\.item.name))" + (shown.s3.error.map { " error=\($0)" } ?? "") : "-") windows=\(NSApp.windows.filter { $0.isVisible && $0.canBecomeMain }.map(\.title)) undoMenu=\(undoMenuTitles()) history=\(FileHistory.shared.undoStack.map(\.name))/\(FileHistory.shared.redoStack.map(\.name))")
             if env["EXPLORER_NO_CAPTURE"] == nil { capture(to: "\(dir)/\(index)-\(parts[0]).png") }
         }
         if env["EXPLORER_SNAPSHOT_QUIT"] != nil { NSApp.terminate(nil) }
+    }
+
+    /// What the Edit menu's ⌘Z and ⇧⌘Z items say right now.
+    private static func undoMenuTitles() -> [String] {
+        NSApp.mainMenu?.items.flatMap { $0.submenu?.items ?? [] }
+            .filter { $0.keyEquivalent.lowercased() == "z" }
+            .map { "\($0.title) enabled=\($0.isEnabled) action=\($0.action.map(NSStringFromSelector) ?? "nil")" } ?? []
     }
 
     private static func hasContent(_ model: BrowserModel) -> Bool {

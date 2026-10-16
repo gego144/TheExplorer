@@ -584,13 +584,19 @@ final class BrowserModel: Identifiable {
 
     func trash(_ urls: Set<URL>) {
         var failed: [String] = []
-        for url in urls {
+        var trashed: [URL] = []
+        var undo: [FileHistory.Step] = []
+        for url in urls.sorted(by: { $0.path < $1.path }) {
             do {
-                try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+                var inTrash: NSURL?
+                try FileManager.default.trashItem(at: url, resultingItemURL: &inTrash)
+                trashed.append(url)
+                if let inTrash = inTrash as URL? { undo.append(.restore(inTrash, to: url)) }
             } catch {
                 failed.append(url.lastPathComponent)
             }
         }
+        FileHistory.shared.record("Move to Trash of \(FileHistory.describe(trashed))", undo: undo)
         if !failed.isEmpty {
             loadError = "Couldn't move to Trash: " + failed.joined(separator: ", ")
         }
@@ -628,6 +634,7 @@ final class BrowserModel: Identifiable {
             case .file:
                 try Data().write(to: url, options: .withoutOverwriting)
             }
+            FileHistory.shared.record(kind == .folder ? "New Folder" : "New File", undo: [.trash(url)])
             reload(selecting: [url])
         } catch {
             loadError = error.localizedDescription
@@ -640,6 +647,7 @@ final class BrowserModel: Identifiable {
         let destination = item.url.deletingLastPathComponent().appendingPathComponent(trimmed)
         do {
             try FileManager.default.moveItem(at: item.url, to: destination)
+            FileHistory.shared.record("Rename of “\(item.name)”", undo: [.move(destination, to: item.url)])
             reload(selecting: [destination])
         } catch {
             loadError = error.localizedDescription
@@ -685,6 +693,7 @@ final class BrowserModel: Identifiable {
                 FileTransfer.perform(sources, into: folder, optionHeld: optionHeld)
             }.value
             transferStatus = nil
+            FileHistory.shared.record("\(copying ? "Copy" : "Move") of \(FileHistory.describe(outcome.placed))", undo: outcome.undo)
             if !outcome.failures.isEmpty {
                 loadError = "Some items couldn't be \(copying ? "copied" : "moved"): " + outcome.failures.joined(separator: "; ")
             }
@@ -702,6 +711,35 @@ final class BrowserModel: Identifiable {
     }
 
     var canCreateItems: Bool { destination == .folder && !isSearching }
+
+    /// Briefly says what ⌘Z or ⇧⌘Z just did, since it often happens in a folder out of view.
+    private(set) var historyStatus: String?
+    @ObservationIgnored private var historyStatusTask: Task<Void, Never>?
+
+    /// Catches up after an undo or redo: sizes for the folders it touched, the items it put back
+    /// selected if they're here, and what went wrong. Other tabs showing those folders reload
+    /// through their folder watchers.
+    func historyApplied(_ outcome: FileHistory.Outcome, undo: Bool) {
+        let folders = outcome.folders.map(\.standardizedFileURL.path)
+        folders.forEach(FolderSizeStore.shared.invalidate)
+        FolderSizeStore.shared.request(folders, force: true)
+        if !outcome.failures.isEmpty {
+            loadError = "Couldn't \(undo ? "undo" : "redo") all of \(outcome.name): " + outcome.failures.joined(separator: "; ")
+        }
+        let here = outcome.placed.filter { $0.deletingLastPathComponent().standardizedFileURL == currentURL.standardizedFileURL }
+        if destination == .folder && !isSearching && !here.isEmpty {
+            reload(selecting: here)
+        } else {
+            reload(keepSelection: true)
+        }
+        historyStatus = "\(undo ? "Undid" : "Redid") \(outcome.name)"
+        historyStatusTask?.cancel()
+        historyStatusTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            self?.historyStatus = nil
+        }
+    }
 
     func dismissError() { loadError = nil }
 }

@@ -172,7 +172,11 @@ final class StorageModel {
         guard let node = pendingTrash else { return }
         pendingTrash = nil
         do {
-            try FileManager.default.trashItem(at: node.url, resultingItemURL: nil)
+            var inTrash: NSURL?
+            try FileManager.default.trashItem(at: node.url, resultingItemURL: &inTrash)
+            if let inTrash = inTrash as URL? {
+                FileHistory.shared.record("Move to Trash of “\(node.name)”", undo: [.restore(inTrash, to: node.url)])
+            }
             didTrash(node)
         } catch {
             errorMessage = "Couldn't move “\(node.name)” to the Trash: \(error.localizedDescription)"

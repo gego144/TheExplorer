@@ -129,3 +129,102 @@ struct FileTransferTests {
         #expect(box.exists("A/here.txt"))
     }
 }
+
+@MainActor
+struct FileHistoryTests {
+    @Test func undoesAndRedoesAMoveBetweenFolders() async throws {
+        let box = try Sandbox()
+        let clip = try box.file("one/clip.ts", "a")
+        let two = try box.folder("two")
+        let history = FileHistory()
+
+        // Dragged from the first tab's folder into the second's.
+        let outcome = FileTransfer.perform([clip], into: two, optionHeld: false)
+        history.record("Move of “clip.ts”", undo: outcome.undo)
+        #expect(box.exists("two/clip.ts") && !box.exists("one/clip.ts"))
+        #expect(history.undoTitle == "Undo Move of “clip.ts”")
+
+        let undone = try #require(await history.undo())
+        #expect(box.exists("one/clip.ts") && !box.exists("two/clip.ts"))
+        #expect(undone.failures.isEmpty)
+        #expect(undone.placed == [clip])
+        #expect(undone.folders == [clip.deletingLastPathComponent(), two])
+        #expect(history.undoStack.isEmpty)
+        #expect(history.redoTitle == "Redo Move of “clip.ts”")
+
+        _ = try #require(await history.redo())
+        #expect(box.exists("two/clip.ts") && !box.exists("one/clip.ts"))
+        #expect(history.redoStack.isEmpty)
+
+        _ = try #require(await history.undo())
+        #expect(box.exists("one/clip.ts"))
+        #expect(try await history.undo() == nil)
+    }
+
+    @Test func undoesSeveralChangesInOrder() async throws {
+        let box = try Sandbox()
+        let notes = try box.file("notes.txt", "n")
+        let archive = try box.folder("archive")
+        let history = FileHistory()
+
+        let renamed = box.root.appendingPathComponent("plans.txt")
+        try FileManager.default.moveItem(at: notes, to: renamed)
+        history.record("Rename of “notes.txt”", undo: [.move(renamed, to: notes)])
+        let moved = FileTransfer.perform([renamed], into: archive, optionHeld: false)
+        history.record("Move of “plans.txt”", undo: moved.undo)
+        #expect(box.exists("archive/plans.txt"))
+
+        _ = await history.undo()
+        #expect(box.exists("plans.txt"))
+        _ = await history.undo()
+        #expect(box.exists("notes.txt") && !box.exists("plans.txt"))
+        #expect(history.redoStack.map(\.name) == ["Move of “plans.txt”", "Rename of “notes.txt”"])
+    }
+
+    @Test func aNewChangeClearsRedo() async throws {
+        let box = try Sandbox()
+        let a = try box.file("a.txt")
+        let b = box.root.appendingPathComponent("b.txt")
+        let history = FileHistory()
+        try FileManager.default.moveItem(at: a, to: b)
+        history.record("Rename of “a.txt”", undo: [.move(b, to: a)])
+        _ = await history.undo()
+        #expect(!history.redoStack.isEmpty)
+        history.record("New Folder", undo: [.trash(box.root.appendingPathComponent("x"))])
+        #expect(history.redoStack.isEmpty)
+    }
+
+    @Test func neverOverwritesWhatTookTheOldName() async throws {
+        let box = try Sandbox()
+        let clip = try box.file("one/clip.ts", "original")
+        let two = try box.folder("two")
+        let history = FileHistory()
+        history.record("Move of “clip.ts”", undo: FileTransfer.perform([clip], into: two, optionHeld: false).undo)
+        // Something new arrives under the old name before the undo.
+        try box.file("one/clip.ts", "newer")
+
+        let outcome = try #require(await history.undo())
+        #expect(outcome.failures.count == 1)
+        #expect(try box.read("one/clip.ts") == "newer")
+        #expect(try box.read("two/clip.ts") == "original")
+        #expect(history.redoStack.isEmpty)
+    }
+
+    @Test func reportsItemsThatAreGone() {
+        let missing = URL(fileURLWithPath: "/tmp/does-not-exist-\(UUID().uuidString)/x.txt")
+        let (inverse, outcome) = FileHistory.apply([.move(missing, to: URL(fileURLWithPath: "/tmp/x.txt"))])
+        #expect(inverse.isEmpty)
+        #expect(outcome.failures.first?.contains("no longer in") == true)
+    }
+
+    @Test func restoringPutsAnItemBackAndCanBeTrashedAgain() throws {
+        let box = try Sandbox()
+        // Stands in for the item's place in the Trash, so the test never touches the real one.
+        let inTrash = try box.file("fake-trash/report.pdf")
+        let original = try box.folder("docs").appendingPathComponent("report.pdf")
+        let (inverse, outcome) = FileHistory.apply([.restore(inTrash, to: original)])
+        #expect(box.exists("docs/report.pdf") && !box.exists("fake-trash/report.pdf"))
+        #expect(inverse == [.trash(original)])
+        #expect(outcome.placed == [original])
+    }
+}

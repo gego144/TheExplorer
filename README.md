@@ -163,6 +163,7 @@ For the storage scan to include protected folders like Mail and Messages, grant 
 | Open current folder in Terminal | ⌃⌘T |
 | Run action 1–9 on the selection | ⌃⌥1…⌃⌥9 |
 | Move to Trash | ⌘⌫ |
+| Undo / redo the last file change (any tab or window) | ⌘Z / ⇧⌘Z |
 | Sidebar / Inspector / Hidden files | ⌥⌘S / ⌘I / ⇧⌘. |
 | Refresh | ⇧⌘R |
 | Settings | ⌘, |

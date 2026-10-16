@@ -174,6 +174,10 @@ struct ExplorerCommands: Commands {
                 .disabled(model?.destination != .folder)
         }
 
+        CommandGroup(replacing: .undoRedo) {
+            HistoryCommands(workspace: workspace)
+        }
+
         CommandGroup(after: .pasteboard) {
             Divider()
             Button("Copy Path") { model.map { FileActions.copyPaths(pathTargets($0)) } }
@@ -328,6 +332,36 @@ struct ExplorerCommands: Commands {
         let selection = model.activeSelection
         if !selection.isEmpty { return Array(selection) }
         return model.destination == .folder ? [model.currentURL] : []
+    }
+}
+
+/// Undo and Redo for file changes, from one history shared by every tab and window. While
+/// you're typing in a text field they undo the typing instead.
+private struct HistoryCommands: View {
+    let workspace: Workspace?
+    var body: some View {
+        let history = FileHistory.shared
+        Button(history.undoTitle) { perform(undo: true) }
+            .keyboardShortcut("z")
+        Button(history.redoTitle) { perform(undo: false) }
+            .keyboardShortcut("z", modifiers: [.command, .shift])
+    }
+
+    private func perform(undo: Bool) {
+        if NSApp.keyWindow?.firstResponder is NSTextView {
+            NSApp.sendAction(Selector(undo ? "undo:" : "redo:"), to: nil, from: nil)
+            return
+        }
+        // The tab that's showing now, not when the menu was built.
+        let model = (workspace ?? Session.scriptedWorkspace)?.selected
+        Task {
+            let history = FileHistory.shared
+            guard let outcome = await (undo ? history.undo() : history.redo()) else {
+                NSSound.beep()
+                return
+            }
+            model?.historyApplied(outcome, undo: undo)
+        }
     }
 }
 

@@ -701,6 +701,9 @@ struct StatusBar: View {
                 ProgressView().controlSize(.mini)
                 Text(status).lineLimit(1).truncationMode(.middle)
                     .foregroundStyle(Theme.accent)
+            } else if let status = model.historyStatus {
+                Text(status).lineLimit(1).truncationMode(.middle)
+                    .foregroundStyle(Theme.accent)
             } else if model.isLoading || (model.isSearching && model.search.isRunning) {
                 ProgressView().controlSize(.mini)
             }

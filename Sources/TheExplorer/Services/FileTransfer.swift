@@ -11,6 +11,8 @@ enum FileTransfer {
     struct Outcome: Sendable {
         var placed: [URL] = []
         var failures: [String] = []
+        /// What it would take to undo the transfer: move moved items back, trash the copies.
+        var undo: [FileHistory.Step] = []
     }
 
     /// Drops that make sense: not onto itself, not into its own subfolder, not already there.
@@ -36,8 +38,12 @@ enum FileTransfer {
             let destination = uniqueDestination(for: source.lastPathComponent, in: folder)
             do {
                 switch mode(for: source, into: folder, optionHeld: optionHeld) {
-                case .move: try fm.moveItem(at: source, to: destination)
-                case .copy: try fm.copyItem(at: source, to: destination)
+                case .move:
+                    try fm.moveItem(at: source, to: destination)
+                    outcome.undo.append(.move(destination, to: source))
+                case .copy:
+                    try fm.copyItem(at: source, to: destination)
+                    outcome.undo.append(.trash(destination))
                 }
                 outcome.placed.append(destination)
             } catch {
