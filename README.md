@@ -1,6 +1,6 @@
 # TheExplorer
 
-A native macOS file explorer with its own look (dark "Workbench" theme, mint accent, dense rows), built because Finder makes simple things hard: telling folders from files at a glance, seeing how big a folder actually is, and finding out what's eating your disk.
+A native macOS file explorer with its own look (dark "Workbench" theme in the Jestr colors, dense rows), built because Finder makes simple things hard: telling folders from files at a glance, seeing how big a folder actually is, and finding out what's eating your disk.
 
 Written in SwiftUI. Spotlight powers search across the whole Mac, and a parallel fts(3) scanner measures disk usage.
 

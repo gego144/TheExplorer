@@ -69,8 +69,7 @@ struct SettingsView: View {
                 }
             }
         }
-        .toggleStyle(.switch)
-        .tint(Theme.accent)
+        .toggleStyle(WorkbenchSwitchStyle())
         .controlSize(.small)
         .padding(20)
         .frame(width: 520)

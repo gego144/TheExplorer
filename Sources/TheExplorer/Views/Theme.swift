@@ -1,37 +1,38 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The Workbench look: graphite surfaces, one mint accent, monospaced numbers.
+/// The Workbench look in Jestr's colors (main-website globals.css): near-black surfaces,
+/// white as the action color, monospaced numbers. Color is kept for meaning (types, sizes).
 enum Theme {
-    static let background = Color(hex: 0x0D0F12)
-    static let surface = Color(hex: 0x161A20)
-    static let raised = Color(hex: 0x1D222A)
-    static let field = Color(hex: 0x0D0F12)
-    static let border = Color(hex: 0x222831)
-    static let fieldBorder = Color(hex: 0x2A313B)
-    static let hover = Color(hex: 0x1A1F26)
+    static let background = Color(hex: 0x0E0E0E)   // main-background
+    static let surface = Color(hex: 0x1A1A1A)      // section
+    static let raised = Color(hex: 0x222222)       // sidebar-item-active
+    static let field = Color(hex: 0x080808)        // default-background
+    static let border = Color(hex: 0x2E2E2E)       // border-subtle
+    static let fieldBorder = Color(hex: 0x373737)  // border-subtle-light
+    static let hover = Color(hex: 0x1C1C1C)        // calendar-weekend-hover
 
-    static let text = Color(hex: 0xEEF2F7)
-    static let textSecondary = Color(hex: 0x9AA3B2)
-    static let textTertiary = Color(hex: 0x5C6573)
+    static let text = Color(hex: 0xFFFFFF)          // text-primary
+    static let textSecondary = Color(hex: 0x999999) // text-muted
+    static let textTertiary = Color(hex: 0x696969)  // social-icon
 
-    static let accent = Color(hex: 0x3DF5C0)
-    static let accentSoft = Color(hex: 0x123B33)
-    static let accentStrong = Color(hex: 0x1A5C4F)
-    static let warning = Color(hex: 0xF5D63D)
-    static let danger = Color(hex: 0xFF7A6B)
+    static let accent = Color(hex: 0xE7E7E7)        // primary / offwhite
+    static let accentSoft = Color(hex: 0x2E2E2E)    // section-active
+    static let accentStrong = Color(hex: 0x545454)  // border-emphasis
+    static let warning = Color(hex: 0xE3C37D)       // yellow
+    static let danger = Color(hex: 0xE27676)        // content-red
 
-    static let hot = Color(hex: 0xF5603D)
+    static let hot = Color(hex: 0xE08240)           // content-orange
 
-    /// Size heat: mint for small, amber for big, coral for the heaviest things in view.
+    /// Size heat: light for small, yellow for big, orange for the heaviest things in view.
     static func heatColor(_ fraction: Double) -> Color {
         fraction < 0.25 ? accent : (fraction < 0.6 ? warning : hot)
     }
 
     /// Stable colors for pinned items and treemap tiles.
     static let palette: [Color] = [
-        accent, warning, Color(hex: 0x9B7BFF), Color(hex: 0xFF7A6B), Color(hex: 0x5AB4FF),
-        Color(hex: 0xF59E3D), Color(hex: 0xE76FD1), Color(hex: 0x7BD88F),
+        Color(hex: 0x6EB8FF), warning, Color(hex: 0xC9BBFF), danger, Color(hex: 0x54D3A0),
+        hot, Color(hex: 0xE35F9F), Color(hex: 0x90E3FF),
     ]
 
     static func paletteColor(for key: String) -> Color {
@@ -95,16 +96,18 @@ struct TypeChip: View {
         let ext = item.fileExtension
         let label = ext.isEmpty ? (item.isPackage ? "PKG" : "FILE") : String(ext.uppercased().prefix(5))
         guard let type = item.contentType else { return (label, Theme.textSecondary) }
-        if type.conforms(to: .application) || type.conforms(to: .applicationBundle) { return ("APP", Color(hex: 0x7BD88F)) }
-        if type.conforms(to: .image) { return (label, Color(hex: 0x9B7BFF)) }
-        if type.conforms(to: .movie) || type.conforms(to: .video) { return (label, Color(hex: 0xE76FD1)) }
-        if type.conforms(to: .audio) { return (label, Color(hex: 0xF59E3D)) }
+        if type.conforms(to: .application) || type.conforms(to: .applicationBundle) { return ("APP", Color(hex: 0x54D3A0)) }
+        // .ts is TypeScript far more often than an MPEG stream.
+        if ["ts", "mts", "cts"].contains(ext) { return (label, Theme.warning) }
+        if type.conforms(to: .image) { return (label, Color(hex: 0xC9BBFF)) }
+        if type.conforms(to: .movie) || type.conforms(to: .video) { return (label, Color(hex: 0xE35F9F)) }
+        if type.conforms(to: .audio) { return (label, Theme.hot) }
         if type.conforms(to: .pdf) { return (label, Theme.danger) }
-        if type.conforms(to: .archive) || type.conforms(to: .diskImage) { return (label, Color(hex: 0xC9A27E)) }
+        if type.conforms(to: .archive) || type.conforms(to: .diskImage) { return (label, Color(hex: 0xFFCB83)) }
         if type.conforms(to: .sourceCode) || type.conforms(to: .script) || type.conforms(to: .json)
             || ["yml", "yaml", "toml", "lock", "xml", "plist"].contains(ext) { return (label, Theme.warning) }
         if type.conforms(to: .text) || type.conforms(to: .presentation) || type.conforms(to: .spreadsheet) {
-            return (label, Color(hex: 0x8EA2FF))
+            return (label, Color(hex: 0x6EB8FF))
         }
         return (label, Theme.textSecondary)
     }

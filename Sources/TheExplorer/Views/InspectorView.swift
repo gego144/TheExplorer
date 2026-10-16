@@ -28,7 +28,7 @@ struct InspectorView: View {
     }
 }
 
-/// Quick Look thumbnail for files (real previews for images, PDFs, videos…); a mint glyph for folders.
+/// Quick Look thumbnail for files (real previews for images, PDFs, videos…); a light glyph for folders.
 struct ItemPreview: View {
     let item: FileItem
     var side: CGFloat = 52

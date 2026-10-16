@@ -125,7 +125,7 @@ struct ErrorBanner: View {
     }
 }
 
-/// Filled mint button for the one primary action in a view.
+/// Filled light button for the one primary action in a view.
 struct AccentButtonStyle: ButtonStyle {
     var large = false
 
@@ -136,6 +136,28 @@ struct AccentButtonStyle: ButtonStyle {
             .padding(.horizontal, large ? 16 : 11)
             .padding(.vertical, large ? 7 : 4)
             .background(Theme.accent.opacity(configuration.isPressed ? 0.75 : 1), in: .rect(cornerRadius: 7))
+    }
+}
+
+/// Monochrome on/off switch: a light track with a dark knob when on, a dim track when off.
+struct WorkbenchSwitchStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Button {
+            configuration.isOn.toggle()
+        } label: {
+            Capsule()
+                .fill(configuration.isOn ? Theme.accent : Theme.fieldBorder)
+                .frame(width: 30, height: 17)
+                .overlay(alignment: configuration.isOn ? .trailing : .leading) {
+                    Circle()
+                        .fill(configuration.isOn ? Theme.background : Theme.textSecondary)
+                        .frame(width: 13, height: 13)
+                        .padding(2)
+                }
+                .animation(.easeOut(duration: 0.12), value: configuration.isOn)
+                .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
     }
 }
 
