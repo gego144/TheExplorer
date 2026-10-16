@@ -72,9 +72,15 @@ private struct ItemDetails: View {
     private var favorites: FavoritesStore { .shared }
 
     var body: some View {
+        let preview = FilePreview.kind(for: item)
         VStack(alignment: .leading, spacing: 14) {
+            if preview == .quickLook {
+                FilePreview(item: item, model: model)
+            }
             HStack(alignment: .top, spacing: 11) {
-                ItemPreview(item: item)
+                if preview != .quickLook {
+                    ItemPreview(item: item)
+                }
                 VStack(alignment: .leading, spacing: 6) {
                     Text(item.name)
                         .font(.system(size: 13.5, weight: .semibold))
@@ -110,6 +116,11 @@ private struct ItemDetails: View {
                 }
                 .buttonStyle(SubtleButtonStyle())
                 .help("Reveal in Finder")
+            }
+
+            if preview == .archive {
+                Rectangle().fill(Theme.border).frame(height: 1)
+                FilePreview(item: item, model: model)
             }
 
             Rectangle().fill(Theme.border).frame(height: 1)

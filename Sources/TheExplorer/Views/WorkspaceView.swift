@@ -27,7 +27,7 @@ struct WorkspaceView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 if prefs.showInspector && InspectorView.hasContent(model) {
                     InspectorView(model: model)
-                        .frame(width: 236)
+                        .frame(width: 272)
                         .padding([.vertical, .trailing], 10)
                 }
             }
@@ -40,7 +40,7 @@ struct WorkspaceView: View {
         .tint(Theme.accent)
         .environment(\.openTab) { url in workspace.newTab(url) }
         .navigationTitle(model.title)
-        .quickLookPreview(Binding(get: { model.previewURL }, set: { model.previewURL = $0 }))
+        .quickLookPreview(Binding(get: { model.previewURL }, set: { model.previewMoved(to: $0) }), in: model.previewItems)
         .alert("Rename", isPresented: Binding(get: { model.renaming != nil }, set: { if !$0 { model.renaming = nil } }),
                presenting: model.renaming) { item in
             NamePrompt(initialName: item.name, confirmTitle: "Rename") { model.rename(item, to: $0) }
@@ -52,6 +52,7 @@ struct WorkspaceView: View {
             Text("In “\(FileManager.default.displayName(atPath: model.currentURL.path))”")
         }
         .onChange(of: searchKey(model), initial: true) { runSearch(model) }
+        .onChange(of: model.activeSelection) { model.followSelectionInPreview() }
         .focusedSceneValue(\.workspace, workspace)
     }
 

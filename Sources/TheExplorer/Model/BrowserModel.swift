@@ -112,6 +112,10 @@ final class BrowserModel: Identifiable {
     var sort: SortSpec { didSet { rebuildRows() } }
     var kindFilter: KindFilter = .all { didSet { rebuildRows() } }
     var previewURL: URL?
+    /// What the Quick Look panel steps through with the arrow keys.
+    private(set) var previewItems: [URL] = []
+    /// Whether stepping through the preview moves the selection with it.
+    @ObservationIgnored private var previewMovesSelection = false
 
     var searchText = ""
     var searchScope: SearchScope = .folder
@@ -475,14 +479,59 @@ final class BrowserModel: Identifiable {
 
     func openSelection() { open(urls: selection) }
 
-    func quickLook(_ urls: Set<URL>? = nil) {
+    /// Toggles Quick Look for the selection. With one item selected, the arrow keys step through
+    /// every file in the list (`rows`, in on-screen order), like Finder; with several, through those.
+    func quickLook(_ urls: Set<URL>? = nil, in rows: [ListRow]? = nil) {
         if previewURL != nil {
             previewURL = nil
             return
         }
         let target = urls ?? activeSelection
-        // Prefer on-screen order so the preview matches what you'd expect.
-        previewURL = rows.first(where: { target.contains($0.id) })?.id ?? target.sorted { $0.path < $1.path }.first
+        guard !target.isEmpty else { return }
+        let rows = rows ?? (destination == .folder && !isSearching ? self.rows : [])
+        let ordered = rows.map(\.id).filter(target.contains)
+        let items = ordered.count == target.count ? ordered : target.sorted { $0.path < $1.path }
+        guard let first = items.first else { return }
+        if target.count == 1 {
+            let files = rows.filter { !$0.item.isFolder || $0.id == first }.map(\.id)
+            previewItems = files.contains(first) ? files : [first]
+            previewMovesSelection = true
+        } else {
+            previewItems = items
+            previewMovesSelection = false
+        }
+        previewURL = first
+    }
+
+    /// Quick Looks a file that isn't in the list, such as one unpacked from an archive.
+    func preview(_ url: URL) {
+        previewItems = [url]
+        previewMovesSelection = false
+        previewURL = url
+    }
+
+    /// The list's selection moved while Quick Look is open: show the new item, like Finder.
+    func followSelectionInPreview() {
+        let selected = activeSelection
+        guard previewURL != nil, previewMovesSelection, selected.count == 1, let url = selected.first,
+              url != previewURL, previewItems.contains(url) else { return }
+        previewURL = url
+    }
+
+    /// The Quick Look panel moved to another item (or closed).
+    func previewMoved(to url: URL?) {
+        previewURL = url
+        guard let url, previewMovesSelection else { return }
+        if isSearching {
+            search.selection = [url]
+            return
+        }
+        switch destination {
+        case .folder: selection = [url]
+        case .recents: recents.selection = [url]
+        case .newFiles: newFiles.selection = [url]
+        case .storage: break
+        }
     }
 
     func trash(_ urls: Set<URL>) {

@@ -85,7 +85,9 @@ enum InputDriver {
                     with: type, location: location, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
                     windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: click, pressure: 1
                 ) else { continue }
-                window.sendEvent(event)
+                // Through the app, as a real click is, so NSApp.currentEvent is set (SwiftUI's
+                // double-click recognition depends on it). This never activates the app.
+                NSApp.sendEvent(event)
             }
             try? await Task.sleep(for: .milliseconds(count > 1 ? 60 : 10))
         }
@@ -166,8 +168,11 @@ enum RowGeometry {
     static var frames: [URL: CGRect] = [:]
     static var depths: [URL: Int] = [:]
 
+    /// The topmost on-screen row whose path ends in `name` ("Theme.swift", or "debug-rows/Sources"
+    /// for a row inside an archive).
     static func frame(named name: String) -> (URL, CGRect)? {
-        frames.filter { $0.key.lastPathComponent == name }.min { $0.value.minY < $1.value.minY }.map { ($0.key, $0.value) }
+        frames.filter { $0.key.lastPathComponent == name || $0.key.path.hasSuffix("/" + name) }
+            .min { $0.value.minY < $1.value.minY }.map { ($0.key, $0.value) }
     }
 }
 
@@ -178,6 +183,16 @@ extension View {
             RowGeometry.frames[row.id] = frame
             RowGeometry.depths[row.id] = row.depth
         }
+        // Rows that scroll away or leave with a folder change must not be clicked by name later.
+        .onDisappear { RowGeometry.frames[row.id] = nil }
+    }
+
+    /// Records the frame of a row that isn't a file on disk (e.g. inside an archive) under `name`.
+    func debugRowFrame(named path: String) -> some View {
+        onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+            RowGeometry.frames[URL(fileURLWithPath: "/debug-rows/" + path)] = frame
+        }
+        .onDisappear { RowGeometry.frames[URL(fileURLWithPath: "/debug-rows/" + path)] = nil }
     }
 }
 #endif

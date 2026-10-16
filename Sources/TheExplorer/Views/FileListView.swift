@@ -57,7 +57,8 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
     var focusRequest = 0
     /// Open the given items; `newTab` is true for ⌘-double-click.
     let onOpen: (Set<URL>, _ newTab: Bool) -> Void
-    var onQuickLook: (Set<URL>) -> Void = { _ in }
+    /// Quick Look the selection; gets the rows too, so the preview can step through them in order.
+    var onQuickLook: (Set<URL>, [ListRow]) -> Void = { _, _ in }
     /// Drop onto a folder row. Return false to reject.
     var onDropInto: (([URL], URL) -> Bool)?
     /// Drop onto empty space.
@@ -159,7 +160,7 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
             return .handled
         }
         .onKeyPress(.space) {
-            onQuickLook(selection)
+            onQuickLook(selection, rows)
             return .handled
         }
         .onKeyPress(.escape) {

@@ -78,7 +78,7 @@ struct RecentsView: View {
                         items.forEach { NSWorkspace.shared.open($0.url) }
                     }
                 },
-                onQuickLook: { model.quickLook($0) },
+                onQuickLook: { model.quickLook($0, in: $1) },
                 onReachEnd: { recents.loadMore() },
                 footer: AnyView(footer),
                 rowMenu: { FileContextMenu(urls: $0, model: model) },

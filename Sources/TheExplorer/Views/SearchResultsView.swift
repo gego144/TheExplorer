@@ -53,7 +53,7 @@ struct SearchResultsView: View {
                     hint: model.searchScope == .folder ? "Try “Everywhere” to search the whole Mac." : "Try “Here” to search hidden and unindexed files in this folder."),
                 focusRequest: model.listFocusRequest,
                 onOpen: { urls, newTab in open(urls, newTab: newTab, rows: rows) },
-                onQuickLook: { model.quickLook($0) },
+                onQuickLook: { model.quickLook($0, in: $1) },
                 rowMenu: { FileContextMenu(urls: $0, model: model) },
                 backgroundMenu: { EmptyView() }
             )

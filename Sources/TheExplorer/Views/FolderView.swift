@@ -25,7 +25,7 @@ struct FolderView: View {
                         model.open(urls: urls)
                     }
                 },
-                onQuickLook: { model.quickLook($0) },
+                onQuickLook: { model.quickLook($0, in: $1) },
                 onDropInto: { urls, folder in model.receiveDrop(urls, into: folder) },
                 onDropBackground: { model.receiveDrop($0, into: model.currentURL) },
                 onToggleExpand: { model.toggleExpanded($0) },

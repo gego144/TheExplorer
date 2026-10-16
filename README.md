@@ -22,6 +22,8 @@ Written in SwiftUI. Spotlight powers search across the whole Mac, and a parallel
 - **Settings (⌘,).** Choose the terminal "Open in Terminal" uses (Terminal, cmux, Ghostty, iTerm, Warp, or any other app). cmux gets a new workspace in the folder. Also set where new windows start, the default sort, folders first, hidden files, and New's default range and clutter filter.
 - **Pinned.** Pin files or folders to the sidebar with ⌘D or by dropping them on the "Pinned" heading. Dropping onto a pinned folder (or any sidebar place) moves items into it.
 - **Inspector.** Size, size on disk, item count, created, modified and last-opened dates, and the full path for whatever is selected.
+- **Previews.** Selecting a document, image, PDF, video, audio or text/code file shows a live preview at the top of the inspector. Space opens Quick Look, and the arrow keys then step through every file in the list.
+- **Zip archives.** Selecting a zip lists what's inside as a folder tree with sizes, without unpacking it (only the archive's table of contents is read, so even huge zips list instantly). Double-click a file inside to preview it, or drag files and folders out to unpack just those.
 - **Drag and drop.** Drag items between tabs, windows, or from Finder. Drop onto empty space to put them in the folder you're viewing, onto a folder row to put them inside it, or onto a path bar segment to send them up the tree. Like Finder, it moves within a disk and copies across disks; hold ⌥ to copy. If an item with the same name already exists, both are kept ("name 2") and nothing is overwritten.
 - **Right-click anywhere.** Right-click empty space in a folder to create a new folder or file (you're asked for the name), open that folder in Terminal, copy its path, or favorite it. Right-click an item for open, open in new tab, Quick Look, rename, copy path, Terminal and more.
 - **The basics.** Quick Look (Space), drag and drop out of the app, Move to Trash, reveal in Finder, and eject for removable drives.
@@ -75,7 +77,7 @@ Grant **Full Disk Access** (System Settings › Privacy & Security › Full Disk
 | Search or jump to a path | ⌘K or ⌘F |
 | Back / Forward / Enclosing folder | ⌘[ / ⌘] / ⌘↑ |
 | Open selection | ⌘↓, Return, or double-click |
-| Quick Look | Space or ⌘Y |
+| Quick Look (then ↑/↓ to step through the list) | Space or ⌘Y |
 | Find | ⌘F |
 | Edit the current path | ⌘L or ⇧⌘G |
 | Recents / New / Storage | ⇧⌘F / ⇧⌘E / ⇧⌘B |

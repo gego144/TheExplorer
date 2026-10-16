@@ -361,7 +361,7 @@ private struct LargestFilesView: View {
             showLocation: true,
             empty: EmptyState(symbol: "doc", title: "No files found"),
             onOpen: { urls, _ in urls.forEach { NSWorkspace.shared.open($0) } },
-            onQuickLook: { model.quickLook($0) },
+            onQuickLook: { model.quickLook($0, in: $1) },
             rowMenu: { FileContextMenu(urls: $0, model: model) },
             backgroundMenu: { EmptyView() }
         )
