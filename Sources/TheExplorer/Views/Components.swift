@@ -27,6 +27,7 @@ struct FileContextMenu: View {
                 }
             }
             Button("Quick Look") { model.quickLook(urls) }
+            ActionsMenu(urls: urls)
             Divider()
             if let single {
                 Button(favorites.contains(single) ? "Unpin" : "Pin to Sidebar") {

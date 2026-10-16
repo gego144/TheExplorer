@@ -1,51 +1,180 @@
+<div align="center">
+
+<img src="docs/icon.png" width="128" height="128" alt="TheExplorer icon">
+
 # TheExplorer
 
-A native macOS file explorer with its own look (dark "Workbench" theme in the Jestr colors, dense rows), built because Finder makes simple things hard: telling folders from files at a glance, seeing how big a folder actually is, and finding out what's eating your disk.
+**A fast, native file explorer for macOS.**<br>
+Real folder sizes, one bar for paths and search, previews of everything, and a storage map, in a dense dark UI built for the keyboard.
 
-Written in SwiftUI. Spotlight powers search across the whole Mac, and a parallel fts(3) scanner measures disk usage.
+![macOS 15+](https://img.shields.io/badge/macOS-15%2B-111111?logo=apple&logoColor=white)
+![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)
+![SwiftUI](https://img.shields.io/badge/UI-SwiftUI-2E2E2E)
+
+[Features](#features) · [Install](#install) · [Shortcuts](#keyboard-shortcuts) · [Development](#development)
+
+<br>
+
+<img src="docs/screenshots/hero.png" alt="TheExplorer showing a project folder expanded inline, with a live code preview in the inspector" width="100%">
+
+</div>
+
+## Why
+
+Finder makes simple things hard: telling folders from files at a glance, seeing how big a folder actually is, and finding out what's eating your disk. TheExplorer is a replacement built around those, written in Swift and SwiftUI and tuned to stay fast on folders with tens of thousands of files. Spotlight powers search across the whole Mac, and a parallel `fts(3)` scanner measures disk usage.
 
 ## Features
 
-- **Browse with real sizes.** Every folder's total size is calculated in the background and drawn as a bar, so the heavy folders stand out. Columns for name, size, kind, modified, created and item count (sortable, and you can hide them).
-- **Folders vs. files, unmistakably.** Folders get a medium-weight name, a chevron and a tinted "Folder" kind. You can also filter the view to just folders or just files.
-- **One bar for path and search.** The command bar shows where you are as clickable chips. Press ⌘K (or ⌘F, or click it) and type to search, or start with `/` or `~` to jump to a path with folder completion (↑↓ to choose, ⇥ to complete). ⌘L opens it with the current path ready to edit.
-- **Get around fast.** Back/forward history, ⌘↑ for the enclosing folder, arrow keys and type-to-select in every list.
-- **Expand folders in place.** Click a folder's arrow (or press →) to show its contents indented below it, as in Finder's list view. Press ← or click again to collapse. Double-click still opens the folder.
-- **Tabs.** Browser-style tabs, each with its own folder, history and search. ⌘T opens one and ⌘-double-click opens a folder in one. Drop files on a tab to move them into its folder, or hover a drag over a tab to switch to it. Tabs come back where you left them after you quit.
-- **Search.**
-  - *This Folder* walks the current folder and its subfolders, including hidden and unindexed files.
-  - *Entire Mac* uses Spotlight, so it's instant but skips unindexed locations.
-  - Results are ranked by relevance, with clutter like `Library`, `node_modules` and `.git` pushed down.
-- **Storage breakdown.** Scan your home folder, the whole Mac, or any folder. Drill into a treemap and a ranked list with percentages, see the largest files, and compare against total disk usage. Moving something to the Trash updates the totals without a rescan.
-- **Recents.** Works like Finder's Recents: every document you've opened, newest first, grouped into Today, Yesterday, Previous 7 Days, Previous 30 Days and then by month. Folders and apps are left out. Covers all time by default, and column headers re-sort the list.
-- **New.** The newest files and folders in your home folder, by date created, modified or added, over the last 24 hours to 90 days. Grouped by day, updated live, with an option to hide clutter. Scrolling to the bottom keeps loading older items. At the end of a range, one click widens it.
-- **Default file browser.** In Settings, choose TheExplorer for other apps' "Show in Finder" and "Reveal" buttons (the `NSFileViewer` preference). It applies right away: revealed items open in a tab of your front window with the items selected, and TheExplorer's own reveal command becomes "Show in Enclosing Folder". Settings also shows which app opens folders from other apps, the Dock and Spotlight. macOS 26 keeps that as Finder (Launch Services rejects changes, and drops a hand-written handler entry at login), so use Open With › TheExplorer from Finder's right-click menu instead. Finder still runs the desktop.
-- **Settings (⌘,).** Choose the default file browser, the terminal "Open in Terminal" uses (Terminal, cmux, Ghostty, iTerm, Warp, or any other app). cmux gets a new workspace in the folder. Also set where new windows start, the default sort, folders first, hidden files, and New's default range and clutter filter.
-- **Pinned.** Pin files or folders to the sidebar with ⌘D or by dropping them on the "Pinned" heading. Dropping onto a pinned folder (or any sidebar place) moves items into it.
-- **Inspector.** Size, size on disk, item count, created, modified and last-opened dates, and the full path for whatever is selected.
-- **Previews.** Selecting a document, image, PDF, video, audio or text/code file shows a live preview at the top of the inspector. Space opens Quick Look, and the arrow keys then step through every file in the list.
-- **Zip archives.** Selecting a zip lists what's inside as a folder tree with sizes, without unpacking it (only the archive's table of contents is read, so even huge zips list instantly). Double-click a file inside to preview it, or drag files and folders out to unpack just those.
-- **Drag and drop.** Drag items between tabs, windows, or from Finder. Drop onto empty space to put them in the folder you're viewing, onto a folder row to put them inside it, or onto a path bar segment to send them up the tree. Like Finder, it moves within a disk and copies across disks; hold ⌥ to copy. If an item with the same name already exists, both are kept ("name 2") and nothing is overwritten.
-- **Right-click anywhere.** Right-click empty space in a folder to create a new folder or file (you're asked for the name), open that folder in Terminal, copy its path, or favorite it. Right-click an item for open, open in new tab, Quick Look, rename, copy path, Terminal and more.
-- **The basics.** Quick Look (Space), drag and drop out of the app, Move to Trash, reveal in Finder, and eject for removable drives.
+### Real folder sizes
 
-## Requirements
+Every folder's total size is calculated in the background and drawn as a bar, so the heavy folders stand out. Type chips (`DIR`, `SWIFT`, `PDF`, `ZIP`…) tell folders from files at a glance, and you can filter to just folders or just files. Click a folder's arrow (or press →) to expand it in place; double-click still opens it.
 
-- macOS 15 or later
-- Xcode 16 or later (Swift 6 toolchain)
+<img src="docs/screenshots/folder-sizes.png" alt="A folder listing with size bars, type chips and the inspector" width="100%">
 
-## Build and run
+### One bar for paths and search
+
+The command bar shows where you are as clickable chips. Press ⌘K and type to search, or start with `/` or `~` to jump to a path with folder completion (↑↓ to choose, ⇥ to complete). *Here* searches the current folder and everything below it, including hidden and unindexed files. *Everywhere* uses Spotlight. Results are ranked by relevance, with clutter like `Library`, `node_modules` and `.git` pushed down.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/path-bar.png" alt="Path completion in the command bar"></td>
+    <td width="50%"><img src="docs/screenshots/search.png" alt="Search results with locations"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Jump anywhere with path completion</sub></td>
+    <td align="center"><sub>Search this folder or the whole Mac</sub></td>
+  </tr>
+</table>
+
+### Previews and zip archives
+
+Selecting a document, image, PDF, video, audio or code file shows a live preview in the inspector. Space opens Quick Look, and ↑/↓ then step through every file in the list. Selecting a zip lists what's inside as a tree with sizes, without unpacking it: only the archive's table of contents is read, so even huge zips list instantly. Double-click a file inside to preview it, or drag files and folders out to unpack just those.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/preview.png" alt="An image previewed in the inspector"></td>
+    <td width="50%"><img src="docs/screenshots/zip.png" alt="A zip archive's contents listed in the inspector"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Live previews for images, PDFs, video and code</sub></td>
+    <td align="center"><sub>Browse zips without unpacking them</sub></td>
+  </tr>
+</table>
+
+### Storage map
+
+Scan your home folder, the whole Mac, or any folder. Drill into a treemap and a ranked list with percentages, see the largest files, and compare against total disk usage. Moving something to the Trash updates the totals without a rescan.
+
+<img src="docs/screenshots/storage.png" alt="The storage treemap and ranked folder list" width="100%">
+
+### Actions
+
+Turn the shell commands you run on files into one-click actions. Define one in Settings › Actions (a name, the file types it applies to, and the command), then run it from the right-click menu or the Actions menu, where the first nine get ⌃⌥1–9. For example, converting a video to HLS:
 
 ```sh
+mkdir -p "$NAME-hls"
+ffmpeg -nostdin -hide_banner -y -i "$FILE" -codec copy -start_number 0 \
+  -hls_time 10 -hls_list_size 0 -f hls "$NAME-hls/$NAME.m3u8"
+```
+
+Commands run in zsh with your login profile, so Homebrew tools like `ffmpeg` are found, and they run in the item's folder, so new files appear right next to it. They get `$FILE`, `$FILENAME`, `$NAME`, `$EXT` and `$DIR`, or every selected path as `"$@"` for actions that run once with all items. A status-bar indicator shows progress; click it for each run's output, or to stop one. Stopping ends everything the command started. Templates for HLS, Zip and Copy SHA-256 get you started.
+
+<p align="center"><img src="docs/screenshots/actions.png" alt="The Actions tab in Settings" width="520"></p>
+
+### Recents and New
+
+- **Recents** works like Finder's: every document you've opened, newest first, grouped into Today, Yesterday, Previous 7 Days, Previous 30 Days and then by month.
+- **New** shows the newest files and folders in your home folder by date created, modified or added, from the last 24 hours to 90 days. It updates live, can hide clutter, and keeps loading as you scroll.
+
+### Settings
+
+<img src="docs/screenshots/settings.png" alt="The Settings window" width="420" align="right">
+
+- **Default file browser.** Send other apps' "Show in Finder" and "Reveal" buttons to TheExplorer. Revealed items open in a tab with the items selected. macOS keeps Finder for folders opened from the Dock, Spotlight or other apps and doesn't let any app take that over, so Settings shows that too, along with the Open With workaround.
+- **Terminal.** Choose what "Open in Terminal" (⌃⌘T) uses: Terminal, cmux, Ghostty, iTerm, Warp or any other app. cmux gets a new workspace in the folder.
+- **Defaults.** Where new windows start, sort order, folders first, hidden files, and New's time range and clutter filter.
+
+<br clear="right">
+
+### And the rest
+
+- **Tabs.** Browser-style tabs, each with its own folder, history and search. Drop files on a tab to move them there. Tabs come back where you left them after you quit.
+- **Pinned.** Pin files or folders to the sidebar with ⌘D or by dropping them on the "Pinned" heading. Dropping onto a pinned folder moves items into it.
+- **Drag and drop.** Between tabs, windows and Finder. Like Finder, it moves within a disk and copies across disks; hold ⌥ to copy. Name clashes keep both items and never overwrite.
+- **Right-click anywhere.** New folder or file, open in Terminal, copy path, pin, rename, Quick Look and more.
+- **Keyboard first.** Back/forward history, ⌘↑ for the enclosing folder, arrow keys and type-to-select in every list.
+
+## Install
+
+TheExplorer builds from source. You need macOS 15 or later and Xcode 16 or later (Swift 6 toolchain).
+
+```sh
+git clone https://github.com/gego144/TheExplorer.git
+cd TheExplorer
 make run        # build, install to /Applications, and open it
+```
+
+Other targets:
+
+```sh
 make install    # build and install without opening
 make test       # run the test suite
 make clean
 ```
 
-`make app` runs `scripts/build-app.sh`, which builds with SwiftPM and wraps the binary in an app bundle in `build/`. A debug build (`CONFIG=debug ./scripts/build-app.sh`) goes to `build/debug/` instead, so it never replaces the copy you use. To work on the code in Xcode, run `open Package.swift`.
+`make app` runs `scripts/build-app.sh`, which builds with SwiftPM and wraps the binary in an app bundle in `build/`. To work on the code in Xcode, run `open Package.swift`.
 
-## Permissions and signing
+For the storage scan to include protected folders like Mail and Messages, grant **Full Disk Access** (System Settings › Privacy & Security › Full Disk Access). The Storage view has a button that opens the right pane.
+
+## Keyboard shortcuts
+
+| Action | Shortcut |
+| --- | --- |
+| New tab / Close tab | ⌘T / ⌘W |
+| Next / previous tab, jump to tab | ⌃Tab / ⌃⇧Tab, ⌘1…⌘9 |
+| Open folder in new tab | ⌥⌘↓ (or ⌘-double-click) |
+| Search or jump to a path | ⌘K or ⌘F |
+| Edit the current path | ⌘L or ⇧⌘G |
+| Back / Forward / Enclosing folder | ⌘[ / ⌘] / ⌘↑ |
+| Open selection | ⌘↓, Return, or double-click |
+| Expand / collapse a folder in place | → / ← |
+| Quick Look (then ↑/↓ to step through the list) | Space or ⌘Y |
+| Recents / New / Storage | ⇧⌘F / ⇧⌘E / ⇧⌘B |
+| Home / Desktop / Documents / Downloads / Applications | ⇧⌘H / ⇧⌘D / ⇧⌘O / ⌥⌘L / ⇧⌘A |
+| Pin or unpin in the sidebar | ⌘D |
+| Show in enclosing folder / Reveal in Finder | ⌘R / ⌥⌘R |
+| Copy path | ⌥⌘C |
+| New folder / New file / Rename | ⇧⌘N / ⌥⌘N / ⇧⌘↩ |
+| Open current folder in Terminal | ⌃⌘T |
+| Run action 1–9 on the selection | ⌃⌥1…⌃⌥9 |
+| Move to Trash | ⌘⌫ |
+| Sidebar / Inspector / Hidden files | ⌥⌘S / ⌘I / ⇧⌘. |
+| Refresh | ⇧⌘R |
+| Settings | ⌘, |
+
+## Development
+
+```
+Sources/TheExplorer/
+  App/        App entry point, menu commands, tabs and session restore, debug scenes and input
+  Model/      Per-window browser state, search, recents, storage, settings, actions
+  Services/   Disk scanner, folder size cache, favorites, Spotlight wrapper, zip reader, directory watcher
+  Views/      SwiftUI views (file list, sidebar, search, recents, storage and treemap, inspector, previews, settings)
+  Util/       Formatting and icon caching
+Resources/    Info.plist and app icon
+scripts/      build-app.sh, make-icon.swift
+Tests/        Swift Testing suites
+docs/         README screenshots
+```
+
+A debug build (`CONFIG=debug ./scripts/build-app.sh`) goes to `build/debug/` with its own bundle identifier, so it never replaces the copy you use.
+
+**Speed is a feature.** Anything proportional to the number of files (listing, sorting, Spotlight results, folder sizes, path suggestions) runs off the main thread, or runs once and is cached, never per redraw.
+
+<details>
+<summary><b>Signing and permissions</b></summary>
+
+<br>
 
 macOS remembers privacy permissions (Desktop, Documents, Downloads, Full Disk Access…) per app, identified by its code signature. An ad-hoc signature changes on every build, which makes macOS ask for permissions again after every rebuild. To avoid that, the build script signs with a stable identity:
 
@@ -66,48 +195,14 @@ cd - && rm -rf "$WORK"
 
 It shows as "not trusted" in Keychain Access. That's expected for a self-signed certificate and doesn't stop it signing. To remove it, delete it in Keychain Access.
 
-Grant **Full Disk Access** (System Settings › Privacy & Security › Full Disk Access) so the storage scan can include protected folders like Mail and Messages. The Storage view has a button that opens the right pane.
+</details>
 
-## Keyboard shortcuts
+<details>
+<summary><b>Scripted scenes and screenshots</b></summary>
 
-| Action | Shortcut |
-| --- | --- |
-| New tab / Close tab | ⌘T / ⌘W |
-| Next / previous tab, jump to tab | ⌃Tab / ⌃⇧Tab, ⌘1…⌘9 |
-| Open folder in new tab | ⌥⌘↓ (or ⌘-double-click) |
-| Search or jump to a path | ⌘K or ⌘F |
-| Back / Forward / Enclosing folder | ⌘[ / ⌘] / ⌘↑ |
-| Open selection | ⌘↓, Return, or double-click |
-| Quick Look (then ↑/↓ to step through the list) | Space or ⌘Y |
-| Find | ⌘F |
-| Edit the current path | ⌘L or ⇧⌘G |
-| Recents / New / Storage | ⇧⌘F / ⇧⌘E / ⇧⌘B |
-| Home / Desktop / Documents / Downloads / Applications | ⇧⌘H / ⇧⌘D / ⇧⌘O / ⌥⌘L / ⇧⌘A |
-| Pin or unpin in the sidebar | ⌘D |
-| Show in enclosing folder / Reveal in Finder | ⌘R / ⌥⌘R |
-| Copy path | ⌥⌘C |
-| New folder / New file / Rename | ⇧⌘N / ⌥⌘N / ⇧⌘↩ |
-| Open current folder in Terminal | ⌃⌘T |
-| Move to Trash | ⌘⌫ |
-| Sidebar / Inspector / Hidden files | ⌥⌘S / ⌘I / ⇧⌘. |
-| Refresh | ⇧⌘R |
+<br>
 
-## Project layout
-
-```
-Sources/TheExplorer/
-  App/        App entry point, menu commands, tabs and session restore, debug screenshots
-  Model/      Per-window browser state, search, recents, storage
-  Services/   Disk scanner, folder size cache, favorites, Spotlight wrapper, directory watcher
-  Views/      SwiftUI views (folder table, sidebar, search, recents, storage and treemap, inspector)
-  Util/       Formatting and icon caching
-Resources/    Info.plist
-scripts/      build-app.sh
-```
-
-## Debug screenshots
-
-Debug builds can drive themselves through a scripted set of scenes and save a screenshot of the window after each one. This is handy for checking UI changes without clicking through by hand:
+Debug builds can drive themselves through a scripted set of scenes and save a screenshot of the window after each one, which is handy for checking UI changes without clicking through by hand:
 
 ```sh
 CONFIG=debug ./scripts/build-app.sh
@@ -116,18 +211,26 @@ open -g -n --env EXPLORER_SNAPSHOT_DIR=/tmp/shots --env EXPLORER_SNAPSHOT_QUIT=1
     build/debug/TheExplorer.app
 ```
 
-Scenes are separated by `;`. The available scenes are `folder:<path>`, `select:<path>`, `newtab:<path>`, `tab:<n>`, `omnibox:<text>`, `expand:<path>`, `recents`, `new`, `range:<days>` (0 for all time), `more` (load the next page), `search:<text>`, `searchmac:<text>`, `scope:mac|folder`, `create:folder|file`, `drop:<source>><folder>`, `storage[:<path>]`, `settings` (shows the Settings window), `reveal:<path>[,<path>…]` (sends the app the reveal event other apps' "Show in Finder" uses), `viewer:<bundle id>` (sets the file viewer and logs it back; pass the current one to change nothing) and `wait:<seconds>`.
+Scenes are separated by `;`. The available scenes are `folder:<path>`, `select:<path>`, `newtab:<path>`, `tab:<n>`, `omnibox:<text>`, `expand:<path>`, `recents`, `new`, `range:<days>` (0 for all time), `more` (load the next page), `search:<text>`, `searchmac:<text>`, `scope:mac|folder`, `create:folder|file`, `drop:<source>><folder>`, `storage[:<path>]`, `settings[:actions]` (shows the Settings window, optionally on its Actions tab), `actioneditor` (shows the action editor; `type:` scenes after it go to the command field), `editortext` (logs the command field), `runs` (logs every action run's state and output), `stop` (stops the newest running action), `menu:<name>` (logs a menu bar menu's items), `reveal:<path>[,<path>…]` (sends the app the reveal event other apps' "Show in Finder" uses), `viewer:<bundle id>` (sets the file viewer and logs it back; pass the current one to change nothing) and `wait:<seconds>`.
 
 Scenes can also drive the app with real input:
+
 - `key:<combo>`: a key press such as `key:cmd+k`, `key:down` or `key:esc`.
 - `type:<text>`: types the text into whatever has focus.
-- `click:<row name>`, `dblclick:<row name>`, `cmdclick:<row name>`: clicks a row in the list.
+- `click:<row name>`, `dblclick:<row name>`, `cmdclick:<row name>`: clicks a row in the list. Rows inside a zip in the inspector are named `debug-rows/<path in the zip>`.
 - `chevron:<row name>`: clicks a folder's expand arrow.
 - `scroll[:<points>]`: scrolls the list one step per frame and reports frame times, hitches, and the longest wait at the bottom for the next page. Leave out the distance to scroll until the list stops growing; negative distances scroll up.
 
-The events go only to the app's own window (see `App/InputDriver.swift`), so they never touch your mouse or keyboard and need no permissions. Use these to test interactions themselves (focus, gestures, scrolling), not just the code behind them. Launch with `open -g` so the app never takes focus; running the binary directly can leave the app without a window. To run fully hidden and just read the log, add `-j` and `--env EXPLORER_NO_CAPTURE=1`.
+The events go only to the app's own window (see `App/InputDriver.swift`), so they never touch your mouse or keyboard and need no permissions. Launch with `open -g` so the app never takes focus; running the binary directly can leave the app without a window. To run fully hidden and just read the log, add `-j` and `--env EXPLORER_NO_CAPTURE=1`. Don't double-click file rows in scenes: opening a file launches its app.
 
-### Measuring speed
+**README screenshots** come from demo mode. `EXPLORER_DEMO=1` shows only the startup disk in the sidebar and puts the window on a Retina screen, so captures are sharp. `EXPLORER_DEMO_PINS` sets the pinned folders (paths separated by `;`), and demo pins are never saved over your own. Point the scenes at a demo folder rather than your own files. `EXPLORER_ACTIONS_FILE` gives a run its own action list, so tests never touch yours.
+
+</details>
+
+<details>
+<summary><b>Measuring speed</b></summary>
+
+<br>
 
 Scripted runs also watch the main thread. After each scene the log reports how long the scene took to show something, plus the worst main-thread stall during it. Anything over 250ms is also logged on its own line as `[hang]`:
 
@@ -135,18 +238,28 @@ Scripted runs also watch the main thread. After each scene the log reports how l
 [snapshot] recents timing: first content 0.08s, worst main-thread stall 49ms, stalls>100ms 0 · …
 ```
 
-Debug builds aren't optimized, so build with `SWIFT_FLAGS="-Xswiftc -O" CONFIG=debug ./scripts/build-app.sh` to get numbers that match the release app. A folder with tens of thousands of files makes a good stress test. The rule the code follows is that anything proportional to the number of files (listing, sorting, Spotlight results, folder sizes, path suggestions) runs off the main thread, or runs once and is cached, never per redraw.
+Debug builds aren't optimized, so build with `SWIFT_FLAGS="-Xswiftc -O" CONFIG=debug ./scripts/build-app.sh` to get numbers that match the release app. A folder with tens of thousands of files makes a good stress test.
 
-## App icon
+</details>
+
+<details>
+<summary><b>App icon</b></summary>
+
+<br>
 
 The icon is drawn in code. After changing `scripts/make-icon.swift`, regenerate it with:
 
 ```sh
 swift scripts/make-icon.swift   # writes Resources/AppIcon.icns
+sips -s format png -z 256 256 Resources/AppIcon.icns --out docs/icon.png
 ```
 
-## Tests
+</details>
 
-```sh
-make test
-```
+## Contributing
+
+Issues and pull requests are welcome. Before opening a PR, run `make test`. For UI changes, check them with the scripted scenes above, and refresh the screenshots in `docs/screenshots/` if the look changed.
+
+## License
+
+No license has been chosen yet, so all rights are reserved for now.

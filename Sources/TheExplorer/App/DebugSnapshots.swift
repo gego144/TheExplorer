@@ -10,6 +10,26 @@ import SwiftUI
 ///     open -g -n --env EXPLORER_SNAPSHOT_DIR=/tmp/shots --env EXPLORER_SNAPSHOT_QUIT=1 \
 ///         --env "EXPLORER_SCENES=folder:~/Dev;recents;search:swift;searchmac:swift;storage:~/Dev" \
 ///         build/debug/TheExplorer.app
+/// Debug-only demo mode for README screenshots (EXPLORER_DEMO=1): only the startup disk in the
+/// sidebar, pins from EXPLORER_DEMO_PINS (paths separated by ";", never saved), and windows
+/// placed on a Retina screen when there is one, so captures are sharp.
+@MainActor
+enum DemoMode {
+    static var isOn: Bool { ProcessInfo.processInfo.environment["EXPLORER_DEMO"] != nil }
+
+    static var pins: [String]? {
+        guard isOn, let value = ProcessInfo.processInfo.environment["EXPLORER_DEMO_PINS"] else { return nil }
+        return value.split(separator: ";").map { NSString(string: String($0)).expandingTildeInPath }
+    }
+
+    /// Moves a window onto a 2x screen, behind everything else (it's never brought forward).
+    static func place(_ window: NSWindow?) {
+        guard isOn, let window, let screen = NSScreen.screens.first(where: { $0.backingScaleFactor >= 2 }) else { return }
+        let frame = screen.visibleFrame
+        window.setFrameOrigin(NSPoint(x: frame.minX + 20, y: frame.maxY - window.frame.height - 20))
+    }
+}
+
 @MainActor
 enum DebugSnapshots {
     private static var hasRun = false
@@ -24,6 +44,7 @@ enum DebugSnapshots {
         defer { ProcessInfo.processInfo.endActivity(activity) }
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         HangWatchdog.start()
+        DemoMode.place(InputDriver.window)
         try? await Task.sleep(for: .seconds(1.5))
 
         for (index, scene) in scenes.split(separator: ";").enumerated() {
@@ -33,7 +54,7 @@ enum DebugSnapshots {
             var wait = 2.5
             switch parts[0] {
             case "folder": model.navigate(to: URL(fileURLWithPath: argument))
-            case "select": model.selection = [URL(fileURLWithPath: argument).standardizedFileURL]
+            case "select": model.selection = Set(argument.split(separator: ",").map { URL(fileURLWithPath: String($0)).standardizedFileURL })
             case "recents": model.show(.recents)
             case "new": model.show(.newFiles)
             case "expand": model.toggleExpanded(URL(fileURLWithPath: argument, isDirectory: true).standardizedFileURL)
@@ -108,13 +129,48 @@ enum DebugSnapshots {
                 } catch {
                     log("viewer failed: \(error.localizedDescription)")
                 }
-            case "settings":
-                // Settings in a plain window ordered in behind, so capture() picks it up.
-                let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView()))
+            case "runs":
+                // Logs every action run: state, progress and the end of its output.
+                for run in ActionRunner.shared.runs {
+                    let tail = run.output.split(separator: "\n").suffix(2).joined(separator: " ⏎ ")
+                    log("run \(run.name): \(run.state) \(run.completed)/\(run.total) items=\(run.items.map(\.lastPathComponent)) output=\(tail.prefix(240))")
+                }
+            case "menu":
+                // Logs a menu bar menu's items: title, enabled, shortcut.
+                let menu = NSApp.mainMenu?.items.first { $0.title == argument }?.submenu
+                menu?.update()
+                for item in menu?.items ?? [] where !item.isSeparatorItem {
+                    log("menu \(argument) › \(item.title) enabled=\(item.isEnabled) key=\(item.keyEquivalent) mods=\(item.keyEquivalentModifierMask.rawValue)")
+                }
+            case "stop":
+                // Stops the newest running action, as its Stop button does.
+                if let run = ActionRunner.shared.runs.first(where: { $0.state == .running }) { ActionRunner.shared.cancel(run.id) }
+            case "settings", "actionruns", "actioneditor":
+                // A window ordered in behind, so capture() picks it up. settings:actions opens that tab.
+                if parts[0] == "settings" { Prefs.shared.settingsTab = argument == "actions" ? .actions : .general }
+                let root: AnyView = switch parts[0] {
+                case "actionruns": AnyView(ActionRunsView(onClear: {}))
+                case "actioneditor": AnyView(ActionEditor(action: FileAction.templates[0]) {})
+                default: AnyView(SettingsView())
+                }
+                let window = NSWindow(contentViewController: NSHostingController(rootView: root))
                 window.title = "Settings"
                 window.orderFront(nil)
+                DemoMode.place(window)
                 settingsWindow = window
-                        case "key": InputDriver.press(parts[1])
+                if parts[0] == "actioneditor" {
+                    // Typing scenes after this go to the command editor.
+                    try? await Task.sleep(for: .milliseconds(300))
+                    InputDriver.targetWindow = window
+                    if let editor = Self.textViews(in: window.contentView).first(where: { $0.isRichText == false && $0.isEditable && $0.font?.isFixedPitch == true }) {
+                        window.makeFirstResponder(editor)
+                        editor.setSelectedRange(NSRange(location: editor.string.utf16.count, length: 0))
+                    }
+                }
+            case "editortext":
+                let text = Self.textViews(in: settingsWindow?.contentView).first { $0.font?.isFixedPitch == true }?.string ?? "none"
+                log("editor text: \(text.debugDescription)")
+            case "key": InputDriver.press(parts[1])
             case "type": await InputDriver.type(parts.count > 1 ? parts[1] : "")
             case "click", "dblclick", "cmdclick", "chevron":
                 // click:<row name>; chevron clicks the folder arrow instead of the name.
@@ -157,6 +213,11 @@ enum DebugSnapshots {
         case .folder: return !model.items.isEmpty
         case .storage: return StorageModel.shared.focus != nil
         }
+    }
+
+    private static func textViews(in view: NSView?) -> [NSTextView] {
+        guard let view else { return [] }
+        return (view as? NSTextView).map { [$0] } ?? view.subviews.flatMap(textViews)
     }
 
     private static func log(_ message: String) {

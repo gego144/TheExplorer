@@ -117,6 +117,9 @@ struct SidebarView: View {
 
     static func mountedVolumes() -> [URL] {
         let urls = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: [.volumeNameKey], options: [.skipHiddenVolumes]) ?? []
+        #if DEBUG
+        if DemoMode.isOn { return urls.filter { $0.path == "/" } }
+        #endif
         return urls.map(\.standardizedFileURL)
     }
 }

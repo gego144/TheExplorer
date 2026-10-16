@@ -2,6 +2,11 @@ import AppKit
 import Observation
 import UniformTypeIdentifiers
 
+/// The Settings window's tabs.
+enum SettingsTab: Hashable {
+    case general, actions
+}
+
 /// Where new windows start.
 enum StartLocation: String, CaseIterable {
     case lastFolder = "last"
@@ -36,6 +41,9 @@ final class Prefs {
 
     var newHidesClutter: Bool { didSet { defaults.set(newHidesClutter, forKey: "newHidesClutter") } }
     var newRange: RecentsRange { didSet { defaults.set(newRange.rawValue, forKey: "newRangeDays") } }
+
+    /// The tab Settings shows; "Edit Actions…" opens it on Actions.
+    var settingsTab = SettingsTab.general
 
     /// Which apps macOS uses as the file browser (see FolderHandler). Read from macOS, not
     /// stored here; refreshed when Settings shows and whenever the app comes forward.

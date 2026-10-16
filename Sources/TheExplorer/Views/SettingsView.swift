@@ -1,11 +1,30 @@
 import SwiftUI
 
-/// Settings (⌘,): the default file browser, the terminal to open folders in, where new windows
-/// start, and the defaults new tabs begin with.
+/// Settings (⌘,). General: the default file browser, the terminal to open folders in, where new
+/// windows start, and the defaults new tabs begin with. Actions: your shell commands for files.
 struct SettingsView: View {
     @Bindable private var prefs = Prefs.shared
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Segmented(selection: $prefs.settingsTab, options: [(.general, "General"), (.actions, "Actions")])
+                .fixedSize()
+                .frame(maxWidth: .infinity)
+            switch prefs.settingsTab {
+            case .general: general
+            case .actions: ActionsSettings()
+            }
+        }
+        .toggleStyle(WorkbenchSwitchStyle())
+        .controlSize(.small)
+        .padding(20)
+        .frame(width: 520)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(Theme.background)
+        .preferredColorScheme(.dark)
+    }
+
+    private var general: some View {
         VStack(alignment: .leading, spacing: 18) {
             section("Default file browser") {
                 SettingRow("“Show in Finder” opens", hint: "Where other apps’ “Show in Finder” and “Reveal” buttons show files. Applies right away.") {
@@ -79,13 +98,6 @@ struct SettingsView: View {
                 }
             }
         }
-        .toggleStyle(WorkbenchSwitchStyle())
-        .controlSize(.small)
-        .padding(20)
-        .frame(width: 520)
-        .fixedSize(horizontal: false, vertical: true)
-        .background(Theme.background)
-        .preferredColorScheme(.dark)
     }
 
     private var folderOpenerHint: String {

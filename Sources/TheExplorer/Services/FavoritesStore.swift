@@ -26,8 +26,18 @@ final class FavoritesStore {
             .appendingPathComponent("TheExplorer", isDirectory: true)
         try? FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
         fileURL = support.appendingPathComponent("favorites.json")
+        #if DEBUG
+        if let pins = DemoMode.pins {
+            favorites = pins.map { Favorite(path: $0, isDirectory: true) }
+            isDemo = true
+            return
+        }
+        #endif
         load()
     }
+
+    /// Demo pins (debug screenshots) are never written over your real ones.
+    @ObservationIgnored private var isDemo = false
 
     func contains(_ url: URL) -> Bool {
         favorites.contains { $0.path == url.path }
@@ -67,6 +77,7 @@ final class FavoritesStore {
     }
 
     private func save() {
+        guard !isDemo else { return }
         guard let data = try? JSONEncoder().encode(favorites) else { return }
         try? data.write(to: fileURL, options: .atomic)
     }

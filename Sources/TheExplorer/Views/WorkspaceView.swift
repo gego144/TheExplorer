@@ -701,6 +701,7 @@ struct StatusBar: View {
                 ProgressView().controlSize(.mini)
             }
             Spacer()
+            ActionActivity()
             if let volume = model.volume {
                 Text(volume.name).foregroundStyle(Theme.textSecondary)
                 HeatBar(fraction: Double(volume.used) / Double(max(volume.total, 1)), height: 4, color: Theme.accent)
@@ -726,8 +727,8 @@ struct StatusBar: View {
         case .recents, .newFiles, .storage:
             return model.title.lowercased()
         case .folder:
-            let folders = model.folderCount
-            var text = "\(folders.formatted()) dirs · \(model.fileCount.formatted()) files"
+            let folders = model.folderCount, files = model.fileCount
+            var text = "\(folders.formatted()) \(folders == 1 ? "dir" : "dirs") · \(files.formatted()) \(files == 1 ? "file" : "files")"
             if model.hiddenCount > 0 { text += " · \(model.hiddenCount.formatted()) hidden" }
             if !model.selection.isEmpty {
                 let sizes = FolderSizeStore.shared

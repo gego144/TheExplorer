@@ -249,6 +249,10 @@ struct ExplorerCommands: Commands {
             Divider()
         }
 
+        CommandMenu("Actions") {
+            ActionCommands(workspace: workspace)
+        }
+
         CommandMenu("Go") {
             Button("Back") { model?.goBack() }
                 .keyboardShortcut("[")
@@ -324,5 +328,38 @@ struct ExplorerCommands: Commands {
         let selection = model.activeSelection
         if !selection.isEmpty { return Array(selection) }
         return model.destination == .folder ? [model.currentURL] : []
+    }
+}
+
+/// The Actions menu: every action, with ⌃⌥1–9 for the first nine. Menu bar items aren't
+/// rebuilt when the selection changes, so each one reads the selection when chosen (and beeps
+/// if the action doesn't apply to it) rather than being enabled ahead of time.
+private struct ActionCommands: View {
+    let workspace: Workspace?
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some View {
+        let actions = ActionsStore.shared.actions
+        ForEach(Array(actions.enumerated()), id: \.element.id) { index, action in
+            let button = Button(action.name) { run(action) }
+            if index < 9 {
+                button.keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: [.control, .option])
+            } else {
+                button
+            }
+        }
+        if !actions.isEmpty { Divider() }
+        Button(actions.isEmpty ? "Add an Action…" : "Edit Actions…") {
+            Prefs.shared.settingsTab = .actions
+            openSettings()
+        }
+    }
+
+    private func run(_ action: FileAction) {
+        // The tab that's showing now, not when the menu was built.
+        let model = (workspace ?? Session.scriptedWorkspace)?.selected
+        let selection = model?.activeSelection ?? []
+        let ordered = selection.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+        if ActionRunner.shared.run(action, on: ordered) == nil { NSSound.beep() }
     }
 }
