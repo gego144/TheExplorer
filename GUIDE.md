@@ -110,10 +110,10 @@ Google Drive shows up under Cloud in the sidebar once you've signed in. TheExplo
   4. Under Clients, create a **Desktop app** client and download its JSON.
 
   Then choose the JSON file (or paste the client ID and secret) and click Add Account. Google opens in your browser. Because the client is yours rather than a published app, Google says it hasn't verified it: choose Advanced, then Go to (your app's name). You can add several Google accounts with the same client.
-- **Browsing:** clicking Google Drive opens My Drive. Its breadcrumb's first chip lists My Drive, Shared with me, Starred and your shared drives. Shortcuts open the folder they point to.
+- **Browsing:** clicking Google Drive in the sidebar opens My Drive. Under it are Shared with me, Starred and each of your shared drives, a click away; the arrow on the account folds them away. Shortcuts open the folder they point to.
 - **Search:** typing in the command bar (⌘K) searches the whole account with Drive's own search, in names and inside documents.
 - **Upload:** drop files or folders onto a Drive folder, a folder row, a breadcrumb or the sidebar account, or paste. Folders upload with everything in them.
-- **Download:** drag items onto Finder, the desktop or any folder in TheExplorer, press F5 with a local folder in the other pane, or right-click › Download.
+- **Download:** right-click › Download to Downloads (or the inspector's Download button) saves to your Downloads folder, and Download To… asks where. You can also drag items onto Finder, the desktop or any folder in TheExplorer, or press F5 with a local folder in the other pane. The status bar says where each download went; click it for the list, where Show opens the folder with what arrived selected.
 - **Google Docs, Sheets and Slides** download as Word, Excel and PowerPoint files; right-click › Download As offers PDF, Markdown, CSV and the rest. Opening one opens it in your browser, and Space previews it as a PDF. Forms, Sites and My Maps only open in the browser.
 - **Moving and copying:** drag Drive items onto another Drive folder to move them; hold ⌥ to copy. Copy and paste works the same way. Drive can't copy folders, so those move or download instead.
 - **Rename, new folder and trash:** ⇧⌘↩, ⇧⌘N and ⌘⌫ work as they do for local files. Trashed items go to Drive's trash, where you can restore them for 30 days.

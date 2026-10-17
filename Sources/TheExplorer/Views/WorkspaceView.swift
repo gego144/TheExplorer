@@ -1023,7 +1023,7 @@ struct StatusBar: View {
                 ProgressView().controlSize(.mini)
             }
             Spacer()
-            TransferActivity()
+            TransferActivity { folder, placed in model.navigate(to: folder, selecting: placed) }
             ActionActivity()
             if model.destination == .drive, let account = model.drive.location?.accountID {
                 DriveUsageIndicator(accountID: account)

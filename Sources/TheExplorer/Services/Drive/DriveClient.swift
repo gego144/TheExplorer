@@ -98,7 +98,7 @@ struct DriveListing: Sendable {
     var nextToken: String?
 }
 
-struct SharedDrive: Sendable, Hashable {
+struct SharedDrive: Sendable, Hashable, Codable {
     let id: String
     let name: String
     let created: Date?
@@ -231,6 +231,18 @@ final class DriveClient: Sendable {
             token = page.nextToken
         } while token != nil
         return files
+    }
+
+    /// Every shared drive you're a member of, all pages.
+    func allDrives() async throws -> [SharedDrive] {
+        var drives: [SharedDrive] = []
+        var token: String?
+        repeat {
+            let page = try await self.drives(token: token)
+            drives += page.drives
+            token = page.nextToken
+        } while token != nil
+        return drives
     }
 
     func drives(token: String? = nil) async throws -> (drives: [SharedDrive], nextToken: String?) {

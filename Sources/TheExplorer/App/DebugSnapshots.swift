@@ -188,7 +188,7 @@ enum DebugSnapshots {
                 }
             case "transfers":
                 for transfer in Transfers.shared.transfers {
-                    log("transfer \(transfer.kind) \(transfer.title): \(transfer.state) \(transfer.doneItems)/\(transfer.totalItems) items \(transfer.doneBytes)/\(transfer.totalBytes) bytes")
+                    log("transfer \(transfer.kind) \(transfer.title): \(transfer.state) \(transfer.doneItems)/\(transfer.totalItems) items \(transfer.doneBytes)/\(transfer.totalBytes) bytes" + (transfer.folder.map { " in \($0.path) placed=\(transfer.placed.map(\.lastPathComponent))" } ?? ""))
                 }
             case "probe":
                 // Which protected locations can this build read? (Full Disk Access diagnostics)
@@ -270,6 +270,11 @@ enum DebugSnapshots {
                     }
                 } else if let item = FileItem(url: URL(fileURLWithPath: ends[0])) {
                     model.rename(item, to: ends[1])
+                }
+            case "showdownload":
+                // What a finished download's Show button does.
+                if let transfer = Transfers.shared.transfers.first(where: { $0.folder != nil && !$0.placed.isEmpty }), let folder = transfer.folder {
+                    model.navigate(to: folder, selecting: transfer.placed)
                 }
             case "beginrename":
                 // What Rename… (⇧⌘↩) does: shows the name prompt for the selected item.

@@ -115,11 +115,11 @@ final class DriveBrowser {
                     switch location.id {
                     case DriveLocation.homeID:
                         // Only to know whether to offer Shared drives.
-                        drives = (try? await client.drives().drives) ?? []
+                        drives = (try? await client.allDrives()) ?? []
+                        DriveStore.shared.setSharedDrives(drives, for: location.accountID)
                     case DriveLocation.drivesID:
-                        let result = try await client.drives()
-                        drives = result.drives
-                        page.nextToken = result.nextToken
+                        drives = try await client.allDrives()
+                        DriveStore.shared.setSharedDrives(drives, for: location.accountID)
                     case DriveLocation.sharedID: page = try await client.sharedWithMe()
                     case DriveLocation.starredID: page = try await client.starred()
                     default: page = try await client.list(in: location.id)
@@ -456,7 +456,7 @@ extension Transfers {
             failed?(CocoaError(.fileReadNoSuchFile))
             return
         }
-        let id = start(.download, title: Self.downloadTitle(urls, into: folder))
+        let id = start(.download, title: Self.downloadTitle(urls, into: folder), folder: folder)
         tasks[id] = Task {
             do {
                 var plan: [DrivePlanItem] = []
@@ -515,6 +515,7 @@ extension Transfers {
                         if known == nil { $0.totalBytes = total }
                     }
                 }
+                update(id) { $0.placed = placed }
                 if skipped.isEmpty {
                     finish(id, .done)
                 } else {

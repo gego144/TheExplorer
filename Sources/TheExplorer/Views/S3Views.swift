@@ -310,8 +310,11 @@ struct S3Inspector: View {
 
 // MARK: - Status bar
 
-/// Uploads and downloads in progress (or just finished); click for details.
+/// Uploads and downloads in progress (or just finished); click for details, and to show
+/// where downloads went.
 struct TransferActivity: View {
+    /// Opens a download's folder in TheExplorer with what landed there selected.
+    var onShow: (URL, [URL]) -> Void = { _, _ in }
     private var transfers: Transfers { .shared }
     @State private var showing = false
     @State private var dismissedBefore = Date.distantPast
@@ -336,7 +339,10 @@ struct TransferActivity: View {
             .frame(maxWidth: 360)
             .help("Show transfers")
             .popover(isPresented: $showing, arrowEdge: .top) {
-                TransfersView(onClear: { dismissedBefore = Date() })
+                TransfersView(onClear: { dismissedBefore = Date() }) { folder, placed in
+                    showing = false
+                    onShow(folder, placed)
+                }
             }
             .task(id: latest.state) {
                 guard latest.state == .done else { return }
@@ -365,6 +371,7 @@ struct TransferActivity: View {
 
 struct TransfersView: View {
     let onClear: () -> Void
+    var onShow: (URL, [URL]) -> Void = { _, _ in }
     private var transfers: Transfers { .shared }
 
     var body: some View {
@@ -390,6 +397,10 @@ struct TransfersView: View {
                         Spacer()
                         if transfer.state == .running {
                             Button("Stop") { transfers.cancel(transfer.id) }.buttonStyle(SubtleButtonStyle())
+                        } else if let folder = transfer.folder, !transfer.placed.isEmpty {
+                            Button("Show") { onShow(folder, transfer.placed) }
+                                .buttonStyle(SubtleButtonStyle())
+                                .help("Show in “\(FileManager.default.displayName(atPath: folder.path))”")
                         }
                     }
                     HeatBar(fraction: transfer.state == .done ? 1 : transfer.fraction, height: 4, color: Theme.accent)
@@ -415,7 +426,7 @@ struct TransfersView: View {
         let items = transfer.totalItems > 1 ? " · \(transfer.doneItems) of \(transfer.totalItems) files" : ""
         switch transfer.state {
         case .running: return bytes + items + (transfer.current.map { " · \($0)" } ?? "")
-        case .done: return "Done · " + Format.bytes(transfer.totalBytes) + items
+        case .done: return "Done · " + Format.bytes(transfer.totalBytes) + items + (transfer.folder.map { " · in " + Format.path($0.path) } ?? "")
         case .cancelled: return "Stopped · " + bytes + items
         case .failed(let message): return message
         }

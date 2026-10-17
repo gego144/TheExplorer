@@ -136,12 +136,15 @@ private struct SidebarRow: View {
     var dropURL: URL?
     var model: BrowserModel?
     var trailing: AnyView?
+    /// How far in the row sits, for places inside another (a Google account's lists).
+    var indent: CGFloat = 0
     let action: () -> Void
     @State private var hovering = HoverPreview.on
     @State private var targeted = false
 
     init(title: String, systemImage: String? = nil, dotColor: Color? = nil, isSelected: Bool, dimmed: Bool = false,
-         dropURL: URL? = nil, model: BrowserModel? = nil, trailing: AnyView? = nil, action: @escaping () -> Void) {
+         dropURL: URL? = nil, model: BrowserModel? = nil, trailing: AnyView? = nil, indent: CGFloat = 0, action: @escaping () -> Void) {
+        self.indent = indent
         self.title = title
         self.systemImage = systemImage
         self.dotColor = dotColor
@@ -173,6 +176,7 @@ private struct SidebarRow: View {
             trailing
         }
         .padding(.horizontal, 8)
+        .padding(.leading, indent)
         .frame(height: Theme.controlHeight)
         .background(background, in: .rect(cornerRadius: Theme.controlRadius))
         .overlay {
@@ -244,6 +248,24 @@ private struct PinnedRow: View {
     }
 }
 
+/// The arrow that folds a sidebar row's children away.
+private struct DisclosureButton: View {
+    let expanded: Bool
+    let toggle: () -> Void
+
+    var body: some View {
+        Button(action: toggle) {
+            Image(systemName: "chevron.right")
+                .font(.system(size: 8, weight: .heavy))
+                .rotationEffect(.degrees(expanded ? 90 : 0))
+                .animation(.snappy(duration: 0.15), value: expanded)
+                .frame(width: 12, height: 12)
+        }
+        .buttonStyle(GhostButtonStyle(padding: 3))
+        .help(expanded ? "Hide Shared with me, Starred and shared drives" : "Show Shared with me, Starred and shared drives")
+    }
+}
+
 private struct EjectButton: View {
     let url: URL
 
@@ -289,20 +311,65 @@ private struct CloudSection: View {
             }
         }
         ForEach(drives) { account in
-            let isCurrent = model.destination == .drive && model.drive.location?.accountID == account.id
-            SidebarRow(title: DriveStore.shared.title(of: account), systemImage: "externaldrive.connected.to.line.below",
-                       isSelected: isCurrent, dropURL: account.myDrive.url, model: model) {
+            let section = driveSection(of: account)
+            let store = DriveStore.shared
+            let expanded = !store.collapsed.contains(account.id)
+            SidebarRow(title: store.title(of: account), systemImage: "externaldrive.connected.to.line.below",
+                       isSelected: section == DriveLocation.myDriveID || section == DriveLocation.homeID,
+                       dropURL: account.myDrive.url, model: model,
+                       trailing: AnyView(DisclosureButton(expanded: expanded) {
+                           if expanded { store.collapsed.insert(account.id) } else { store.collapsed.remove(account.id) }
+                       })) {
                 model.showDrive(account.myDrive)
             }
-            .help(account.email)
+            .help("My Drive · \(account.email)")
             .contextMenu {
                 Button("Open in New Tab") { openTab(account.myDrive.url) }
-                Button("Shared with Me") { model.showDrive(DriveLocation(accountID: account.id, id: DriveLocation.sharedID, name: "Shared with me")) }
-                Button("Starred") { model.showDrive(DriveLocation(accountID: account.id, id: DriveLocation.starredID, name: "Starred")) }
                 Divider()
                 Button("Google Drive Settings…") { showSettings() }
             }
+            // Its other places, each a click away: what's shared with you, starred, and every
+            // shared drive you're in.
+            if expanded {
+                let places = [DriveLocation(accountID: account.id, id: DriveLocation.sharedID, name: "Shared with me"),
+                              DriveLocation(accountID: account.id, id: DriveLocation.starredID, name: "Starred")]
+                ForEach(places, id: \.id) { place in
+                    driveRow(place, systemImage: place.id == DriveLocation.sharedID ? "person.2" : "star", section: section)
+                }
+                ForEach(store.sharedDrives[account.id] ?? [], id: \.id) { drive in
+                    driveRow(DriveLocation(accountID: account.id, id: drive.id, name: drive.name),
+                             systemImage: "externaldrive.badge.person.crop", section: section, drops: true)
+                }
+                if let error = store.sharedDrivesError[account.id] {
+                    SidebarRow(title: "Drives didn't load", systemImage: "exclamationmark.triangle", isSelected: false,
+                               dimmed: true, indent: 14) { store.refreshSharedDrives(account.id) }
+                        .help(error + " Click to try again.")
+                }
+            }
         }
+        .task(id: drives.map(\.id)) {
+            for account in drives { DriveStore.shared.refreshSharedDrives(account.id) }
+        }
+    }
+
+    private func driveRow(_ place: DriveLocation, systemImage: String, section: String?, drops: Bool = false) -> some View {
+        SidebarRow(title: place.name, systemImage: systemImage, isSelected: section == place.id,
+                   dropURL: drops ? place.url : nil, model: model, indent: 14) {
+            model.showDrive(place)
+        }
+        .contextMenu {
+            Button("Open in New Tab") { openTab(place.url) }
+        }
+    }
+
+    /// Which of an account's places the active pane is in: My Drive, Shared with me, Starred or
+    /// a shared drive (by ID). Nil when it's showing something else.
+    private func driveSection(of account: DriveAccount) -> String? {
+        guard model.destination == .drive, let location = model.drive.location, location.accountID == account.id else { return nil }
+        let trail = model.drive.trail
+        guard trail.count > 1 else { return location.id }
+        if trail[1].id == DriveLocation.drivesID { return trail.count > 2 ? trail[2].id : DriveLocation.drivesID }
+        return trail[1].id
     }
 
     private func showSettings() {

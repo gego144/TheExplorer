@@ -75,11 +75,13 @@ final class DriveStore {
         var clientID = ""
         var accounts: [DriveAccount] = []
         var usage: [String: DriveAbout]? = [:]
+        var drives: [String: [SharedDrive]]? = [:]
 
-        init(clientID: String, accounts: [DriveAccount], usage: [String: DriveAbout]) {
+        init(clientID: String, accounts: [DriveAccount], usage: [String: DriveAbout], drives: [String: [SharedDrive]]) {
             self.clientID = clientID
             self.accounts = accounts
             self.usage = usage
+            self.drives = drives
         }
 
         /// Storage figures are only a cache: if they can't be read, the accounts still load.
@@ -88,6 +90,7 @@ final class DriveStore {
             clientID = try container.decodeIfPresent(String.self, forKey: .clientID) ?? ""
             accounts = try container.decodeIfPresent([DriveAccount].self, forKey: .accounts) ?? []
             usage = (try? container.decodeIfPresent([String: DriveAbout].self, forKey: .usage)) ?? [:]
+            drives = (try? container.decodeIfPresent([String: [SharedDrive]].self, forKey: .drives)) ?? [:]
         }
     }
 
@@ -96,6 +99,9 @@ final class DriveStore {
     private(set) var accounts: [DriveAccount] = []
     /// Each account's name and storage, refreshed whenever it's opened.
     private(set) var usage: [UUID: DriveAbout] = [:]
+    /// Each account's shared drives, by name, for the sidebar. Saved, so they show at launch,
+    /// and refreshed from Drive.
+    private(set) var sharedDrives: [UUID: [SharedDrive]] = [:]
 
     @ObservationIgnored private var clients: [UUID: DriveClient] = [:]
     @ObservationIgnored private var files: [String: DriveFile] = [:]
@@ -181,6 +187,37 @@ final class DriveStore {
         accounts.removeAll { $0.id == account.id }
         clients[account.id] = nil
         usage[account.id] = nil
+        sharedDrives[account.id] = nil
+        persist()
+    }
+
+    /// Why an account's shared drives couldn't be listed, if they couldn't.
+    private(set) var sharedDrivesError: [UUID: String] = [:]
+
+    /// Accounts whose places (Shared with me, Starred, shared drives) are folded away in the sidebar.
+    var collapsed: Set<UUID> = Set((UserDefaults.standard.stringArray(forKey: "collapsedDriveAccounts") ?? []).compactMap(UUID.init)) {
+        didSet { UserDefaults.standard.set(collapsed.map(\.uuidString), forKey: "collapsedDriveAccounts") }
+    }
+
+    func refreshSharedDrives(_ accountID: UUID) {
+        guard let client = client(for: accountID) else { return }
+        Task {
+            do {
+                setSharedDrives(try await client.allDrives(), for: accountID)
+                sharedDrivesError[accountID] = nil
+            } catch {
+                sharedDrivesError[accountID] = error.localizedDescription
+            }
+        }
+    }
+
+    func setSharedDrives(_ drives: [SharedDrive], for accountID: UUID) {
+        let sorted = drives.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        for drive in sorted {
+            parents[key(accountID, drive.id)] = DriveLocation(accountID: accountID, id: DriveLocation.drivesID, name: "Shared drives")
+        }
+        guard sharedDrives[accountID] != sorted else { return }
+        sharedDrives[accountID] = sorted
         persist()
     }
 
@@ -320,12 +357,16 @@ final class DriveStore {
         clientID = saved.clientID
         accounts = saved.accounts
         usage = Dictionary(uniqueKeysWithValues: (saved.usage ?? [:]).compactMap { key, value in UUID(uuidString: key).map { ($0, value) } })
+        sharedDrives = Dictionary(uniqueKeysWithValues: (saved.drives ?? [:]).compactMap { key, value in UUID(uuidString: key).map { ($0, value) } })
     }
 
     private func persist() {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(Saved(clientID: clientID, accounts: accounts, usage: Dictionary(uniqueKeysWithValues: usage.map { ($0.key.uuidString, $0.value) }))) else { return }
+        let saved = Saved(clientID: clientID, accounts: accounts,
+                          usage: Dictionary(uniqueKeysWithValues: usage.map { ($0.key.uuidString, $0.value) }),
+                          drives: Dictionary(uniqueKeysWithValues: sharedDrives.map { ($0.key.uuidString, $0.value) }))
+        guard let data = try? encoder.encode(saved) else { return }
         try? data.write(to: fileURL, options: .atomic)
     }
 }

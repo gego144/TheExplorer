@@ -216,6 +216,10 @@ final class Transfers {
         var state = State.running
         let started = Date()
         var finished: Date?
+        /// For downloads: the folder they went to (nil for copies fetched to preview), and the
+        /// top-level items that landed there.
+        var folder: URL?
+        var placed: [URL] = []
 
         var fraction: Double { totalBytes > 0 ? min(1, Double(doneBytes) / Double(totalBytes)) : 0 }
     }
@@ -278,7 +282,7 @@ final class Transfers {
             failed?(CocoaError(.fileReadNoSuchFile))
             return
         }
-        let id = start(.download, title: Self.downloadTitle(urls, into: folder))
+        let id = start(.download, title: Self.downloadTitle(urls, into: folder), folder: folder)
         tasks[id] = Task {
             do {
                 // Each object with where it goes; folder names are made unique once, up front.
@@ -321,6 +325,7 @@ final class Transfers {
                     finishedBytes = transfers.first { $0.id == id }?.doneBytes ?? finishedBytes
                     update(id) { $0.doneItems += 1 }
                 }
+                update(id) { $0.placed = placed }
                 finish(id, .done)
                 completion?(placed)
             } catch {
@@ -348,8 +353,9 @@ final class Transfers {
         }
     }
 
-    func start(_ kind: Transfer.Kind, title: String) -> UUID {
-        let transfer = Transfer(kind: kind, title: title)
+    func start(_ kind: Transfer.Kind, title: String, folder: URL? = nil) -> UUID {
+        var transfer = Transfer(kind: kind, title: title)
+        transfer.folder = folder.flatMap { Self.isViewingCache($0) ? nil : $0 }
         transfers.insert(transfer, at: 0)
         if transfers.count > 20 { transfers.removeLast(transfers.count - 20) }
         return transfer.id
@@ -375,8 +381,12 @@ final class Transfers {
 
     /// "“clip.mov” to “Downloads”", or "“clip.mov” for viewing" for the cache Quick Look uses.
     static func downloadTitle(_ urls: [URL], into folder: URL) -> String {
-        let cache = FileManager.default.temporaryDirectory.standardizedFileURL.path
-        return noun(urls) + (folder.standardizedFileURL.path.hasPrefix(cache) ? " for viewing" : " to “\(folder.lastPathComponent)”")
+        noun(urls) + (isViewingCache(folder) ? " for viewing" : " to “\(FileManager.default.displayName(atPath: folder.path))”")
+    }
+
+    /// The temporary folders files are fetched to for opening and Quick Look.
+    static func isViewingCache(_ folder: URL) -> Bool {
+        folder.standardizedFileURL.path.hasPrefix(FileManager.default.temporaryDirectory.standardizedFileURL.path)
     }
 
     static func noun(_ urls: [URL]) -> String {
