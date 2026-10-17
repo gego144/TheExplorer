@@ -407,7 +407,7 @@ struct TransfersView: View {
         .padding(12)
         .frame(width: 400)
         .background(Theme.background)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.colorScheme)
     }
 
     private func status(_ transfer: S3Transfers.Transfer) -> String {
@@ -617,7 +617,7 @@ struct ConnectionEditor: View {
         .padding(18)
         .frame(width: 500)
         .background(Theme.background)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.colorScheme)
     }
 
     private var isComplete: Bool {

@@ -18,6 +18,7 @@ struct TheExplorerApp: App {
 
         Settings {
             SettingsView()
+                .id(Prefs.shared.themeRevision)
         }
     }
 }
@@ -121,6 +122,8 @@ private struct WorkspaceWindow: View {
 
     var body: some View {
         WorkspaceView(workspace: workspace)
+            // A new theme redraws the whole window with its colors.
+            .id(Prefs.shared.themeRevision)
             .frame(minWidth: 820, minHeight: 460)
             .onAppear {
                 workspace.start()

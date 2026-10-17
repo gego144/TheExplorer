@@ -3,12 +3,12 @@ import SwiftUI
 
 /// Colors for rendered previews: links, and JSON's keys and value types.
 private enum Ink {
-    static let link = Color(hex: 0x6EB8FF)
-    static let key = Color(hex: 0xC9BBFF)
-    static let string = Color(hex: 0x54D3A0)
-    static let number = Color(hex: 0x6EB8FF)
-    static let bool = Color(hex: 0xE35F9F)
-    static let body = Color(hex: 0xD6D6D6)
+    static var link: Color { Theme.blue }
+    static var key: Color { Theme.purple }
+    static var string: Color { Theme.green }
+    static var number: Color { Theme.blue }
+    static var bool: Color { Theme.pink }
+    static var body: Color { Theme.body }
 }
 
 /// The inspector's preview for Markdown, CSV, JSON and fonts, drawn by TheExplorer instead of
@@ -104,7 +104,7 @@ struct ExpandedPreview: View {
         let item = FileItem(url: url)
         let kind = item.flatMap { RenderedKind(url: url, type: $0.contentType) }
         ZStack {
-            Color.black.opacity(0.55)
+            Theme.scrim
                 .contentShape(.rect)
                 .onTapGesture(perform: close)
             VStack(spacing: 0) {

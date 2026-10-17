@@ -123,7 +123,7 @@ struct ActionRunsView: View {
         .padding(12)
         .frame(width: 460)
         .background(Theme.background)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.colorScheme)
     }
 }
 
@@ -386,7 +386,7 @@ struct ActionEditor: View {
         .padding(18)
         .frame(width: 500)
         .background(Theme.background)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.colorScheme)
     }
 
     private func field(_ title: String, hint: String? = nil, @ViewBuilder content: () -> some View) -> some View {

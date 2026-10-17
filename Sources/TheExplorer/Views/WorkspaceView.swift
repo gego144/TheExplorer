@@ -49,7 +49,7 @@ struct WorkspaceView: View {
         .background(Theme.background)
         .foregroundStyle(Theme.text)
         .ignoresSafeArea(.container, edges: .top)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.colorScheme)
         .tint(Theme.accent)
         .environment(\.openTab) { url in workspace.newTab(url) }
         .navigationTitle(model.title)

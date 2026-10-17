@@ -122,6 +122,7 @@ Commands run in zsh with your login profile, so Homebrew tools like `ffmpeg` are
 
 <img src="docs/screenshots/settings.png" alt="The Settings window" width="340" align="right">
 
+- **Appearance.** Pick a theme: Dark (the default), Graphite (softer greys), Midnight (deep navy), Light, or System, which is Dark or Light following macOS and switches when macOS does.
 - **Default file browser.** Send other apps' "Show in Finder" and "Reveal" buttons to TheExplorer. Revealed items open in a tab with the items selected. macOS keeps Finder for folders opened from the Dock, Spotlight or other apps and doesn't let any app take that over, so Settings shows that too, along with the Open With workaround.
 - **Terminal.** Choose what "Open in Terminal" (⌃⌘T) uses: Terminal, cmux, Ghostty, iTerm, Warp or any other app. cmux gets a new workspace in the folder.
 - **Defaults.** Where new windows start, sort order, folders first, hidden files, and New's time range and clutter filter.

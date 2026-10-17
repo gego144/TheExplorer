@@ -6,13 +6,13 @@ import SwiftUI
 
 extension Theme {
     /// Hover fill on the window background (rows, sidebar items, ghost buttons).
-    static let hoverFill = Color(hex: 0x1F1F1F)
+    static var hoverFill: Color { colors.hoverFill }
     /// Hover fill on raised controls (buttons, chips).
-    static let raisedHover = Color(hex: 0x2B2B2B)
+    static var raisedHover: Color { colors.raisedHover }
     /// Pressed fill.
-    static let pressedFill = Color(hex: 0x333333)
+    static var pressedFill: Color { colors.pressedFill }
     /// Hover border on raised controls.
-    static let borderHover = Color(hex: 0x474747)
+    static var borderHover: Color { colors.borderHover }
 
     /// Corner radii: small chips, controls, fields and cards.
     static let chipRadius: CGFloat = 5

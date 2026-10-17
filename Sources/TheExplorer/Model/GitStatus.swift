@@ -34,8 +34,8 @@ enum GitChange: Int, Comparable, Sendable {
 
     var color: Color {
         switch self {
-        case .untracked, .added: Color(hex: 0x6EB8FF)
-        case .renamed: Color(hex: 0xC9BBFF)
+        case .untracked, .added: Theme.blue
+        case .renamed: Theme.purple
         case .modified: Theme.warning
         case .deleted, .conflicted: Theme.danger
         }

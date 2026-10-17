@@ -22,6 +22,17 @@ final class Prefs {
     static let shared = Prefs()
 
     var showSidebar: Bool { didSet { defaults.set(showSidebar, forKey: "showSidebar") } }
+
+    /// The color theme (Settings › General).
+    var theme: ThemeChoice {
+        didSet {
+            defaults.set(theme.rawValue, forKey: "theme")
+            applyTheme()
+        }
+    }
+    /// Bumped whenever the colors change. Windows are keyed on it, so they redraw everything
+    /// with the new colors (see Theme).
+    private(set) var themeRevision = 0
     var showInspector: Bool { didSet { defaults.set(showInspector, forKey: "showInspector") } }
 
     /// Bundle identifier of the app "Open in Terminal" uses.
@@ -60,9 +71,30 @@ final class Prefs {
 
     @ObservationIgnored private let defaults = UserDefaults.standard
 
+    /// Whether macOS is in dark mode, for the System theme.
+    private static var systemIsDark: Bool {
+        UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
+    }
+
+    #if DEBUG
+    /// Scripted runs: shows a theme without saving it over yours.
+    func previewTheme(_ choice: ThemeChoice) {
+        Theme.apply(choice.palette(systemIsDark: Self.systemIsDark))
+        themeRevision += 1
+    }
+    #endif
+
+    func applyTheme() {
+        let palette = theme.palette(systemIsDark: Self.systemIsDark)
+        guard palette != Theme.colors else { return }
+        Theme.apply(palette)
+        themeRevision += 1
+    }
+
     private init() {
         let defaults = UserDefaults.standard
         showSidebar = defaults.object(forKey: "showSidebar") as? Bool ?? true
+        theme = defaults.string(forKey: "theme").flatMap(ThemeChoice.init) ?? .dark
         showInspector = defaults.object(forKey: "showInspector") as? Bool ?? true
         terminalID = defaults.string(forKey: "terminalBundleID") ?? Terminal.appleTerminal
         startLocation = defaults.string(forKey: "startLocation").flatMap(StartLocation.init) ?? .lastFolder
@@ -74,6 +106,15 @@ final class Prefs {
         newHidesClutter = defaults.object(forKey: "newHidesClutter") as? Bool ?? true
         newRange = (defaults.object(forKey: "newRangeDays") as? Int).flatMap(RecentsRange.init) ?? .week
         refreshFileBrowser()
+        Theme.apply(theme.palette(systemIsDark: Self.systemIsDark))
+        // The System theme follows macOS switching between light and dark (by hand, or at
+        // sunset with Auto). The setting is written just after the notification goes out.
+        DistributedNotificationCenter.default().addObserver(forName: Notification.Name("AppleInterfaceThemeChangedNotification"),
+                                                            object: nil, queue: .main) { _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                MainActor.assumeIsolated { Prefs.shared.applyTheme() }
+            }
+        }
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { Prefs.shared.refreshFileBrowser() }
         }

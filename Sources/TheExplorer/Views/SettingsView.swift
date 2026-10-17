@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Settings (⌘,). General: the default file browser, the terminal to open folders in, where new
+/// Settings (⌘,). General: the color theme, the default file browser, the terminal to open folders in, where new
 /// windows start, and the defaults new tabs begin with. Actions: your shell commands for files.
 /// Open With: the apps that open file types from TheExplorer.
 struct SettingsView: View {
@@ -24,11 +24,15 @@ struct SettingsView: View {
         .frame(width: 520)
         .fixedSize(horizontal: false, vertical: true)
         .background(Theme.background)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(Theme.colorScheme)
     }
 
     private var general: some View {
         VStack(alignment: .leading, spacing: 18) {
+            section("Appearance") {
+                ThemePicker(prefs: prefs)
+            }
+
             section("Default file browser") {
                 SettingRow("“Show in Finder” opens", hint: "Where other apps’ “Show in Finder” and “Reveal” buttons show files. Applies right away.") {
                     FileViewerPicker(prefs: prefs)
@@ -353,5 +357,125 @@ private struct StartLocationPicker: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         prefs.startFolder = url.path
         prefs.startLocation = .custom
+    }
+}
+
+// MARK: - Theme
+
+/// A tile for each theme, drawn as a little window in its colors.
+private struct ThemePicker: View {
+    @Bindable var prefs: Prefs
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(ThemeChoice.allCases) { choice in
+                Button { prefs.theme = choice } label: {
+                    ThemeTileLabel(choice: choice, isSelected: prefs.theme == choice)
+                }
+                .buttonStyle(ThemeTileStyle(isSelected: prefs.theme == choice))
+                .help(choice == .system ? "Dark or Light, following macOS" : choice.title)
+                #if DEBUG
+                .debugRowFrame(named: "theme-\(choice.rawValue)")
+                #endif
+            }
+        }
+        .padding(12)
+    }
+}
+
+private struct ThemeTileLabel: View {
+    static let size = CGSize(width: 76, height: 50)
+    let choice: ThemeChoice
+    let isSelected: Bool
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Group {
+                if choice == .system {
+                    // Dark on the left, light on the right.
+                    MiniWindow(palette: .dark)
+                        .overlay {
+                            MiniWindow(palette: .light)
+                                .mask(alignment: .trailing) { Rectangle().frame(width: ThemeTileLabel.size.width / 2) }
+                        }
+                } else {
+                    MiniWindow(palette: choice.palette(systemIsDark: true))
+                }
+            }
+            .frame(width: Self.size.width, height: Self.size.height)
+            .clipShape(.rect(cornerRadius: 6))
+            Text(choice.title)
+                .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                .foregroundStyle(isSelected ? Theme.text : Theme.textSecondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct ThemeTileStyle: ButtonStyle {
+    let isSelected: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        Hovering { hovering in
+            configuration.label
+                .padding(4)
+                .background(configuration.isPressed ? Theme.pressedFill : (hovering ? Theme.hoverFill : .clear),
+                            in: .rect(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(isSelected ? Theme.accent : (hovering ? Theme.borderHover : .clear),
+                                                                        lineWidth: isSelected ? 1.5 : 1))
+                .contentShape(.rect)
+                .clickable(!isSelected)
+        }
+    }
+}
+
+/// A sketch of the window in a palette: sidebar, rows with one selected, and the inspector card.
+private struct MiniWindow: View {
+    let palette: ThemePalette
+
+    var body: some View {
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(0..<4, id: \.self) { index in
+                    Capsule().fill(index == 1 ? palette.text.opacity(0.8) : palette.textTertiary.opacity(0.7)).frame(width: 10, height: 2.5)
+                }
+            }
+            .padding(5)
+            .frame(width: 20, alignment: .topLeading)
+            .frame(maxHeight: .infinity, alignment: .top)
+            .background(palette.background)
+            Rectangle().fill(palette.border).frame(width: 0.5)
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(0..<5, id: \.self) { index in
+                    HStack(spacing: 3) {
+                        Capsule().fill(index == 2 ? palette.text : palette.textSecondary.opacity(0.8)).frame(width: 14, height: 2.5)
+                        Spacer(minLength: 0)
+                        Capsule().fill([palette.warning, palette.blue, palette.purple, palette.hot, palette.green][index]).frame(width: 6, height: 2.5)
+                    }
+                    .padding(.horizontal, 3)
+                    .frame(height: 6)
+                    .background(index == 2 ? palette.accentSoft : .clear, in: .rect(cornerRadius: 1.5))
+                }
+            }
+            .padding(.vertical, 6)
+            .padding(.horizontal, 3)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background(palette.background)
+            RoundedRectangle(cornerRadius: 3)
+                .fill(palette.surface)
+                .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(palette.border, lineWidth: 0.5))
+                .overlay(alignment: .topLeading) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        RoundedRectangle(cornerRadius: 1.5).fill(palette.raised).frame(width: 8, height: 8)
+                        Capsule().fill(palette.accent).frame(width: 11, height: 2.5)
+                        Capsule().fill(palette.textTertiary).frame(width: 8, height: 2)
+                    }
+                    .padding(3)
+                }
+                .frame(width: 20)
+                .padding(3)
+                .background(palette.background)
+        }
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(palette.border))
     }
 }

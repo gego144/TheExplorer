@@ -112,6 +112,9 @@ enum DebugSnapshots {
                     delegate?.filePromiseProvider(promise, writePromiseTo: destination) { continuation.resume(returning: .some($0)) }
                 }
                 log("promise name=\(name) type=\(promise.fileType) error=\(String(describing: result ?? nil))")
+            case "theme":
+                // theme:<system|dark|graphite|midnight|light> shows a theme for the run, unsaved.
+                if let choice = ThemeChoice(rawValue: argument) { Prefs.shared.previewTheme(choice) }
             case "split": workspace.toggleSplit()
             case "pane":
                 // pane:1 or pane:2 makes that side of a split tab active.
