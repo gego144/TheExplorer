@@ -112,6 +112,10 @@ enum DebugSnapshots {
                     delegate?.filePromiseProvider(promise, writePromiseTo: destination) { continuation.resume(returning: .some($0)) }
                 }
                 log("promise name=\(name) type=\(promise.fileType) error=\(String(describing: result ?? nil))")
+            case "split": workspace.toggleSplit()
+            case "pane":
+                // pane:1 or pane:2 makes that side of a split tab active.
+                if let second = workspace.secondPane(of: workspace.currentTab) { workspace.activate(argument == "2" ? second : workspace.currentTab) }
             case "back": model.goBack()
             case "bigpreview":
                 if argument.isEmpty { model.expandedPreview = nil } else { model.showExpandedPreview(URL(fileURLWithPath: argument)) }
@@ -361,10 +365,23 @@ enum DebugSnapshots {
                 } else {
                     log("\(scene): no row on screen with that name")
                 }
+            case "dragrow":
+                // dragrow:<row name>:<dx>: presses in the middle of a named element and drags
+                // it sideways (the split divider is "split-divider").
+                let pieces = (parts.count > 1 ? parts[1] : "").split(separator: ":").map(String.init)
+                if let name = pieces.first, let (_, frame) = RowGeometry.frame(named: name), let dx = pieces.dropFirst().first.flatMap(Double.init) {
+                    await InputDriver.drag(from: CGPoint(x: frame.midX, y: frame.midY), by: dx)
+                    log("\(scene): divider at \(RowGeometry.frame(named: name).map { Int($0.1.midX) } ?? -1)")
+                } else {
+                    log("\(scene): no row on screen with that name")
+                }
             case "clickat":
-                // clickat:<x>,<y>: a click at a point in the window, in points from the top left.
+                // clickat:<x>,<y>[,<clicks>]: a click at a point in the window, in points from the
+                // top left; a third number makes it a double (or triple) click.
                 let numbers = argument.split(separator: ",").compactMap { Double($0) }
-                if numbers.count == 2 { await InputDriver.click(at: CGPoint(x: numbers[0], y: numbers[1])) }
+                if numbers.count >= 2 {
+                    await InputDriver.click(at: CGPoint(x: numbers[0], y: numbers[1]), count: numbers.count > 2 ? Int(numbers[2]) : 1)
+                }
             case "scroll":
                 let report = await InputDriver.scroll(points: Double(argument).map { CGFloat($0) })
                 log("\(scene) scroll: \(report)")
@@ -382,7 +399,7 @@ enum DebugSnapshots {
             log("\(scene) timing: first content \(firstContent.map { String(format: "%.2fs", $0) } ?? "never"), worst main-thread stall \(HangWatchdog.worst)ms, stalls>100ms \(HangWatchdog.stalls) · recents=\(shown.recents.rows.count) new=\(shown.newFiles.rows.count) total=\(shown.newFiles.totalCount.map(String.init) ?? "nil") more=\(shown.newFiles.hasMore) gathering=\(shown.newFiles.isGathering) hits=\(shown.search.hits.count)")
             let names = shown.rows.prefix(40).map { "\($0.item.name)@\(RelativeTime.short($0.item.modified))" }.joined(separator: ",")
             let selected = shown.selection.map(\.lastPathComponent).sorted().joined(separator: ",")
-            log("\(scene) -> tabs=\(workspace.tabs.count) view=\(shown.destination) search=\"\(shown.searchText)\" expanded=\(shown.expanded.map(\.lastPathComponent).sorted()) firstResponder=\(InputDriver.window?.firstResponder.map { String(describing: type(of: $0)) } ?? "nil") key=\(InputDriver.window?.isKeyWindow ?? false) active=\(NSApp.isActive) url=\(shown.currentURL.path) items=[\(names)] selected=[\(selected)] error=\(shown.loadError ?? "none") preview=\(shown.previewURL?.lastPathComponent ?? "nil")/\(shown.previewItems.count) big=\(shown.expandedPreview?.lastPathComponent ?? "nil") s3=\(shown.destination == .s3 ? (shown.s3.location?.uri ?? "?") + " rows=\(shown.s3.rows.map(\.item.name))" + (shown.s3.error.map { " error=\($0)" } ?? "") : "-") windows=\(NSApp.windows.filter { $0.isVisible && $0.canBecomeMain }.map(\.title)) git=\(gitSummary(shown)) undoMenu=\(undoMenuTitles()) history=\(FileHistory.shared.undoStack.map(\.name))/\(FileHistory.shared.redoStack.map(\.name))")
+            log("\(scene) -> tabs=\(workspace.tabs.count) panes=\(workspace.secondPane(of: workspace.currentTab).map { "\(workspace.currentTab.currentURL.lastPathComponent)|\($0.currentURL.lastPathComponent) active=\(workspace.selected === $0 ? 2 : 1)" } ?? "1") view=\(shown.destination) search=\"\(shown.searchText)\" expanded=\(shown.expanded.map(\.lastPathComponent).sorted()) firstResponder=\(InputDriver.window?.firstResponder.map { String(describing: type(of: $0)) } ?? "nil") key=\(InputDriver.window?.isKeyWindow ?? false) active=\(NSApp.isActive) url=\(shown.currentURL.path) items=[\(names)] selected=[\(selected)] error=\(shown.loadError ?? "none") preview=\(shown.previewURL?.lastPathComponent ?? "nil")/\(shown.previewItems.count) big=\(shown.expandedPreview?.lastPathComponent ?? "nil") s3=\(shown.destination == .s3 ? (shown.s3.location?.uri ?? "?") + " rows=\(shown.s3.rows.map(\.item.name))" + (shown.s3.error.map { " error=\($0)" } ?? "") : "-") windows=\(NSApp.windows.filter { $0.isVisible && $0.canBecomeMain }.map(\.title)) git=\(gitSummary(shown)) undoMenu=\(undoMenuTitles()) history=\(FileHistory.shared.undoStack.map(\.name))/\(FileHistory.shared.redoStack.map(\.name))")
             if env["EXPLORER_NO_CAPTURE"] == nil { capture(to: "\(dir)/\(index)-\(parts[0]).png") }
         }
         if env["EXPLORER_SNAPSHOT_QUIT"] != nil { NSApp.terminate(nil) }

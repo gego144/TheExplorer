@@ -23,6 +23,12 @@ In a repository, changed files get a letter (**M** modified, **U** untracked…)
 
 <img src="docs/screenshots/hero.png" alt="A git project expanded inline, with change badges, the branch chip and a code preview" width="100%">
 
+### Split pane
+
+Press ⌘\ to put two folders side by side, Tab to switch between them, and F5 or F6 to copy or move the selection across.
+
+<img src="docs/screenshots/split.png" alt="Two folders side by side in a split tab" width="100%">
+
 ### Real folder sizes
 
 Every folder's total size is worked out in the background and drawn as a bar, so the heavy ones stand out. Click a folder's arrow to expand it in place.

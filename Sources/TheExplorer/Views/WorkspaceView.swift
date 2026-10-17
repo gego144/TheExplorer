@@ -4,11 +4,22 @@ import SwiftUI
 extension EnvironmentValues {
     /// Opens a folder in a new tab of the current window.
     @Entry var openTab: (URL) -> Void = { _ in }
+    /// Whether this is the active pane (always, unless the tab is split). Lists only take
+    /// keyboard focus on their own in the active pane.
+    @Entry var isActivePane = true
+    /// In a split tab: makes this pane the active one (its list got focus).
+    @Entry var activatePane: (() -> Void)?
+    /// In a split tab: moves to the other pane (Tab in a list).
+    @Entry var switchPane: (() -> Void)?
+    /// The window, when its tab is split, for Copy and Move to Other Pane.
+    @Entry var splitWorkspace: Workspace?
 }
 
 /// A whole window: tab strip, command bar, sidebar, content, inspector and status bar.
 struct WorkspaceView: View {
     @Bindable var workspace: Workspace
+    /// The first pane's width when a divider drag began.
+    @State private var dragStart: CGFloat = 0
     private var prefs: Prefs { .shared }
 
     var body: some View {
@@ -23,7 +34,7 @@ struct WorkspaceView: View {
                         .frame(width: 192)
                         .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 1) }
                 }
-                content(model)
+                panes(model)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 if prefs.showInspector && InspectorView.hasContent(model) {
                     InspectorView(model: model)
@@ -64,6 +75,38 @@ struct WorkspaceView: View {
         .focusedSceneValue(\.workspace, workspace)
     }
 
+    /// The tab's content, or its two panes side by side when it's split.
+    @ViewBuilder
+    private func panes(_ active: BrowserModel) -> some View {
+        let tab = workspace.currentTab
+        if let second = workspace.secondPane(of: tab) {
+            GeometryReader { proxy in
+                let width = proxy.size.width - 1
+                // Neither pane gets narrower than the list's columns need (with room for names),
+                // however the divider was dragged or the window resized.
+                let minimum = min(380, width / 2)
+                let first = min(max(width * workspace.splitFraction(of: tab), minimum), width - minimum)
+                HStack(spacing: 0) {
+                    SplitPane(model: tab, workspace: workspace, isActive: active === tab) { content(tab) }
+                        .frame(width: first)
+                        .clipped()
+                    SplitDivider(
+                        onDrag: { began, offset in
+                            if began { dragStart = first }
+                            workspace.setSplitFraction((dragStart + offset) / max(width, 1), of: tab)
+                        },
+                        onReset: { workspace.setSplitFraction(nil, of: tab) }
+                    )
+                    SplitPane(model: second, workspace: workspace, isActive: active === second) { content(second) }
+                        .frame(width: max(0, width - first))
+                        .clipped()
+                }
+            }
+        } else {
+            content(active)
+        }
+    }
+
     @ViewBuilder
     private func content(_ model: BrowserModel) -> some View {
         if model.isSearching {
@@ -88,6 +131,175 @@ struct WorkspaceView: View {
             model.search.run(text: model.searchText, scope: model.searchScope, folder: model.currentURL, includeHidden: model.showHidden)
         } else {
             model.search.clear()
+        }
+    }
+}
+
+/// The line between split panes. Drag it to resize them; double-click to even them out.
+private struct SplitDivider: View {
+    /// Called with how far the divider has moved since the drag began.
+    let onDrag: (_ began: Bool, _ offset: CGFloat) -> Void
+    let onReset: () -> Void
+    @State private var hovering = HoverPreview.on
+    @State private var dragging = false
+
+    var body: some View {
+        Rectangle()
+            .fill(hovering || dragging ? Theme.accentStrong : Theme.fieldBorder)
+            .frame(width: 1)
+            .overlay {
+                // A wider grip than the line itself.
+                DividerGrip(onDrag: onDrag, onReset: onReset, onHover: { hovering = $0 }, onDragging: { dragging = $0 })
+                    .frame(width: 9)
+                    #if DEBUG
+                    .debugRowFrame(named: "split-divider")
+                    #endif
+            }
+            .zIndex(1)
+            .animation(Theme.hoverAnimation, value: hovering)
+    }
+}
+
+/// The divider's grip, in AppKit: it takes the first click even in a window that isn't
+/// focused, and shows the resize cursor.
+private struct DividerGrip: NSViewRepresentable {
+    let onDrag: (Bool, CGFloat) -> Void
+    let onReset: () -> Void
+    let onHover: (Bool) -> Void
+    let onDragging: (Bool) -> Void
+
+    func makeNSView(context: Context) -> GripView { GripView() }
+
+    func updateNSView(_ view: GripView, context: Context) {
+        view.onDrag = onDrag
+        view.onReset = onReset
+        view.onHover = onHover
+        view.onDragging = onDragging
+    }
+
+    final class GripView: NSView {
+        var onDrag: (Bool, CGFloat) -> Void = { _, _ in }
+        var onReset: () -> Void = {}
+        var onHover: (Bool) -> Void = { _ in }
+        var onDragging: (Bool) -> Void = { _ in }
+        private var start: CGFloat = 0
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        override func resetCursorRects() {
+            addCursorRect(bounds, cursor: .resizeLeftRight)
+        }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            trackingAreas.forEach(removeTrackingArea)
+            addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .cursorUpdate],
+                                           owner: self))
+        }
+
+        override func cursorUpdate(with event: NSEvent) { NSCursor.resizeLeftRight.set() }
+        override func mouseEntered(with event: NSEvent) { onHover(true) }
+        override func mouseExited(with event: NSEvent) { onHover(false) }
+
+        override func mouseDown(with event: NSEvent) {
+            if event.clickCount == 2 {
+                onReset()
+                return
+            }
+            start = event.locationInWindow.x
+            onDragging(true)
+            onDrag(true, 0)
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            onDrag(false, event.locationInWindow.x - start)
+        }
+
+        override func mouseUp(with event: NSEvent) { onDragging(false) }
+    }
+}
+
+/// One side of a split tab: a slim header saying where it is (bright when it's the active
+/// pane), then the pane's own list.
+private struct SplitPane<Content: View>: View {
+    let model: BrowserModel
+    let workspace: Workspace
+    let isActive: Bool
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(spacing: 0) {
+            SplitPaneHeader(model: model, isActive: isActive, onActivate: { activate() }, onClose: { workspace.close(pane: model) })
+            content()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .environment(\.isActivePane, isActive)
+        .environment(\.activatePane) { workspace.activate(model) }
+        .environment(\.switchPane) { workspace.switchPane() }
+        .environment(\.splitWorkspace, workspace)
+        #if DEBUG
+        .debugRowFrame(named: "pane-\(workspace.currentTab === model ? 1 : 2)")
+        #endif
+    }
+
+    private func activate() {
+        workspace.activate(model)
+        model.listFocusRequest += 1
+    }
+}
+
+private struct SplitPaneHeader: View {
+    let model: BrowserModel
+    let isActive: Bool
+    let onActivate: () -> Void
+    let onClose: () -> Void
+    @State private var hovering = HoverPreview.on
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: symbol)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(isActive ? Theme.text : Theme.textTertiary)
+            Text(model.title)
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(isActive ? Theme.text : Theme.textSecondary)
+                .lineLimit(1)
+            if model.destination == .folder && !model.isSearching {
+                Text(Format.path(model.currentURL.deletingLastPathComponent().path))
+                    .font(Theme.monoSmall)
+                    .foregroundStyle(Theme.textTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+            }
+            Spacer(minLength: 4)
+            Button(action: onClose) {
+                Image(systemName: "xmark").font(.system(size: 8.5, weight: .bold)).frame(width: 14, height: 14)
+            }
+            .buttonStyle(GhostButtonStyle(padding: 2, tint: Theme.textTertiary))
+            .opacity(hovering || isActive ? 1 : 0)
+            .help("Close Pane")
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 26)
+        .background(isActive ? Theme.surface : Theme.background)
+        .overlay(alignment: .top) {
+            Rectangle().fill(isActive ? Theme.accent.opacity(0.85) : .clear).frame(height: 1.5)
+        }
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
+        .contentShape(.rect)
+        .onTapGesture(perform: onActivate)
+        .hoverTracking { hovering = $0 }
+        .animation(Theme.hoverAnimation, value: hovering)
+    }
+
+    private var symbol: String {
+        if model.isSearching { return "magnifyingglass" }
+        switch model.destination {
+        case .folder: return "folder"
+        case .recents: return "clock"
+        case .newFiles: return "sparkles"
+        case .storage: return "chart.pie"
+        case .s3: return "cloud"
         }
     }
 }
@@ -171,19 +383,26 @@ private struct TabItem: View {
     @State private var dropTargeted = false
     @State private var springLoad: Task<Void, Never>?
 
-    private var isSelected: Bool { workspace.selected === tab }
+    private var isSelected: Bool { workspace.currentTab === tab }
+
+    /// A split tab is named after both its panes.
+    private var label: String {
+        let name = { (pane: BrowserModel) in pane.isSearching ? "“\(pane.searchText)”" : pane.title }
+        guard let second = workspace.secondPane(of: tab) else { return name(tab) }
+        return name(tab) + " | " + name(second)
+    }
 
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: icon)
                 .font(.system(size: 9.5, weight: .bold))
                 .foregroundStyle(isSelected || dropTargeted ? Theme.accent : Theme.textTertiary)
-            Text(tab.isSearching ? "“\(tab.searchText)”" : tab.title)
+            Text(label)
                 .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
                 .foregroundStyle(isSelected ? Theme.text : Theme.textSecondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .frame(maxWidth: 150, alignment: .leading)
+                .frame(maxWidth: workspace.secondPane(of: tab) == nil ? 150 : 220, alignment: .leading)
             if workspace.tabs.count > 1 {
                 Button {
                     workspace.close(tab)
@@ -239,6 +458,7 @@ private struct TabItem: View {
     }
 
     private var icon: String {
+        if workspace.secondPane(of: tab) != nil { return "rectangle.split.2x1.fill" }
         if tab.isSearching { return "magnifyingglass" }
         switch tab.destination {
         case .folder: return "folder.fill"

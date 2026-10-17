@@ -75,6 +75,9 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
     @ViewBuilder let backgroundMenu: () -> BackgroundMenu
 
     @FocusState private var focused: Bool
+    @Environment(\.isActivePane) private var isActivePane
+    @Environment(\.activatePane) private var activatePane
+    @Environment(\.switchPane) private var switchPane
     @State private var anchor: URL?
     @State private var cursor: URL?
     @State private var dropTarget: URL?
@@ -183,14 +186,22 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
             selection = []
             return .handled
         }
+        .onKeyPress(.tab) {
+            // In a split tab, Tab moves to the other pane.
+            guard let switchPane else { return .ignored }
+            switchPane()
+            return .handled
+        }
         .onKeyPress(phases: .down) { press in
             typeSelect(press)
         }
         .onChange(of: focusRequest) { focused = true }
+        .onChange(of: focused) { if focused { activatePane?() } }
         .onAppear {
             // Lists appear mid-typing (search results replace the folder after the first
-            // character); never pull focus out of a text field you're typing in.
-            if !NSApp.windows.contains(where: { $0.isVisible && $0.firstResponder is NSText }) { focused = true }
+            // character); never pull focus out of a text field you're typing in. In a split
+            // tab, only the active pane's list takes it.
+            if isActivePane && !NSApp.windows.contains(where: { $0.isVisible && $0.firstResponder is NSText }) { focused = true }
             multiDrag.install()
         }
         .onDisappear { multiDrag.uninstall() }

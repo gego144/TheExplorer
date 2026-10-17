@@ -8,35 +8,213 @@ struct WindowState: Codable, Hashable {
     var id = UUID()
     var paths: [String]
     var selected: Int
+    /// Each tab's second pane, when it's split.
+    var splits: [String?]?
+    /// Where each split tab's divider is, as a fraction of the width.
+    var splitFractions: [Double?]?
 }
 
 /// One window: an ordered set of tabs, each a full browser with its own folder and history.
+/// A tab can be split into two panes side by side; one of them is active, and everything that
+/// acts on "the current folder" (the command bar, sidebar, inspector, menus) uses that one.
 @MainActor
 @Observable
 final class Workspace {
+    /// Each tab's first (left) pane, which stands for the tab.
     private(set) var tabs: [BrowserModel]
     private(set) var selectedIndex: Int
+    /// The second (right) pane of each split tab, by its first pane.
+    private var splits: [ObjectIdentifier: BrowserModel] = [:]
+    /// Split tabs whose second pane is the active one.
+    private var secondActive: Set<ObjectIdentifier> = []
+    /// Where split tabs' dividers were dragged to, as a fraction of the width (half otherwise).
+    private var fractions: [ObjectIdentifier: Double] = [:]
 
-    var selected: BrowserModel { tabs[selectedIndex] }
+    /// The tab showing, as its first pane.
+    var currentTab: BrowserModel { tabs[selectedIndex] }
+
+    /// The active pane of the tab showing.
+    var selected: BrowserModel {
+        let tab = currentTab
+        let key = ObjectIdentifier(tab)
+        return secondActive.contains(key) ? splits[key] ?? tab : tab
+    }
 
     init(state: WindowState?) {
-        let paths = state?.paths.filter { FileManager.default.fileExists(atPath: $0) } ?? []
-        if paths.isEmpty {
+        let exists = { (path: String) in FileManager.default.fileExists(atPath: path) }
+        let kept = (state?.paths ?? []).enumerated().filter { exists($0.element) }
+        if kept.isEmpty {
             tabs = [BrowserModel()]
             selectedIndex = 0
         } else {
-            tabs = paths.map { BrowserModel(url: URL(fileURLWithPath: $0)) }
-            selectedIndex = min(max(0, state?.selected ?? 0), paths.count - 1)
+            tabs = kept.map { BrowserModel(url: URL(fileURLWithPath: $0.element)) }
+            selectedIndex = min(max(0, state?.selected ?? 0), kept.count - 1)
+            for (tab, (index, _)) in zip(tabs, kept) {
+                if let splits = state?.splits, splits.indices.contains(index), let path = splits[index], exists(path) {
+                    self.splits[ObjectIdentifier(tab)] = BrowserModel(url: URL(fileURLWithPath: path))
+                    if let fractions = state?.splitFractions, fractions.indices.contains(index), let fraction = fractions[index] {
+                        self.fractions[ObjectIdentifier(tab)] = Self.clamped(fraction)
+                    }
+                }
+            }
         }
     }
 
     var state: WindowState {
-        WindowState(paths: tabs.map(\.currentURL.path), selected: selectedIndex)
+        let splits = tabs.map { secondPane(of: $0).map { pane in pane.currentURL.path } }
+        let fractions = tabs.map { self.fractions[ObjectIdentifier($0)] }
+        return WindowState(paths: tabs.map(\.currentURL.path), selected: selectedIndex,
+                           splits: splits.contains { $0 != nil } ? splits : nil,
+                           splitFractions: fractions.contains { $0 != nil } ? fractions : nil)
     }
 
     func start() {
-        selected.start()
+        startPanes()
         Session.register(self)
+    }
+
+    private func startPanes() {
+        currentTab.start()
+        secondPane(of: currentTab)?.start()
+    }
+
+    // MARK: - Split panes
+
+    func secondPane(of tab: BrowserModel) -> BrowserModel? { splits[ObjectIdentifier(tab)] }
+
+    var isSplit: Bool { secondPane(of: currentTab) != nil }
+
+    /// How much of the width a split tab's first pane gets.
+    func splitFraction(of tab: BrowserModel) -> Double { fractions[ObjectIdentifier(tab)] ?? 0.5 }
+
+    /// Moves a split tab's divider; nil puts it back in the middle.
+    func setSplitFraction(_ fraction: Double?, of tab: BrowserModel) {
+        fractions[ObjectIdentifier(tab)] = fraction.map(Self.clamped)
+    }
+
+    private static func clamped(_ fraction: Double) -> Double { min(max(fraction, 0.15), 0.85) }
+
+    /// In a split tab, the pane that isn't active.
+    var otherPane: BrowserModel? {
+        guard let second = secondPane(of: currentTab) else { return nil }
+        return selected === second ? currentTab : second
+    }
+
+    /// Splits the tab into two panes, the new one showing the same folder and active, or
+    /// closes the second pane.
+    func toggleSplit() {
+        if isSplit {
+            close(pane: secondPane(of: currentTab)!)
+            return
+        }
+        let current = selected
+        let pane = BrowserModel(url: current.destination == .folder ? current.currentURL : URL.home)
+        splits[ObjectIdentifier(currentTab)] = pane
+        pane.start()
+        activate(pane)
+        focusSoon(pane)
+    }
+
+    /// Puts keyboard focus in a pane's list once it's on screen.
+    private func focusSoon(_ pane: BrowserModel) {
+        Task {
+            try? await Task.sleep(for: .milliseconds(50))
+            pane.listFocusRequest += 1
+        }
+    }
+
+    /// Makes a pane of the current tab the active one.
+    func activate(_ pane: BrowserModel) {
+        let key = ObjectIdentifier(currentTab)
+        guard let second = splits[key], pane === second || pane === currentTab else { return }
+        if pane === second { secondActive.insert(key) } else { secondActive.remove(key) }
+    }
+
+    /// Moves to the other pane, keyboard focus included.
+    func switchPane() {
+        guard let other = otherPane else { return }
+        activate(other)
+        other.listFocusRequest += 1
+    }
+
+    /// Puts the right pane on the left and the left on the right.
+    func swapPanes() {
+        let first = currentTab
+        let key = ObjectIdentifier(first)
+        guard let second = splits[key] else { return }
+        let secondWasActive = secondActive.contains(key)
+        let fraction = fractions.removeValue(forKey: key)
+        splits[key] = nil
+        secondActive.remove(key)
+        tabs[selectedIndex] = second
+        splits[ObjectIdentifier(second)] = first
+        // The divider stays where it was.
+        fractions[ObjectIdentifier(second)] = fraction.map { 1 - $0 }
+        // The same pane stays active, now on the other side.
+        if !secondWasActive { secondActive.insert(ObjectIdentifier(second)) }
+        focusSoon(selected)
+    }
+
+    /// Shows the active pane's folder in the other pane too.
+    func showSameFolderInOtherPane() {
+        guard let other = otherPane, selected.destination == .folder else { return }
+        other.navigate(to: selected.currentURL)
+    }
+
+    /// Closes one pane of a split tab, leaving the other as the whole tab.
+    func close(pane: BrowserModel) {
+        let first = currentTab
+        let key = ObjectIdentifier(first)
+        guard let second = splits[key] else { return }
+        splits[key] = nil
+        secondActive.remove(key)
+        fractions[key] = nil
+        if pane === first {
+            tabs[selectedIndex] = second
+        }
+        focusSoon(selected)
+    }
+
+    /// In a split tab, the pane across from `pane`.
+    func pane(oppositeTo pane: BrowserModel) -> BrowserModel? {
+        guard let second = secondPane(of: currentTab) else { return nil }
+        if pane === second { return currentTab }
+        return pane === currentTab ? second : nil
+    }
+
+    /// Where a pane takes items: the folder it shows, or its S3 folder. Nil while it's showing
+    /// search results, Recents and the like.
+    func dropFolder(of pane: BrowserModel) -> URL? {
+        guard !pane.isSearching else { return nil }
+        switch pane.destination {
+        case .folder: return pane.currentURL
+        case .s3: return pane.s3.location.flatMap { $0.bucket == nil ? nil : $0.url }
+        case .recents, .newFiles, .storage: return nil
+        }
+    }
+
+    /// F5 and F6: copies or moves items from `pane` (by default the active one, and its
+    /// selection) into the other pane's folder. Returns false when there's nothing to send or
+    /// nowhere to send it.
+    @discardableResult
+    func sendToOtherPane(_ urls: Set<URL>? = nil, from pane: BrowserModel? = nil, mode: FileTransfer.Mode) -> Bool {
+        let source = pane ?? selected
+        guard let target = self.pane(oppositeTo: source), let folder = dropFolder(of: target) else { return false }
+        let items = (urls ?? source.activeSelection).sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+        guard !items.isEmpty else { return false }
+        // Moving out of S3 isn't a thing; those always download.
+        return source.transfer(items, into: folder, mode: items.allSatisfy(\.isFileURL) ? mode : .copy)
+    }
+
+    /// ⌘W: closes the active pane of a split tab, otherwise the tab. Returns false when it was
+    /// the last tab, so the caller closes the window.
+    @discardableResult
+    func closeActivePane() -> Bool {
+        if isSplit {
+            close(pane: selected)
+            return true
+        }
+        return close(currentTab)
     }
 
     // MARK: - Tabs
@@ -54,7 +232,7 @@ final class Workspace {
     func select(_ index: Int) {
         guard tabs.indices.contains(index) else { return }
         selectedIndex = index
-        tabs[index].start()
+        startPanes()
     }
 
     /// Shows folders handed over by macOS: the tab already showing one, otherwise a new tab.
@@ -94,21 +272,27 @@ final class Workspace {
     func close(_ tab: BrowserModel) -> Bool {
         guard tabs.count > 1, let index = tabs.firstIndex(where: { $0 === tab }) else { return false }
         tabs.remove(at: index)
+        splits[ObjectIdentifier(tab)] = nil
+        secondActive.remove(ObjectIdentifier(tab))
+        fractions[ObjectIdentifier(tab)] = nil
         if index < selectedIndex || selectedIndex >= tabs.count {
             selectedIndex = max(0, selectedIndex - 1)
         }
-        selected.start()
+        startPanes()
         return true
     }
 
     func closeOthers(than tab: BrowserModel) {
         tabs = tabs.filter { $0 === tab }
+        splits = splits.filter { $0.key == ObjectIdentifier(tab) }
+        secondActive = secondActive.filter { $0 == ObjectIdentifier(tab) }
+        fractions = fractions.filter { $0.key == ObjectIdentifier(tab) }
         selectedIndex = 0
     }
 
     func move(_ tab: BrowserModel, to destination: Int) {
         guard let from = tabs.firstIndex(where: { $0 === tab }) else { return }
-        let current = selected
+        let current = currentTab
         tabs.remove(at: from)
         tabs.insert(tab, at: min(max(0, destination), tabs.count))
         selectedIndex = tabs.firstIndex { $0 === current } ?? 0

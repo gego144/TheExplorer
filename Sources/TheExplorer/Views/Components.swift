@@ -5,6 +5,7 @@ struct FileContextMenu: View {
     let urls: Set<URL>
     let model: BrowserModel
     @Environment(\.openTab) private var openTab
+    @Environment(\.splitWorkspace) private var split
 
     private var favorites: FavoritesStore { .shared }
 
@@ -41,6 +42,13 @@ struct FileContextMenu: View {
                 Button("Duplicate") { model.duplicate(urls) }
             }
             PasteItems(model: model, folder: single.flatMap { FileItem(url: $0)?.isFolder == true ? $0 : nil })
+            if let split, let other = split.pane(oppositeTo: model), split.dropFolder(of: other) != nil {
+                Divider()
+                Button("Copy to Other Pane") { split.sendToOtherPane(urls, from: model, mode: .copy) }
+                if urls.allSatisfy(\.isFileURL) {
+                    Button("Move to Other Pane") { split.sendToOtherPane(urls, from: model, mode: .move) }
+                }
+            }
             Divider()
             if let single {
                 Button(favorites.contains(single) ? "Unpin" : "Pin to Sidebar") {

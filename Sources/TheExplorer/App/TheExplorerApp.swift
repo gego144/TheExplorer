@@ -161,9 +161,9 @@ struct ExplorerCommands: Commands {
             }
             .keyboardShortcut(.downArrow, modifiers: [.command, .option])
             .disabled(!(model?.activeSelection.contains { FileItem(url: $0)?.isFolder == true } ?? false))
-            Button("Close Tab") {
+            Button(workspace?.isSplit == true ? "Close Pane" : "Close Tab") {
                 guard let workspace else { return }
-                if !workspace.close(workspace.selected) { NSApp.keyWindow?.performClose(nil) }
+                if !workspace.closeActivePane() { NSApp.keyWindow?.performClose(nil) }
             }
             .keyboardShortcut("w")
             Divider()
@@ -244,6 +244,13 @@ struct ExplorerCommands: Commands {
             }
             .keyboardShortcut(.delete)
             .disabled(model?.activeSelection.isEmpty ?? true)
+            Divider()
+            // Not disabled ahead of time (the menu bar isn't rebuilt when panes change); they
+            // beep when there's no other pane to send to.
+            Button("Copy to Other Pane") { sendToOtherPane(.copy) }
+                .keyboardShortcut(Self.functionKey(NSF5FunctionKey), modifiers: [])
+            Button("Move to Other Pane") { sendToOtherPane(.move) }
+                .keyboardShortcut(Self.functionKey(NSF6FunctionKey), modifiers: [])
         }
 
         CommandGroup(after: .sidebar) {
@@ -254,6 +261,12 @@ struct ExplorerCommands: Commands {
             Button(model?.showHidden == true ? "Hide Hidden Files" : "Show Hidden Files") { model?.showHidden.toggle() }
                 .keyboardShortcut(".", modifiers: [.command, .shift])
             Button("Folders First") { model?.foldersFirst.toggle() }
+            Divider()
+            Button(workspace?.isSplit == true ? "Close Split" : "Split Pane") { workspace?.toggleSplit() }
+                .keyboardShortcut("\\")
+            Button("Switch Pane") { paneAction { $0.switchPane() } }
+            Button("Swap Panes") { paneAction { $0.swapPanes() } }
+            Button("Show Same Folder in Other Pane") { paneAction { $0.showSameFolderInOtherPane() } }
             Divider()
             Button("Refresh") { model?.reload(keepSelection: true) }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
@@ -321,6 +334,28 @@ struct ExplorerCommands: Commands {
             }
             Divider()
         }
+    }
+
+    /// Runs on the split tab showing now, or beeps when it isn't split.
+    private func paneAction(_ action: (Workspace) -> Void) {
+        guard let workspace = workspace ?? Session.scriptedWorkspace, workspace.isSplit else {
+            NSSound.beep()
+            return
+        }
+        action(workspace)
+    }
+
+    private func sendToOtherPane(_ mode: FileTransfer.Mode) {
+        // F5 while typing in a text field does nothing to files.
+        if NSApp.keyWindow?.firstResponder is NSTextView { return }
+        guard let workspace = workspace ?? Session.scriptedWorkspace, workspace.sendToOtherPane(mode: mode) else {
+            NSSound.beep()
+            return
+        }
+    }
+
+    static func functionKey(_ key: Int) -> KeyEquivalent {
+        KeyEquivalent(Unicode.Scalar(UInt16(key)).map(Character.init) ?? " ")
     }
 
     private func go(_ directory: FileManager.SearchPathDirectory) {

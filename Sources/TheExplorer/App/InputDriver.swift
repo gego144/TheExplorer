@@ -56,6 +56,8 @@ enum InputDriver {
         case "down": return (special(NSDownArrowFunctionKey), 125)
         case "left": return (special(NSLeftArrowFunctionKey), 123)
         case "right": return (special(NSRightArrowFunctionKey), 124)
+        case "f5": return (special(NSF5FunctionKey), 96)
+        case "f6": return (special(NSF6FunctionKey), 97)
         default: return (name, keyCodes[name] ?? 0)
         }
     }
@@ -138,6 +140,25 @@ enum InputDriver {
             ) else { continue }
             NSApp.sendEvent(event)
             try? await Task.sleep(for: .milliseconds(type == .mouseMoved ? 150 : 30))
+        }
+    }
+
+    /// Presses at a point in the window, drags by `dx` points in small steps, and lets go.
+    static func drag(from point: CGPoint, by dx: CGFloat) async {
+        guard let window, let content = window.contentView else { return }
+        let start = NSPoint(x: point.x, y: content.bounds.height - point.y)
+        let steps = 12
+        var events: [(NSEvent.EventType, CGFloat)] = [(.leftMouseDown, 0)]
+        events += (1...steps).map { (.leftMouseDragged, dx * CGFloat($0) / CGFloat(steps)) }
+        events.append((.leftMouseUp, dx))
+        for (type, offset) in events {
+            guard let event = NSEvent.mouseEvent(
+                with: type, location: NSPoint(x: start.x + offset, y: start.y), modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                eventNumber: nextEventNumber(), clickCount: 1, pressure: 1
+            ) else { continue }
+            NSApp.sendEvent(event)
+            try? await Task.sleep(for: .milliseconds(16))
         }
     }
 
