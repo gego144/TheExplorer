@@ -40,6 +40,8 @@ struct WorkspaceView: View {
                     InspectorView(model: model)
                         .frame(width: 272)
                         .padding([.vertical, .trailing], 10)
+                        // Clear of the list's last column.
+                        .padding(.leading, 14)
                 }
             }
             StatusBar(model: model)

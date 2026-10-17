@@ -263,7 +263,7 @@ struct ExplorerCommands: Commands {
             Button("Folders First") { model?.foldersFirst.toggle() }
             Divider()
             Button(workspace?.isSplit == true ? "Close Split" : "Split Pane") { workspace?.toggleSplit() }
-                .keyboardShortcut("\\")
+                .keyboardShortcut("/")
             Button("Switch Pane") { paneAction { $0.switchPane() } }
             Button("Swap Panes") { paneAction { $0.swapPanes() } }
             Button("Show Same Folder in Other Pane") { paneAction { $0.showSameFolderInOtherPane() } }

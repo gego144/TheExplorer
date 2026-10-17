@@ -131,7 +131,7 @@ Commands run in zsh with your login profile, so Homebrew tools like `ffmpeg` are
 ## And the rest
 
 - **Tabs.** Browser-style tabs, each with its own folder, history and search. Drop files on a tab to move them there. Tabs come back where you left them after you quit.
-- **Split pane.** ⌘\ splits a tab into two folders side by side, each with its own history. Drag the line between them to resize the panes, or double-click it to even them out. The active pane has a bright line along its header, and the command bar, sidebar, inspector and menus all act on it. Click a pane or press Tab to switch. F5 copies the selection to the other pane's folder and F6 moves it there (also in the right-click menu), or drag between them. View › Swap Panes and Show Same Folder in Other Pane are there too. ⌘W closes the active pane, and splits (and where you left the divider) come back after you quit.
+- **Split pane.** ⌘/ splits a tab into two folders side by side, each with its own history. Drag the line between them to resize the panes, or double-click it to even them out. The active pane has a bright line along its header, and the command bar, sidebar, inspector and menus all act on it. Click a pane or press Tab to switch. F5 copies the selection to the other pane's folder and F6 moves it there (also in the right-click menu), or drag between them. View › Swap Panes and Show Same Folder in Other Pane are there too. ⌘W closes the active pane, and splits (and where you left the divider) come back after you quit.
 - **Pinned.** Pin files or folders to the sidebar with ⌘D or by dropping them on the "Pinned" heading. Dropping onto a pinned folder moves items into it.
 - **Git status.** In a repository, changed files get a letter: **M** modified, **A** added, **U** untracked, **R** renamed, red for deleted or conflicted. Folders get a dot when something inside changed, ignored files are dimmed, and the path bar shows the branch, ahead/behind and the number of changes. It updates as you edit, stage, commit or switch branches, including in git worktrees.
 - **Cut, copy and paste.** ⌘X, ⌘C and ⌘V for files, including with Finder in either direction. Cut items fade until you paste them, ⌥⌘V moves whatever was copied, and Duplicate is in the right-click menu. Pasting into an S3 folder uploads.
@@ -152,7 +152,7 @@ For the storage scan to include protected folders like Mail and Messages, grant 
 | Action | Shortcut |
 | --- | --- |
 | New tab / Close tab (or the active pane) | ⌘T / ⌘W |
-| Split pane / switch pane | ⌘\ / Tab |
+| Split pane / switch pane | ⌘/ / Tab |
 | Copy / move the selection to the other pane | F5 / F6 |
 | Next / previous tab, jump to tab | ⌃Tab / ⌃⇧Tab, ⌘1…⌘9 |
 | Open folder in new tab | ⌥⌘↓ (or ⌘-double-click) |

@@ -154,6 +154,20 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
                     .allowsHitTesting(false)
             }
         }
+        .task(id: backgroundTargeted || dropTarget != nil) {
+            // A drag that ends without SwiftUI saying so (dropping items back into the folder
+            // they came from) would leave the highlight on, so it also goes once the mouse
+            // button is up.
+            guard backgroundTargeted || dropTarget != nil else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(150))
+                if NSEvent.pressedMouseButtons & 1 == 0 {
+                    backgroundTargeted = false
+                    dropTarget = nil
+                    return
+                }
+            }
+        }
         .overlay {
             if backgroundTargeted {
                 RoundedRectangle(cornerRadius: 8)

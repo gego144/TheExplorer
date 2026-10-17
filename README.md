@@ -25,7 +25,7 @@ In a repository, changed files get a letter (**M** modified, **U** untracked…)
 
 ### Split pane
 
-Press ⌘\ to put two folders side by side, Tab to switch between them, and F5 or F6 to copy or move the selection across.
+Press ⌘/ to put two folders side by side, Tab to switch between them, and F5 or F6 to copy or move the selection across.
 
 <img src="docs/screenshots/split.png" alt="Two folders side by side in a split tab" width="100%">
 
