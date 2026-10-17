@@ -114,6 +114,8 @@ final class BrowserModel: Identifiable {
     var sort: SortSpec { didSet { rebuildRows() } }
     var kindFilter: KindFilter = .all { didSet { rebuildRows() } }
     var previewURL: URL?
+    /// A Markdown, CSV, JSON or font file shown in the large rendered preview.
+    var expandedPreview: URL?
     /// What the Quick Look panel steps through with the arrow keys.
     private(set) var previewItems: [URL] = []
     /// Whether stepping through the preview moves the selection with it.
@@ -559,9 +561,15 @@ final class BrowserModel: Identifiable {
 
     /// Toggles Quick Look for the selection. With one item selected, the arrow keys step through
     /// every file in the list (`rows`, in on-screen order), like Finder; with several, through those.
+    /// Markdown, CSV, JSON and fonts open in TheExplorer's own large preview instead, which
+    /// steps through the list the same way.
     func quickLook(_ urls: Set<URL>? = nil, in rows: [ListRow]? = nil) {
         if previewURL != nil {
             previewURL = nil
+            return
+        }
+        if expandedPreview != nil {
+            expandedPreview = nil
             return
         }
         let target = urls ?? activeSelection
@@ -585,7 +593,33 @@ final class BrowserModel: Identifiable {
             previewItems = items
             previewMovesSelection = false
         }
-        previewURL = first
+        if target.count == 1 && RenderedKind(file: first) != nil {
+            expandedPreview = first
+        } else {
+            previewURL = first
+        }
+    }
+
+    /// Opens one file in the large preview on its own, such as one a link points to.
+    func showExpandedPreview(_ url: URL) {
+        previewItems = [url]
+        previewMovesSelection = false
+        expandedPreview = url
+    }
+
+    /// ↑/↓ in the large preview: the next file in the list, shown there if it can be, or in
+    /// Quick Look if not. The selection follows, as it does in Quick Look.
+    func stepExpandedPreview(by offset: Int) {
+        guard let current = expandedPreview, let index = previewItems.firstIndex(of: current),
+              previewItems.indices.contains(index + offset) else { return }
+        let next = previewItems[index + offset]
+        if RenderedKind(file: next) != nil {
+            expandedPreview = next
+            moveSelection(to: next)
+        } else {
+            expandedPreview = nil
+            previewMoved(to: next)
+        }
     }
 
     /// Quick Looks a file that isn't in the list, such as one unpacked from an archive.
@@ -606,7 +640,11 @@ final class BrowserModel: Identifiable {
     /// The Quick Look panel moved to another item (or closed).
     func previewMoved(to url: URL?) {
         previewURL = url
-        guard let url, previewMovesSelection else { return }
+        if let url { moveSelection(to: url) }
+    }
+
+    private func moveSelection(to url: URL) {
+        guard previewMovesSelection else { return }
         if isSearching {
             search.selection = [url]
             return

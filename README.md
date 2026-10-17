@@ -57,6 +57,17 @@ Select a file to preview it, with what's inside: dimensions and color for images
   </tr>
 </table>
 
+### Markdown, CSV, JSON and fonts, rendered
+
+Markdown shows formatted, CSVs as a table, JSON as a tree you can fold and copy from, and fonts as a specimen. Press Space to read any of them over the whole window.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/markdown.png" alt="A Markdown file rendered over the window"></td>
+    <td width="50%"><img src="docs/screenshots/json.png" alt="A JSON file as a collapsible tree in the inspector"></td>
+  </tr>
+</table>
+
 ### Zips without unpacking
 
 Selecting a zip lists everything inside as a tree with sizes, instantly, even for huge archives. Drag files out to unpack just those.

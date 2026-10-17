@@ -3,15 +3,25 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// The large preview at the top of the inspector: the file itself for documents, images,
-/// media and text, or the table of contents for zip archives.
+/// media and text, drawn by TheExplorer for Markdown, CSV, JSON and fonts, or the table of
+/// contents for zip archives.
 struct FilePreview: View {
-    enum Kind { case quickLook, archive }
+    enum Kind: Equatable {
+        case quickLook, archive
+        case rendered(RenderedKind)
+
+        /// Shown big, above the file's name, rather than below its details.
+        var isLarge: Bool { self != .archive }
+    }
 
     let item: FileItem
     let model: BrowserModel
 
     static func kind(for item: FileItem) -> Kind? {
         guard !item.isFolder, !item.isPackage, let type = item.contentType else { return nil }
+        if let rendered = RenderedKind(url: item.url, type: type), (item.fileSize ?? 0) <= rendered.maxBytes {
+            return .rendered(rendered)
+        }
         if type.conforms(to: .zip) { return .archive }
         if type.conforms(to: .application) || type.conforms(to: .archive) || type.conforms(to: .diskImage) { return nil }
         if type.conforms(to: .content) || type.conforms(to: .text) || type.conforms(to: .sourceCode)
@@ -25,6 +35,7 @@ struct FilePreview: View {
         switch Self.kind(for: item) {
         case .quickLook: InlineQuickLook(url: item.url, onExpand: { model.quickLook([item.url]) })
         case .archive: ArchiveContentsView(url: item.url, archiveSize: item.fileSize, model: model)
+        case .rendered(let kind): RenderedPreview(kind: kind, item: item, model: model)
         case nil: EmptyView()
         }
     }
@@ -68,7 +79,7 @@ private struct InlineQuickLook: View {
     }
 }
 
-private struct QuickLookRepresentable: NSViewRepresentable {
+struct QuickLookRepresentable: NSViewRepresentable {
     let url: URL
 
     func makeNSView(context: Context) -> QLPreviewView {

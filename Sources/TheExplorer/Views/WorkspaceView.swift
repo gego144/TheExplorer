@@ -41,6 +41,14 @@ struct WorkspaceView: View {
         .environment(\.openTab) { url in workspace.newTab(url) }
         .navigationTitle(model.title)
         .quickLookPreview(Binding(get: { model.previewURL }, set: { model.previewMoved(to: $0) }), in: model.previewItems)
+        .overlay {
+            if let url = model.expandedPreview {
+                ExpandedPreview(url: url, model: model)
+                    .id(url)
+                    .transition(.opacity.combined(with: .scale(scale: 0.985)))
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: model.expandedPreview)
         .alert("Rename", isPresented: Binding(get: { model.renaming != nil }, set: { if !$0 { model.renaming = nil } }),
                presenting: model.renaming) { item in
             NamePrompt(initialName: item.name, confirmTitle: "Rename") { model.rename(item, to: $0) }

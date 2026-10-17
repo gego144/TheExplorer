@@ -43,7 +43,16 @@ Selecting a document, image, PDF, video, audio or code file shows a live preview
 - **Audio:** length, codec, sample rate and channels.
 - **HLS playlists:** length and segments, or the variants.
 - **Everything else:** page count and paper size for PDFs, family and styles for fonts, and line count for text and code.
- Space opens Quick Look, and ↑/↓ then step through every file in the list. Selecting a zip lists what's inside as a tree with sizes, without unpacking it: only the archive's table of contents is read, so even huge zips list instantly. Double-click a file inside to preview it, or drag files and folders out to unpack just those.
+
+Markdown, CSV, JSON and fonts are drawn by TheExplorer itself, since Quick Look shows the first three as plain text:
+- **Markdown** renders headings, lists and task boxes, tables, quotes, code and images next to the file. Links to other Markdown files open in the preview, with Back to return, and `#section` links jump to that heading. Remote images (like badges) show as labels and aren't downloaded, so previewing a file never reaches out to a server.
+- **CSV and TSV** show as a table with a sticky header, row numbers and numbers lined up on the right. The delimiter is detected (commas, semicolons, tabs or pipes), quoted fields work, and the first 1,000 rows are shown while every row is counted.
+- **JSON** shows as a tree in the file's own key order. Click a row to open it, ⌥-click to open everything inside, and right-click to copy a value, its path (like `.users[3].name`) or its key. Comments and trailing commas are fine (tsconfig.json, .jsonc), and JSON Lines files list one entry per line.
+- **Fonts** show a specimen in the font itself, with every style in the file. Fonts without Latin letters show their own characters.
+
+Click the code button on a preview to see the file's source. Space (or the expand button) opens these files over the window, where fonts also get a size waterfall and a box to type your own text. ↑/↓ step to the next file in the list, and Esc or Space closes it.
+
+For everything else, Space opens Quick Look, and ↑/↓ then step through every file in the list. Selecting a zip lists what's inside as a tree with sizes, without unpacking it: only the archive's table of contents is read, so even huge zips list instantly. Double-click a file inside to preview it, or drag files and folders out to unpack just those.
 
 <table>
   <tr>
@@ -57,6 +66,17 @@ Selecting a document, image, PDF, video, audio or code file shows a live preview
 </table>
 
 <img src="docs/screenshots/video.png" alt="A video previewed with its length, resolution, codec and frame rate" width="100%">
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/markdown.png" alt="A Markdown file rendered over the window"></td>
+    <td width="50%"><img src="docs/screenshots/json.png" alt="A JSON file as a collapsible tree in the inspector"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Markdown, rendered</sub></td>
+    <td align="center"><sub>JSON as a tree you can fold</sub></td>
+  </tr>
+</table>
 
 ## Storage map
 
@@ -138,7 +158,7 @@ For the storage scan to include protected folders like Mail and Messages, grant 
 | Back / Forward / Enclosing folder | ⌘[ / ⌘] / ⌘↑ |
 | Open selection | ⌘↓, Return, or double-click |
 | Expand / collapse a folder in place | → / ← |
-| Quick Look (then ↑/↓ to step through the list) | Space or ⌘Y |
+| Quick Look, or the large preview for Markdown, CSV, JSON and fonts (then ↑/↓ to step through the list) | Space or ⌘Y |
 | Recents / New / Storage | ⇧⌘F / ⇧⌘E / ⇧⌘B |
 | Home / Desktop / Documents / Downloads / Applications | ⇧⌘H / ⇧⌘D / ⇧⌘O / ⌥⌘L / ⇧⌘A |
 | Pin or unpin in the sidebar | ⌘D |

@@ -86,11 +86,11 @@ private struct ItemDetails: View {
     var body: some View {
         let preview = FilePreview.kind(for: item)
         VStack(alignment: .leading, spacing: 14) {
-            if preview == .quickLook {
+            if preview?.isLarge == true {
                 FilePreview(item: item, model: model)
             }
             HStack(alignment: .top, spacing: 11) {
-                if preview != .quickLook {
+                if preview?.isLarge != true {
                     ItemPreview(item: item)
                 }
                 VStack(alignment: .leading, spacing: 6) {
