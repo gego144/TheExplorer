@@ -221,6 +221,17 @@ struct TypeChip: View {
         let ext = item.fileExtension
         let label = ext.isEmpty ? (item.isPackage ? "PKG" : "FILE") : String(ext.uppercased().prefix(5))
         guard let type = item.contentType else { return (label, Theme.textSecondary) }
+        // Google Docs, Sheets and Slides from Drive, which have no extension of their own.
+        if let mime = type.preferredMIMEType, mime.hasPrefix(DriveFile.googlePrefix) {
+            switch mime.dropFirst(DriveFile.googlePrefix.count) {
+            case "document": return ("DOC", Theme.blue)
+            case "spreadsheet": return ("SHEET", Theme.green)
+            case "presentation": return ("SLIDE", Theme.warning)
+            case "form": return ("FORM", Theme.purple)
+            case "drawing": return ("DRAW", Theme.pink)
+            default: return ("GOOGLE", Theme.textSecondary)
+            }
+        }
         if type.conforms(to: .application) || type.conforms(to: .applicationBundle) { return ("APP", Theme.green) }
         // .ts is TypeScript far more often than an MPEG stream.
         if ["ts", "mts", "cts"].contains(ext) { return (label, Theme.warning) }

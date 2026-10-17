@@ -109,6 +109,8 @@ final class Workspace {
         }
         let current = selected
         let pane = BrowserModel(url: current.destination == .folder ? current.currentURL : URL.home)
+        // An S3 or Drive folder opens there too.
+        if current.destination.isRemote { pane.navigate(to: current.historyURL, recordHistory: false) }
         splits[ObjectIdentifier(currentTab)] = pane
         pane.start()
         activate(pane)
@@ -157,8 +159,8 @@ final class Workspace {
 
     /// Shows the active pane's folder in the other pane too.
     func showSameFolderInOtherPane() {
-        guard let other = otherPane, selected.destination == .folder else { return }
-        other.navigate(to: selected.currentURL)
+        guard let other = otherPane, selected.destination == .folder || selected.destination.isRemote else { return }
+        other.navigate(to: selected.destination.isRemote ? selected.historyURL : selected.currentURL)
     }
 
     /// Closes one pane of a split tab, leaving the other as the whole tab.
@@ -182,13 +184,14 @@ final class Workspace {
         return pane === currentTab ? second : nil
     }
 
-    /// Where a pane takes items: the folder it shows, or its S3 folder. Nil while it's showing
-    /// search results, Recents and the like.
+    /// Where a pane takes items: the folder it shows, or its S3 or Drive folder. Nil while it's
+    /// showing search results, Recents and the like.
     func dropFolder(of pane: BrowserModel) -> URL? {
         guard !pane.isSearching else { return nil }
         switch pane.destination {
         case .folder: return pane.currentURL
         case .s3: return pane.s3.location.flatMap { $0.bucket == nil ? nil : $0.url }
+        case .drive: return pane.drive.canAddItems ? pane.drive.location?.url : nil
         case .recents, .newFiles, .storage: return nil
         }
     }
@@ -202,8 +205,9 @@ final class Workspace {
         guard let target = self.pane(oppositeTo: source), let folder = dropFolder(of: target) else { return false }
         let items = (urls ?? source.activeSelection).sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
         guard !items.isEmpty else { return false }
-        // Moving out of S3 isn't a thing; those always download.
-        return source.transfer(items, into: folder, mode: items.allSatisfy(\.isFileURL) ? mode : .copy)
+        // Moving out of S3 isn't a thing, and Drive only moves within itself; those download.
+        let movable = items.allSatisfy { $0.isFileURL || ($0.scheme == DriveLocation.scheme && folder.scheme == DriveLocation.scheme) }
+        return source.transfer(items, into: folder, mode: movable ? mode : .copy)
     }
 
     /// ⌘W: closes the active pane of a split tab, otherwise the tab. Returns false when it was
@@ -222,8 +226,10 @@ final class Workspace {
     /// Opens `url` in a new tab right after the current one.
     func newTab(_ url: URL? = nil, select: Bool = true) {
         let s3 = url.flatMap(S3Location.init(url:))
-        let tab = BrowserModel(url: s3 == nil ? url ?? selected.currentURL : selected.currentURL)
+        let drive = url.flatMap(DriveLocation.init(url:))
+        let tab = BrowserModel(url: s3 == nil && drive == nil ? url ?? selected.currentURL : selected.currentURL)
         if let s3 { tab.showS3(s3, recordHistory: false) }
+        if let drive { tab.showDrive(drive, recordHistory: false) }
         let index = selectedIndex + 1
         tabs.insert(tab, at: index)
         if select { self.select(index) } else { tab.start() }

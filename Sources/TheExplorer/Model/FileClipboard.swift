@@ -45,10 +45,10 @@ final class FileClipboard {
         cutChangeCount = pasteboard.changeCount
     }
 
-    /// Files (and S3 items) on the pasteboard, from here or any other app.
+    /// Files (and S3 and Drive items) on the pasteboard, from here or any other app.
     var urls: [URL] {
         let objects = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] ?? []
-        return objects.filter { $0.isFileURL || $0.scheme == S3Location.scheme }
+        return objects.filter { $0.isFileURL || RemoteFiles.isRemote($0) }
     }
 
     var canPaste: Bool {

@@ -21,11 +21,11 @@ make clean
 Sources/TheExplorer/
   App/        App entry point, menu commands, tabs and session restore, debug scenes and input
   Model/      Per-window browser state, search, recents, storage, settings, actions
-  Services/   Search index and fuzzy matcher, disk scanner, folder size cache, favorites, Spotlight wrapper (Recents), zip reader, S3 client and signer, directory watcher
+  Services/   Search index and fuzzy matcher, disk scanner, folder size cache, favorites, Spotlight wrapper (Recents), zip reader, S3 client and signer, Google sign-in and Drive client, directory watcher
   Views/      SwiftUI views (file list, sidebar, search, recents, storage and treemap, inspector, previews, settings)
   Util/       Formatting and icon caching
 Resources/    Info.plist and app icon
-scripts/      build-app.sh, make-icon.swift
+scripts/      build-app.sh, make-icon.swift, mock-drive.py (a local stand-in for Google Drive)
 Tests/        Swift Testing suites
 docs/         Screenshots for the README and guide
 ```
@@ -66,7 +66,7 @@ open -g -n --env EXPLORER_SNAPSHOT_DIR=/tmp/shots --env EXPLORER_SNAPSHOT_QUIT=1
     build/debug/TheExplorer.app
 ```
 
-Scenes are separated by `;`. The available scenes are `folder:<path>`, `select:<path>`, `newtab:<path>`, `tab:<n>`, `omnibox:<text>`, `expand:<path>`, `recents`, `new`, `range:<days>` (0 for all time), `more` (load the next page), `search:<text>`, `searchmac:<text>`, `scope:mac|folder`, `create:folder|file`, `drop:<source>><folder>`, `storage[:<path>]`, `settings[:actions|openwith|cloud]` (shows the Settings window, optionally on that tab), `openrule:<types>><bundle id>` (adds an Open With rule for the run, e.g. `openrule:png,jpg>com.apple.Preview`), `actioneditor` (shows the action editor; `type:` scenes after it go to the command field), `editortext` (logs the command field), `runs` (logs every action run's state and output), `stop` (stops the newest running action), `menu:<name>` (logs a menu bar menu's items), `s3:[bucket/prefix/]` (browses the first S3 connection), `transfers` (logs uploads and downloads), `promise:<bucket/key>><folder>` (delivers an S3 item the way a drop on Finder asks for it, and logs what the drag carries), `theme:<system|dark|graphite|midnight|light>` (shows a theme for the run without saving it), `split` (splits the tab, or closes the split), `pane:1|2` (makes that side active), `back`, `bigpreview:<path>` (opens a Markdown, CSV, JSON or font file in the large preview; leave out the path to close it), `reveal:<path>[,<path>…]` (sends the app the reveal event other apps' "Show in Finder" uses), `viewer:<bundle id>` (sets the file viewer and logs it back; pass the current one to change nothing) and `wait:<seconds>`.
+Scenes are separated by `;`. The available scenes are `folder:<path>`, `select:<path>`, `newtab:<path>`, `tab:<n>`, `omnibox:<text>`, `expand:<path>`, `recents`, `new`, `range:<days>` (0 for all time), `more` (load the next page), `search:<text>`, `searchmac:<text>`, `scope:mac|folder`, `create:folder|file`, `drop:<source>><folder>`, `storage[:<path>]`, `settings[:actions|openwith|cloud]` (shows the Settings window, optionally on that tab), `openrule:<types>><bundle id>` (adds an Open With rule for the run, e.g. `openrule:png,jpg>com.apple.Preview`), `actioneditor` (shows the action editor; `type:` scenes after it go to the command field), `editortext` (logs the command field), `runs` (logs every action run's state and output), `stop` (stops the newest running action), `menu:<name>` (logs a menu bar menu's items), `s3:[bucket/prefix/]` (browses the first S3 connection), `transfers` (logs uploads and downloads), `promise:<bucket/key>><folder>` (delivers an S3 item the way a drop on Finder asks for it, and logs what the drag carries; `promise:drive:<id>><folder>` does the same for a Drive file), `drive:[<id>/]` (browses the first Google account: My Drive, a folder by ID, or `~/`, `~shared/`, `~starred/` and `~drives/` for its lists), `drivesignin` (signs in the way Add Account does), `googleclient` (shows the Google client sheet), `beginrename` (shows the rename prompt for the selection, as ⇧⌘↩ does), `theme:<system|dark|graphite|midnight|light>` (shows a theme for the run without saving it), `split` (splits the tab, or closes the split), `pane:1|2` (makes that side active), `back`, `bigpreview:<path>` (opens a Markdown, CSV, JSON or font file in the large preview; leave out the path to close it), `reveal:<path>[,<path>…]` (sends the app the reveal event other apps' "Show in Finder" uses), `viewer:<bundle id>` (sets the file viewer and logs it back; pass the current one to change nothing) and `wait:<seconds>`.
 
 Scenes can also drive the app with real input:
 
@@ -81,7 +81,7 @@ Scenes can also drive the app with real input:
 
 The events go only to the app's own window (see `App/InputDriver.swift`), so they never touch your mouse or keyboard and need no permissions. Launch with `open -g` so the app never takes focus; running the binary directly can leave the app without a window. To run fully hidden and just read the log, add `-j` and `--env EXPLORER_NO_CAPTURE=1`. Don't double-click file rows in scenes: opening a file launches its app.
 
-**README screenshots** come from demo mode. `EXPLORER_DEMO=1` shows only the startup disk in the sidebar and puts the window on a Retina screen, so captures are sharp. `EXPLORER_DEMO_PINS` sets the pinned folders (paths separated by `;`), and demo pins are never saved over your own. Point the scenes at a demo folder rather than your own files. `EXPLORER_ACTIONS_FILE`, `EXPLORER_S3_FILE`, `EXPLORER_VISITS_FILE` and `EXPLORER_INDEX_FILE` give a run its own actions, S3 connections, recent folders and search index, so tests never touch yours. Demo mode also shows the command bar's dropdowns even though the app is in the background. `drop:` accepts `s3:bucket/key` for S3 items.
+**README screenshots** come from demo mode. `EXPLORER_DEMO=1` shows only the startup disk in the sidebar and puts the window on a Retina screen, so captures are sharp. `EXPLORER_DEMO_PINS` sets the pinned folders (paths separated by `;`), and demo pins are never saved over your own. Point the scenes at a demo folder rather than your own files. `EXPLORER_ACTIONS_FILE`, `EXPLORER_S3_FILE`, `EXPLORER_DRIVE_FILE`, `EXPLORER_VISITS_FILE` and `EXPLORER_INDEX_FILE` give a run its own actions, S3 connections, Google accounts, recent folders and search index, so tests never touch yours. Demo mode also shows the command bar's dropdowns even though the app is in the background. `drop:`, `trash:` and `rename:` accept `s3:bucket/key` for S3 items (`drop:` only) and `drive:<id>` for Drive items. Scripted runs never open files or links in other apps; they log `open <path>` instead.
 
 ## Measuring speed
 
@@ -111,6 +111,26 @@ python3 -m venv /tmp/motoenv && /tmp/motoenv/bin/pip install "moto[server]"
 /tmp/motoenv/bin/moto_server -p 5055 &
 EXPLORER_S3_TEST_ENDPOINT=http://127.0.0.1:5055 swift test --filter S3
 ```
+
+## Testing Google Drive without Google
+
+`scripts/mock-drive.py` stands in for Google's sign-in and the parts of the Drive API the app uses, with a small seeded Drive. Nothing leaves your Mac. The client's integration tests run against it, and are skipped otherwise:
+
+```sh
+python3 scripts/mock-drive.py 5056 &
+EXPLORER_DRIVE_ENDPOINT=http://127.0.0.1:5056 swift test --filter Drive
+```
+
+Debug builds talk to it too. Give the run an accounts file with a client and an account, and a sign-in token, so it never reads your Keychain:
+
+```sh
+echo '{"clientID": "test.apps.googleusercontent.com", "accounts": [{"id": "6B1C1E8A-3E0B-4C3D-9C1A-111111111111", "email": "test@example.com", "name": "Test User"}]}' > /tmp/drive.json
+open -g -n --env EXPLORER_DRIVE_ENDPOINT=http://127.0.0.1:5056 --env EXPLORER_DRIVE_FILE=/tmp/drive.json \
+    --env EXPLORER_DRIVE_TOKEN=refresh-test --env EXPLORER_SNAPSHOT_DIR=/tmp/shots --env EXPLORER_SNAPSHOT_QUIT=1 \
+    --env "EXPLORER_SCENES=drive:;dblclick:Projects;key:cmd+k;type:milk;wait:1" build/debug/TheExplorer.app
+```
+
+The mock keeps what you change until it's restarted. `EXPLORER_DRIVE_TOKEN=revoked` shows what a signed-out account looks like.
 
 ## Contributing
 

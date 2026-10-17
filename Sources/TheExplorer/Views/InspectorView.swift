@@ -7,12 +7,16 @@ struct InspectorView: View {
 
     /// Whether there's anything to show; the column collapses otherwise.
     static func hasContent(_ model: BrowserModel) -> Bool {
-        !model.activeSelection.isEmpty || (model.destination == .folder && !model.isSearching)
+        !model.activeSelection.isEmpty || (model.destination == .folder && !model.isSearching) || model.destination == .drive
     }
 
     var body: some View {
         if model.destination == .s3 {
             ScrollView { S3Inspector(model: model) }
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
+        } else if model.destination == .drive {
+            ScrollView { DriveInspector(model: model) }
                 .scrollContentBackground(.hidden)
                 .scrollIndicators(.never)
         } else {

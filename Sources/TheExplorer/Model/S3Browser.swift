@@ -191,11 +191,11 @@ final class S3Browser {
 
 // MARK: - Transfers
 
-/// Uploads to and downloads from S3, with progress for the status bar.
+/// Uploads to and downloads from S3 and Google Drive, with progress for the status bar.
 @MainActor
 @Observable
-final class S3Transfers {
-    static let shared = S3Transfers()
+final class Transfers {
+    static let shared = Transfers()
 
     struct Transfer: Identifiable {
         enum Kind { case upload, download }
@@ -221,7 +221,7 @@ final class S3Transfers {
     }
 
     private(set) var transfers: [Transfer] = []
-    @ObservationIgnored private var tasks: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored var tasks: [UUID: Task<Void, Never>] = [:]
 
     var activeCount: Int { transfers.filter { $0.state == .running }.count }
 
@@ -278,7 +278,7 @@ final class S3Transfers {
             failed?(CocoaError(.fileReadNoSuchFile))
             return
         }
-        let id = start(.download, title: "\(Self.noun(urls)) to “\(folder.lastPathComponent)”")
+        let id = start(.download, title: Self.downloadTitle(urls, into: folder))
         tasks[id] = Task {
             do {
                 // Each object with where it goes; folder names are made unique once, up front.
@@ -348,19 +348,19 @@ final class S3Transfers {
         }
     }
 
-    private func start(_ kind: Transfer.Kind, title: String) -> UUID {
+    func start(_ kind: Transfer.Kind, title: String) -> UUID {
         let transfer = Transfer(kind: kind, title: title)
         transfers.insert(transfer, at: 0)
         if transfers.count > 20 { transfers.removeLast(transfers.count - 20) }
         return transfer.id
     }
 
-    private func update(_ id: UUID, _ change: (inout Transfer) -> Void) {
+    func update(_ id: UUID, _ change: (inout Transfer) -> Void) {
         guard let index = transfers.firstIndex(where: { $0.id == id }) else { return }
         change(&transfers[index])
     }
 
-    private func finish(_ id: UUID, _ state: Transfer.State) {
+    func finish(_ id: UUID, _ state: Transfer.State) {
         tasks[id] = nil
         update(id) {
             $0.state = state
@@ -369,12 +369,18 @@ final class S3Transfers {
         }
     }
 
-    private static func state(for error: Error) -> Transfer.State {
+    static func state(for error: Error) -> Transfer.State {
         error is CancellationError || (error as? URLError)?.code == .cancelled ? .cancelled : .failed(error.localizedDescription)
     }
 
-    private static func noun(_ urls: [URL]) -> String {
-        urls.count == 1 ? "“\(S3Location(url: urls[0])?.itemName.nilIfEmpty ?? urls[0].lastPathComponent)”" : "\(urls.count) items"
+    /// "“clip.mov” to “Downloads”", or "“clip.mov” for viewing" for the cache Quick Look uses.
+    static func downloadTitle(_ urls: [URL], into folder: URL) -> String {
+        let cache = FileManager.default.temporaryDirectory.standardizedFileURL.path
+        return noun(urls) + (folder.standardizedFileURL.path.hasPrefix(cache) ? " for viewing" : " to “\(folder.lastPathComponent)”")
+    }
+
+    static func noun(_ urls: [URL]) -> String {
+        urls.count == 1 ? "“\(S3Location(url: urls[0])?.itemName.nilIfEmpty ?? DriveLocation(url: urls[0])?.name ?? urls[0].lastPathComponent)”" : "\(urls.count) items"
     }
 
     /// A key from the archive-style relative path, kept inside `folder` (no "..").

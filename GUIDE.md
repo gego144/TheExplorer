@@ -2,7 +2,7 @@
 
 Everything TheExplorer does and how to use it. For building and working on the code, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
-**Contents:** [Folder sizes](#real-folder-sizes) · [Paths and search](#one-bar-for-paths-and-search) · [Previews](#previews-and-zip-archives) · [Storage](#storage-map) · [S3](#s3-like-a-folder) · [Actions](#actions) · [Recents and New](#recents-and-new) · [Settings](#settings) · [Everything else](#and-the-rest) · [Permissions](#permissions) · [Keyboard shortcuts](#keyboard-shortcuts)
+**Contents:** [Folder sizes](#real-folder-sizes) · [Paths and search](#one-bar-for-paths-and-search) · [Previews](#previews-and-zip-archives) · [Storage](#storage-map) · [S3](#s3-like-a-folder) · [Google Drive](#google-drive) · [Actions](#actions) · [Recents and New](#recents-and-new) · [Settings](#settings) · [Everything else](#and-the-rest) · [Permissions](#permissions) · [Keyboard shortcuts](#keyboard-shortcuts)
 
 ## Real folder sizes
 
@@ -99,6 +99,31 @@ The app signs requests itself (AWS Signature Version 4, checked against AWS's pu
 
 <img src="docs/screenshots/s3.png" alt="Browsing an S3 bucket" width="100%">
 
+## Google Drive
+
+Google Drive shows up under Cloud in the sidebar once you've signed in. TheExplorer talks to the Drive API directly, so you don't need Google Drive for desktop, and nothing syncs to your Mac.
+
+- **Setting up:** Drive needs an OAuth client from a Google Cloud project of your own. It's free, takes about five minutes, and Settings › Cloud › Set Up Google Client… links to each page:
+  1. Enable the Google Drive API.
+  2. Under Google Auth Platform › Branding, give the app a name and your email.
+  3. Under Audience, choose External, then **Publish App**. Left in Testing, Google signs you out every 7 days.
+  4. Under Clients, create a **Desktop app** client and download its JSON.
+
+  Then choose the JSON file (or paste the client ID and secret) and click Add Account. Google opens in your browser. Because the client is yours rather than a published app, Google says it hasn't verified it: choose Advanced, then Go to (your app's name). You can add several Google accounts with the same client.
+- **Browsing:** clicking Google Drive opens My Drive. Its breadcrumb's first chip lists My Drive, Shared with me, Starred and your shared drives. Shortcuts open the folder they point to.
+- **Search:** typing in the command bar (⌘K) searches the whole account with Drive's own search, in names and inside documents.
+- **Upload:** drop files or folders onto a Drive folder, a folder row, a breadcrumb or the sidebar account, or paste. Folders upload with everything in them.
+- **Download:** drag items onto Finder, the desktop or any folder in TheExplorer, press F5 with a local folder in the other pane, or right-click › Download.
+- **Google Docs, Sheets and Slides** download as Word, Excel and PowerPoint files; right-click › Download As offers PDF, Markdown, CSV and the rest. Opening one opens it in your browser, and Space previews it as a PDF. Forms, Sites and My Maps only open in the browser.
+- **Moving and copying:** drag Drive items onto another Drive folder to move them; hold ⌥ to copy. Copy and paste works the same way. Drive can't copy folders, so those move or download instead.
+- **Rename, new folder and trash:** ⇧⌘↩, ⇧⌘N and ⌘⌫ work as they do for local files. Trashed items go to Drive's trash, where you can restore them for 30 days.
+- **Links:** right-click › Copy Link copies the Drive link, which opens the item for anyone it's shared with; Open in Browser opens it at drive.google.com.
+- **Storage:** the status bar and inspector show how much of your Drive is used.
+
+The client secret and each account's sign-in are kept in your Keychain. Removing an account in Settings also signs it out with Google, and nothing in your Drive is touched.
+
+<img src="docs/screenshots/drive.png" alt="Browsing Google Drive" width="100%">
+
 ## Actions
 
 Turn the shell commands you run on files into one-click actions. Define one in Settings › Actions (a name, the file types it applies to, and the command), then run it from the right-click menu or the Actions menu, where the first nine get ⌃⌥1–9. For example, converting a video to HLS:
@@ -135,7 +160,7 @@ Commands run in zsh with your login profile, so Homebrew tools like `ffmpeg` are
 - **Split pane.** ⌘/ splits a tab into two folders side by side, each with its own history. Drag the line between them to resize the panes, or double-click it to even them out. The active pane has a bright line along its header, and the command bar, sidebar, inspector and menus all act on it. Click a pane or press Tab to switch. F5 copies the selection to the other pane's folder and F6 moves it there (also in the right-click menu), or drag between them. View › Swap Panes and Show Same Folder in Other Pane are there too. ⌘W closes the active pane, and splits (and where you left the divider) come back after you quit.
 - **Pinned.** Pin files or folders to the sidebar with ⌘D or by dropping them on the "Pinned" heading. Dropping onto a pinned folder moves items into it.
 - **Git status.** In a repository, changed files get a letter: **M** modified, **A** added, **U** untracked, **R** renamed, red for deleted or conflicted. Folders get a dot when something inside changed, ignored files are dimmed, and the path bar shows the branch, ahead/behind and the number of changes. It updates as you edit, stage, commit or switch branches, including in git worktrees.
-- **Cut, copy and paste.** ⌘X, ⌘C and ⌘V for files, including with Finder in either direction. Cut items fade until you paste them, ⌥⌘V moves whatever was copied, and Duplicate is in the right-click menu. Pasting into an S3 folder uploads.
+- **Cut, copy and paste.** ⌘X, ⌘C and ⌘V for files, including with Finder in either direction. Cut items fade until you paste them, ⌥⌘V moves whatever was copied, and Duplicate is in the right-click menu. Pasting into an S3 or Google Drive folder uploads.
 - **Undo.** ⌘Z undoes the last move, copy, paste, rename, new item or Move to Trash, from any tab or window.
 - **Drag and drop.** Between tabs, windows and Finder. Like Finder, it moves within a disk and copies across disks; hold ⌥ to copy. Name clashes keep both items and never overwrite.
 - **Open With.** Right-click › Open With lists every app that can open the selection, with the one opening uses now first, plus Other… for any app. For files of one type, Always Open With makes your pick the default for that type. Settings › Open With lists these rules, and you can add your own: a list of types like `png, jpg, webp` and the app to open them in, with presets for images, video, audio, PDF, text and code. Rules apply to opening files from TheExplorer; macOS's defaults and other apps are left alone.

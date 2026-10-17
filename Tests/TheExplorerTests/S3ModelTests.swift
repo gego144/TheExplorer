@@ -50,14 +50,14 @@ struct S3ModelTests {
         try "c".write(to: root.appendingPathComponent("report.pdf"), atomically: true, encoding: .utf8)
         try Data().write(to: root.appendingPathComponent("project/.DS_Store"))
 
-        let files = S3Transfers.expand([root.appendingPathComponent("project"), root.appendingPathComponent("report.pdf")], under: "uploads/")
+        let files = Transfers.expand([root.appendingPathComponent("project"), root.appendingPathComponent("report.pdf")], under: "uploads/")
         #expect(Set(files.map(\.key)) == ["uploads/project/README.md", "uploads/project/src/main.py", "uploads/report.pdf"])
     }
 
     @Test func downloadsStayInsideTheirFolder() {
         let folder = URL(fileURLWithPath: "/tmp/downloads")
-        #expect(S3Transfers.safeDestination("a/../../etc/passwd", in: folder).path == "/tmp/downloads/a/etc/passwd")
-        #expect(S3Transfers.safeDestination("photos/2026/x.jpg", in: folder).path == "/tmp/downloads/photos/2026/x.jpg")
+        #expect(Transfers.safeDestination("a/../../etc/passwd", in: folder).path == "/tmp/downloads/a/etc/passwd")
+        #expect(Transfers.safeDestination("photos/2026/x.jpg", in: folder).path == "/tmp/downloads/photos/2026/x.jpg")
     }
 
     @Test func addressingStyle() {
@@ -82,10 +82,10 @@ struct S3ItemNameTests {
 
     @Test @MainActor func promisesFilesAndFoldersAndCarriesTheURL() throws {
         let file = S3Location.url(connectionID: id, bucket: "media", key: "videos/teaser cut.mp4")
-        let promise = try #require(S3FilePromise(file))
+        let promise = try #require(RemoteFilePromise(file))
         #expect(promise.fileType == "public.mpeg-4")
         #expect(promise.delegate?.filePromiseProvider(promise, fileNameForType: promise.fileType) == "teaser cut.mp4")
-        let folder = try #require(S3FilePromise(S3Location.url(connectionID: id, bucket: "media", key: "videos/")))
+        let folder = try #require(RemoteFilePromise(S3Location.url(connectionID: id, bucket: "media", key: "videos/")))
         #expect(folder.fileType == "public.folder")
         // Drops inside the app still read the S3 address off the drag.
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("S3ItemNameTests-\(UUID().uuidString)"))
@@ -94,6 +94,6 @@ struct S3ItemNameTests {
         pasteboard.writeObjects([promise])
         #expect(pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] == [file])
         // A connection's top level (no bucket) can't be dropped as a file.
-        #expect(S3FilePromise(S3Location.url(connectionID: id, bucket: nil, key: "")) == nil)
+        #expect(RemoteFilePromise(S3Location.url(connectionID: id, bucket: nil, key: "")) == nil)
     }
 }

@@ -259,7 +259,8 @@ private struct EjectButton: View {
     }
 }
 
-/// S3 connections: click to browse, drop files on one (with a bucket set) to upload.
+/// S3 connections and Google accounts: click to browse, drop files on one (an S3 connection
+/// with a bucket set, or Google Drive) to upload.
 private struct CloudSection: View {
     let model: BrowserModel
     @Environment(\.openSettings) private var openSettings
@@ -272,8 +273,9 @@ private struct CloudSection: View {
             .padding(.top, 12)
             .padding(.bottom, 4)
         let connections = S3Store.shared.connections
-        if connections.isEmpty {
-            SidebarRow(title: "Connect S3…", systemImage: "plus.circle", isSelected: false, dimmed: true) { showSettings() }
+        let drives = DriveStore.shared.accounts
+        if connections.isEmpty && drives.isEmpty {
+            SidebarRow(title: "Connect S3 or Google Drive…", systemImage: "plus.circle", isSelected: false, dimmed: true) { showSettings() }
         }
         ForEach(connections) { connection in
             let isCurrent = model.destination == .s3 && model.s3.location?.connectionID == connection.id
@@ -284,6 +286,21 @@ private struct CloudSection: View {
             .contextMenu {
                 Button("Open in New Tab") { openTab(connection.root.url) }
                 Button("Edit Connection…") { showSettings() }
+            }
+        }
+        ForEach(drives) { account in
+            let isCurrent = model.destination == .drive && model.drive.location?.accountID == account.id
+            SidebarRow(title: DriveStore.shared.title(of: account), systemImage: "externaldrive.connected.to.line.below",
+                       isSelected: isCurrent, dropURL: account.myDrive.url, model: model) {
+                model.showDrive(account.myDrive)
+            }
+            .help(account.email)
+            .contextMenu {
+                Button("Open in New Tab") { openTab(account.myDrive.url) }
+                Button("Shared with Me") { model.showDrive(DriveLocation(accountID: account.id, id: DriveLocation.sharedID, name: "Shared with me")) }
+                Button("Starred") { model.showDrive(DriveLocation(accountID: account.id, id: DriveLocation.starredID, name: "Starred")) }
+                Divider()
+                Button("Google Drive Settings…") { showSettings() }
             }
         }
     }

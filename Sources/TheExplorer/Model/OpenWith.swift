@@ -120,14 +120,34 @@ enum FileOpener {
             if let app = ruleApp(for: url) {
                 byApp[app, default: []].append(url)
             } else {
-                NSWorkspace.shared.open(url)
+                systemOpen(url)
             }
         }
         for (app, files) in byApp { open(files, with: app) }
     }
 
     static func open(_ urls: [URL], with app: URL) {
+        guard !logsInstead(urls) else { return }
         NSWorkspace.shared.open(urls, withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
+    }
+
+    /// Opens a file in its default app, or a web link in the browser.
+    static func systemOpen(_ url: URL) {
+        guard !logsInstead([url]) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    /// Scripted runs (debug builds) never launch other apps: they log what would have opened.
+    private static func logsInstead(_ urls: [URL]) -> Bool {
+        #if DEBUG
+        guard ProcessInfo.processInfo.environment["EXPLORER_SNAPSHOT_DIR"] != nil else { return false }
+        for url in urls {
+            FileHandle.standardError.write(Data("[snapshot] open \(url.isFileURL ? url.path : url.absoluteString)\n".utf8))
+        }
+        return true
+        #else
+        return false
+        #endif
     }
 
     /// The app your rules pick for a file, if any.

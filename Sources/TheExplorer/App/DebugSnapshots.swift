@@ -92,12 +92,30 @@ enum DebugSnapshots {
                 // s3: shows the first connection; s3:bucket/prefix/ a folder in it.
                 // The raw argument: tilde expansion would drop the trailing "/" that marks a folder.
                 if let url = S3Location(url: Self.debugURL("s3:" + (parts.count > 1 ? parts[1] : ""))) { model.showS3(url) }
+            case "drive":
+                // drive: shows the first account's My Drive; drive:<id>/ a folder in it, and
+                // drive:~/, drive:~shared/ and the like its lists.
+                // The raw argument: tilde expansion would turn "~/" into the home folder.
+                let raw = parts.count > 1 ? parts[1] : DriveLocation.myDriveID + "/"
+                if let location = DriveLocation(url: Self.debugURL("drive:" + raw)) {
+                    model.showDrive(location)
+                }
+            case "drivesignin":
+                // Signs in against the test server (EXPLORER_DRIVE_ENDPOINT), as Add Account does.
+                do {
+                    let account = try await DriveStore.shared.signIn()
+                    log("drivesignin ok email=\(account.email) accounts=\(DriveStore.shared.accounts.map(\.email))")
+                } catch {
+                    log("drivesignin error=\(error.localizedDescription)")
+                }
             case "promise":
-                // promise:bucket/key>/dest/folder does what a drop on Finder does with an S3 item:
-                // logs what the drag carries, then asks for the file in that folder.
+                // promise:bucket/key>/dest/folder does what a drop on Finder does with an S3 item
+                // (or promise:drive:<id>>/dest/folder with a Drive file): logs what the drag
+                // carries, then asks for the file in that folder.
                 let ends = argument.components(separatedBy: ">")
-                guard ends.count == 2, let promise = S3FilePromise(Self.debugURL("s3:" + ends[0])) else {
-                    log("promise: not an S3 item")
+                let source = ends.first.map { $0.hasPrefix("drive:") ? $0 : "s3:" + $0 } ?? ""
+                guard ends.count == 2, let promise = RemoteFilePromise(Self.debugURL(source)) else {
+                    log("promise: not an S3 or Drive item")
                     break
                 }
                 let pasteboard = NSPasteboard(name: NSPasteboard.Name("TheExplorer.debug.drag.\(ProcessInfo.processInfo.processIdentifier)"))
@@ -169,7 +187,7 @@ enum DebugSnapshots {
                     log("droptypes hit at (500,200): \(hit.map { $0.className } ?? "nil")")
                 }
             case "transfers":
-                for transfer in S3Transfers.shared.transfers {
+                for transfer in Transfers.shared.transfers {
                     log("transfer \(transfer.kind) \(transfer.title): \(transfer.state) \(transfer.doneItems)/\(transfer.totalItems) items \(transfer.doneBytes)/\(transfer.totalBytes) bytes")
                 }
             case "probe":
@@ -240,11 +258,22 @@ enum DebugSnapshots {
                     log("menu \(argument) › \(item.title) enabled=\(item.isEnabled) key=\(item.keyEquivalent) mods=\(item.keyEquivalentModifierMask.rawValue)")
                 }
             case "trash":
-                // What Move to Trash, Rename… and New Folder… do once confirmed.
-                model.trash([URL(fileURLWithPath: argument)])
+                // What Move to Trash, Rename… and New Folder… do once confirmed. "drive:<id>"
+                // names a Drive item.
+                model.trash([Self.debugURL(parts.count > 1 ? parts[1] : "")])
             case "rename":
                 let ends = argument.components(separatedBy: ">")
-                if let item = FileItem(url: URL(fileURLWithPath: ends[0])) { model.rename(item, to: ends[1]) }
+                if ends[0].hasPrefix("drive:") {
+                    let url = Self.debugURL(ends[0])
+                    if let row = model.drive.rows.first(where: { DriveLocation(url: $0.id)?.id == DriveLocation(url: url)?.id }) {
+                        model.rename(row.item, to: ends[1])
+                    }
+                } else if let item = FileItem(url: URL(fileURLWithPath: ends[0])) {
+                    model.rename(item, to: ends[1])
+                }
+            case "beginrename":
+                // What Rename… (⇧⌘↩) does: shows the name prompt for the selected item.
+                model.beginRename()
             case "mkdir": model.create(.folder, named: argument)
             case "openrule":
                 // openrule:png,jpg>com.apple.Preview adds a default-app rule (in memory for scripted runs).
@@ -314,7 +343,7 @@ enum DebugSnapshots {
             case "stop":
                 // Stops the newest running action, as its Stop button does.
                 if let run = ActionRunner.shared.runs.first(where: { $0.state == .running }) { ActionRunner.shared.cancel(run.id) }
-            case "settings", "actionruns", "actioneditor", "connectioneditor", "transferlist":
+            case "settings", "actionruns", "actioneditor", "connectioneditor", "googleclient", "transferlist":
                 // A window ordered in behind, so capture() picks it up. settings:actions opens that tab.
                 if parts[0] == "settings" {
                     Prefs.shared.settingsTab = switch argument {
@@ -328,6 +357,7 @@ enum DebugSnapshots {
                 case "actionruns": AnyView(ActionRunsView(onClear: {}))
                 case "actioneditor": AnyView(ActionEditor(action: FileAction.templates[0]) {})
                 case "connectioneditor": AnyView(ConnectionEditor(draft: S3Store.shared.connections.first.map { ConnectionDraft($0) } ?? .keys()) {})
+                case "googleclient": AnyView(GoogleClientEditor {})
                 case "transferlist": AnyView(TransfersView(onClear: {}))
                 default: AnyView(SettingsView())
                 }
@@ -402,7 +432,7 @@ enum DebugSnapshots {
             log("\(scene) timing: first content \(firstContent.map { String(format: "%.2fs", $0) } ?? "never"), worst main-thread stall \(HangWatchdog.worst)ms, stalls>100ms \(HangWatchdog.stalls) · recents=\(shown.recents.rows.count) new=\(shown.newFiles.rows.count) total=\(shown.newFiles.totalCount.map(String.init) ?? "nil") more=\(shown.newFiles.hasMore) gathering=\(shown.newFiles.isGathering) hits=\(shown.search.hits.count)")
             let names = shown.rows.prefix(40).map { "\($0.item.name)@\(RelativeTime.short($0.item.modified))" }.joined(separator: ",")
             let selected = shown.selection.map(\.lastPathComponent).sorted().joined(separator: ",")
-            log("\(scene) -> tabs=\(workspace.tabs.count) panes=\(workspace.secondPane(of: workspace.currentTab).map { "\(workspace.currentTab.currentURL.lastPathComponent)|\($0.currentURL.lastPathComponent) active=\(workspace.selected === $0 ? 2 : 1)" } ?? "1") view=\(shown.destination) search=\"\(shown.searchText)\" expanded=\(shown.expanded.map(\.lastPathComponent).sorted()) firstResponder=\(InputDriver.window?.firstResponder.map { String(describing: type(of: $0)) } ?? "nil") key=\(InputDriver.window?.isKeyWindow ?? false) active=\(NSApp.isActive) url=\(shown.currentURL.path) items=[\(names)] selected=[\(selected)] error=\(shown.loadError ?? "none") preview=\(shown.previewURL?.lastPathComponent ?? "nil")/\(shown.previewItems.count) big=\(shown.expandedPreview?.lastPathComponent ?? "nil") s3=\(shown.destination == .s3 ? (shown.s3.location?.uri ?? "?") + " rows=\(shown.s3.rows.map(\.item.name))" + (shown.s3.error.map { " error=\($0)" } ?? "") : "-") windows=\(NSApp.windows.filter { $0.isVisible && $0.canBecomeMain }.map(\.title)) git=\(gitSummary(shown)) undoMenu=\(undoMenuTitles()) history=\(FileHistory.shared.undoStack.map(\.name))/\(FileHistory.shared.redoStack.map(\.name))")
+            log("\(scene) -> tabs=\(workspace.tabs.count) panes=\(workspace.secondPane(of: workspace.currentTab).map { "\(workspace.currentTab.currentURL.lastPathComponent)|\($0.currentURL.lastPathComponent) active=\(workspace.selected === $0 ? 2 : 1)" } ?? "1") view=\(shown.destination) search=\"\(shown.searchText)\" expanded=\(shown.expanded.map(\.lastPathComponent).sorted()) firstResponder=\(InputDriver.window?.firstResponder.map { String(describing: type(of: $0)) } ?? "nil") key=\(InputDriver.window?.isKeyWindow ?? false) active=\(NSApp.isActive) url=\(shown.currentURL.path) items=[\(names)] selected=[\(selected)] error=\(shown.loadError ?? "none") preview=\(shown.previewURL?.lastPathComponent ?? "nil")/\(shown.previewItems.count) big=\(shown.expandedPreview?.lastPathComponent ?? "nil") s3=\(shown.destination == .s3 ? (shown.s3.location?.uri ?? "?") + " rows=\(shown.s3.rows.map(\.item.name))" + (shown.s3.error.map { " error=\($0)" } ?? "") : "-") drive=\(shown.destination == .drive ? "\(shown.drive.trail.map(\.name).joined(separator: " / "))" + (shown.drive.isSearching ? " search=\(shown.drive.query)" : "") + " rows=\(shown.drive.rows.map(\.item.name)) selected=\(shown.drive.rows.filter { shown.drive.selection.contains($0.id) }.map(\.item.name))" + (shown.drive.error.map { " error=\($0)" } ?? "") : "-") windows=\(NSApp.windows.filter { $0.isVisible && $0.canBecomeMain }.map(\.title)) git=\(gitSummary(shown)) undoMenu=\(undoMenuTitles()) history=\(FileHistory.shared.undoStack.map(\.name))/\(FileHistory.shared.redoStack.map(\.name))")
             if env["EXPLORER_NO_CAPTURE"] == nil { capture(to: "\(dir)/\(index)-\(parts[0]).png") }
         }
         if env["EXPLORER_SNAPSHOT_QUIT"] != nil { NSApp.terminate(nil) }
@@ -432,11 +462,21 @@ enum DebugSnapshots {
         case .folder: return !model.items.isEmpty
         case .storage: return StorageModel.shared.focus != nil
         case .s3: return !model.s3.rows.isEmpty || model.s3.error != nil
+        case .drive: return !model.drive.rows.isEmpty || model.drive.error != nil
         }
     }
 
-    /// A file path, or "s3:bucket/key" for an item in the first S3 connection.
+    /// A file path, "s3:bucket/key" for an item in the first S3 connection, or "drive:<id>"
+    /// for one in the first Google account ("drive:<id>/" for a folder).
     private static func debugURL(_ text: String) -> URL {
+        if text.hasPrefix("drive:"), let account = DriveStore.shared.accounts.first {
+            let path = String(text.dropFirst(6))
+            let isFolder = path.hasSuffix("/")
+            let id = isFolder ? String(path.dropLast()) : path
+            let location = DriveLocation(accountID: account.id, id: id, name: "")
+            let name = DriveStore.shared.file(location)?.name ?? (id == DriveLocation.myDriveID ? "My Drive" : id == DriveLocation.homeID ? account.email : id)
+            return DriveLocation.url(accountID: account.id, id: id, name: name, isFolder: isFolder)
+        }
         if text.hasPrefix("s3:"), let connection = S3Store.shared.connections.first {
             let path = text.dropFirst(3)
             guard let slash = path.firstIndex(of: "/") else {

@@ -70,7 +70,7 @@ struct WorkspaceView: View {
                presenting: model.creating) { kind in
             NamePrompt(initialName: model.suggestedName(for: kind), confirmTitle: "Create") { model.create(kind, named: $0) }
         } message: { _ in
-            Text("In “\(FileManager.default.displayName(atPath: model.currentURL.path))”")
+            Text("In “\(model.destination == .drive ? model.drive.location?.name ?? "" : FileManager.default.displayName(atPath: model.currentURL.path))”")
         }
         .onChange(of: searchKey(model), initial: true) { runSearch(model) }
         .onChange(of: model.activeSelection) { model.followSelectionInPreview() }
@@ -120,6 +120,7 @@ struct WorkspaceView: View {
             case .newFiles: RecentsView(model: model, recents: model.newFiles)
             case .storage: StorageView(model: model)
             case .s3: S3View(model: model)
+            case .drive: DriveView(model: model)
             }
         }
     }
@@ -302,6 +303,7 @@ private struct SplitPaneHeader: View {
         case .newFiles: return "sparkles"
         case .storage: return "chart.pie"
         case .s3: return "cloud"
+        case .drive: return "externaldrive.connected.to.line.below"
         }
     }
 }
@@ -468,6 +470,7 @@ private struct TabItem: View {
         case .newFiles: return "sparkles"
         case .storage: return "chart.pie.fill"
         case .s3: return "cloud.fill"
+        case .drive: return "externaldrive.fill.badge.icloud"
         }
     }
 }
@@ -555,6 +558,13 @@ struct Omnibox: View {
     }
 
     private var isPathMode: Bool { query.hasPrefix("/") || query.hasPrefix("~") }
+    private var placeholder: String {
+        switch model.destination {
+        case .s3: "filter this folder"
+        case .drive: "search Drive"
+        default: "search or go to path"
+        }
+    }
     private var showsField: Bool { editing || focused || !query.isEmpty }
     /// What the dropdown lists: path completions, or your recent folders before you type.
     private var listed: [URL] { isPathMode ? suggestions : query.isEmpty ? recents : [] }
@@ -575,7 +585,7 @@ struct Omnibox: View {
                     .onKeyPress(.upArrow) { moveHighlight(-1) }
                     .onKeyPress(.tab) { complete() }
                 if !isPathMode && !query.isEmpty {
-                    if model.destination != .s3 { scopeChips }
+                    if !model.destination.isRemote { scopeChips }
                 }
                 if !query.isEmpty {
                     Button(action: cancel) {
@@ -591,7 +601,7 @@ struct Omnibox: View {
                 }
                 Spacer(minLength: 8)
                 HStack(spacing: 6) {
-                    Text(model.destination == .s3 ? "filter this folder" : "search or go to path")
+                    Text(placeholder)
                     Text("⌘K")
                         .font(.system(size: 10, weight: .medium))
                         .padding(.horizontal, 4)
@@ -886,7 +896,7 @@ private struct Breadcrumbs: View {
 
     private var trail: [URL] {
         switch model.destination {
-        case .recents, .newFiles, .storage, .s3: return []
+        case .recents, .newFiles, .storage, .s3, .drive: return []
         case .folder:
             var urls: [URL] = []
             var url = model.currentURL
@@ -903,6 +913,8 @@ private struct Breadcrumbs: View {
     var body: some View {
         if model.destination == .s3 {
             S3Breadcrumbs(model: model)
+        } else if model.destination == .drive {
+            DriveBreadcrumbs(model: model)
         } else if model.destination != .folder {
             Chip(title: model.title)
         } else {
@@ -1013,7 +1025,9 @@ struct StatusBar: View {
             Spacer()
             TransferActivity()
             ActionActivity()
-            if let volume = model.volume {
+            if model.destination == .drive, let account = model.drive.location?.accountID {
+                DriveUsageIndicator(accountID: account)
+            } else if let volume = model.volume {
                 Text(volume.name).foregroundStyle(Theme.textSecondary)
                 HeatBar(fraction: Double(volume.used) / Double(max(volume.total, 1)), height: 4, color: Theme.accent)
                     .frame(width: 110)
@@ -1049,6 +1063,18 @@ struct StatusBar: View {
             var text = "\(folders.formatted()) \(folders == 1 ? "folder" : "folders") · \(files.formatted()) \(files == 1 ? "file" : "files")"
             if model.s3.hasMore { text += "+" }
             if !model.s3.selection.isEmpty { text += " · \(model.s3.selection.count.formatted()) selected" }
+            return text
+        case .drive:
+            let drive = model.drive
+            var text: String
+            if drive.isSearching {
+                text = "\(drive.rows.count.formatted())\(drive.hasMore ? "+" : "") \(drive.rows.count == 1 ? "result" : "results")"
+            } else {
+                let (folders, files) = drive.counts
+                text = "\(folders.formatted()) \(folders == 1 ? "folder" : "folders") · \(files.formatted()) \(files == 1 ? "file" : "files")"
+                if drive.hasMore { text += "+" }
+            }
+            if !drive.selection.isEmpty { text += " · \(drive.selection.count.formatted()) selected" }
             return text
         case .folder:
             let folders = model.folderCount, files = model.fileCount

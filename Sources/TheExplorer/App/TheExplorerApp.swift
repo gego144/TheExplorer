@@ -224,12 +224,9 @@ struct ExplorerCommands: Commands {
                 }
             }
             .keyboardShortcut("d")
-            Button("Rename…") {
-                guard let model, let url = model.selection.first, let item = FileItem(url: url) else { return }
-                model.renaming = item
-            }
-            .keyboardShortcut(.return, modifiers: [.command, .shift])
-            .disabled(model?.destination != .folder || model?.isSearching == true || model?.selection.count != 1)
+            Button("Rename…") { model?.beginRename() }
+                .keyboardShortcut(.return, modifiers: [.command, .shift])
+                .disabled(!(model?.canRename ?? false))
             Divider()
             Button("Move to Trash") {
                 // ⌘⌫ while typing in a text field should edit the text, never trash files.
@@ -271,7 +268,13 @@ struct ExplorerCommands: Commands {
             Button("Swap Panes") { paneAction { $0.swapPanes() } }
             Button("Show Same Folder in Other Pane") { paneAction { $0.showSameFolderInOtherPane() } }
             Divider()
-            Button("Refresh") { model?.reload(keepSelection: true) }
+            Button("Refresh") {
+                switch model?.destination {
+                case .s3: model?.s3.reload(keepSelection: true)
+                case .drive: model?.drive.reload(keepSelection: true)
+                default: model?.reload(keepSelection: true)
+                }
+            }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
             Button("Recalculate Folder Sizes") { model?.recalculateSizes() }
             Divider()

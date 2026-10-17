@@ -270,12 +270,12 @@ enum AWSProfiles {
     }
 }
 
-/// Secret keys in the login Keychain.
+/// Secrets in the login Keychain: S3 secret keys, and Google's client secret and sign-ins.
 enum Keychain {
-    private static let service = "TheExplorer S3"
+    static let s3 = "TheExplorer S3"
 
-    static func set(_ secret: String, account: String) {
-        delete(account: account)
+    static func set(_ secret: String, account: String, service: String = s3) {
+        delete(account: account, service: service)
         let item: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -285,7 +285,7 @@ enum Keychain {
         SecItemAdd(item as CFDictionary, nil)
     }
 
-    static func get(account: String) -> String? {
+    static func get(account: String, service: String = s3) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -297,7 +297,7 @@ enum Keychain {
         return String(data: data, encoding: .utf8)
     }
 
-    static func delete(account: String) {
+    static func delete(account: String, service: String = s3) {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

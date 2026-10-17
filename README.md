@@ -92,6 +92,12 @@ Browse your S3 buckets in the same list as your files. Drop files on a bucket to
 
 <img src="docs/screenshots/s3.png" alt="Browsing an S3 bucket" width="100%">
 
+### Google Drive, without Google's app
+
+Browse My Drive, Shared with me and shared drives, search with Drive's own search, and drag files in to upload or out to download. Google Docs, Sheets and Slides download as Office files and preview as PDFs. It signs in with an OAuth client from your own Google Cloud project, so nothing sits in between.
+
+<img src="docs/screenshots/drive.png" alt="Browsing Google Drive" width="100%">
+
 ### Actions and Open With
 
 Turn shell commands you run on files, like an ffmpeg conversion, into right-click actions. Choose which app opens each file type, from Settings or the right-click menu.

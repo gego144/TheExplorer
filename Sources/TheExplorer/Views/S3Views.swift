@@ -91,7 +91,7 @@ struct S3View: View {
             if newTab || targets.count > 1 { openTab(row.id) } else { model.navigate(to: row.id) }
         }
         for row in targets where !row.item.isFolder {
-            S3Transfers.shared.fetchForViewing(row.id) { FileOpener.open([$0]) }
+            Transfers.shared.fetchForViewing(row.id) { FileOpener.open([$0]) }
         }
     }
 }
@@ -109,14 +109,14 @@ private struct S3RowMenu: View {
         let isFile = single.map { !$0.absoluteString.hasSuffix("/") } ?? false
         if let single {
             Button("Open") {
-                if isFile { S3Transfers.shared.fetchForViewing(single) { FileOpener.open([$0]) } } else { model.navigate(to: single) }
+                if isFile { Transfers.shared.fetchForViewing(single) { FileOpener.open([$0]) } } else { model.navigate(to: single) }
             }
             if !isFile { Button("Open in New Tab") { openTab(single) } }
             if isFile { Button("Quick Look") { model.quickLook([single]) } }
             Divider()
         }
         if !isBucketList || targets.allSatisfy({ $0.bucket != nil }) {
-            Button("Download to Downloads") { S3Transfers.shared.download(Array(urls), into: URL.downloadsDirectory) }
+            Button("Download to Downloads") { Transfers.shared.download(Array(urls), into: URL.downloadsDirectory) }
             Button("Download To…") {
                 let panel = NSOpenPanel()
                 panel.canChooseDirectories = true
@@ -124,7 +124,7 @@ private struct S3RowMenu: View {
                 panel.canCreateDirectories = true
                 panel.prompt = "Download Here"
                 guard panel.runModal() == .OK, let folder = panel.url else { return }
-                S3Transfers.shared.download(Array(urls), into: folder)
+                Transfers.shared.download(Array(urls), into: folder)
             }
             Divider()
         }
@@ -176,7 +176,7 @@ private struct S3BackgroundMenu: View {
         panel.allowsMultipleSelection = true
         panel.prompt = "Upload"
         guard panel.runModal() == .OK else { return }
-        S3Transfers.shared.upload(panel.urls, to: location)
+        Transfers.shared.upload(panel.urls, to: location)
     }
 }
 
@@ -280,7 +280,7 @@ struct S3Inspector: View {
                     .foregroundStyle(Theme.textSecondary)
             }
             HStack(spacing: 6) {
-                Button("Download") { S3Transfers.shared.download(selected.map(\.id), into: URL.downloadsDirectory) }
+                Button("Download") { Transfers.shared.download(selected.map(\.id), into: URL.downloadsDirectory) }
                     .buttonStyle(SubtleButtonStyle())
                     .help("Download to your Downloads folder")
                 if selected.count == 1, let row = selected.first, !row.item.isFolder {
@@ -312,7 +312,7 @@ struct S3Inspector: View {
 
 /// Uploads and downloads in progress (or just finished); click for details.
 struct TransferActivity: View {
-    private var transfers: S3Transfers { .shared }
+    private var transfers: Transfers { .shared }
     @State private var showing = false
     @State private var dismissedBefore = Date.distantPast
 
@@ -346,7 +346,7 @@ struct TransferActivity: View {
         }
     }
 
-    private func label(_ transfer: S3Transfers.Transfer, others: Int) -> String {
+    private func label(_ transfer: Transfers.Transfer, others: Int) -> String {
         let more = others > 0 ? " +\(others)" : ""
         let verb = transfer.kind == .upload ? "Uploading" : "Downloading"
         switch transfer.state {
@@ -357,7 +357,7 @@ struct TransferActivity: View {
         }
     }
 
-    private func isFailure(_ transfer: S3Transfers.Transfer) -> Bool {
+    private func isFailure(_ transfer: Transfers.Transfer) -> Bool {
         if case .failed = transfer.state { return true }
         return false
     }
@@ -365,7 +365,7 @@ struct TransferActivity: View {
 
 struct TransfersView: View {
     let onClear: () -> Void
-    private var transfers: S3Transfers { .shared }
+    private var transfers: Transfers { .shared }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -410,7 +410,7 @@ struct TransfersView: View {
         .preferredColorScheme(Theme.colorScheme)
     }
 
-    private func status(_ transfer: S3Transfers.Transfer) -> String {
+    private func status(_ transfer: Transfers.Transfer) -> String {
         let bytes = "\(Format.bytes(transfer.doneBytes)) of \(Format.bytes(transfer.totalBytes))"
         let items = transfer.totalItems > 1 ? " · \(transfer.doneItems) of \(transfer.totalItems) files" : ""
         switch transfer.state {
@@ -421,7 +421,7 @@ struct TransfersView: View {
         }
     }
 
-    private func statusColor(_ transfer: S3Transfers.Transfer) -> Color {
+    private func statusColor(_ transfer: Transfers.Transfer) -> Color {
         if case .failed = transfer.state { return Theme.danger }
         return Theme.textTertiary
     }
@@ -429,7 +429,7 @@ struct TransfersView: View {
 
 // MARK: - Settings
 
-/// The Cloud tab in Settings: your S3 connections.
+/// The Cloud tab in Settings: your S3 connections, then Google Drive.
 struct CloudSettings: View {
     private var store: S3Store { .shared }
     @State private var editing: ConnectionDraft?
@@ -498,6 +498,8 @@ struct CloudSettings: View {
         .sheet(item: $editing) { draft in
             ConnectionEditor(draft: draft) { editing = nil }
         }
+        DriveSettings()
+            .padding(.top, 10)
     }
 }
 

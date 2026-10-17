@@ -56,10 +56,11 @@ enum FileTransfer {
     }
 
     /// "Report.pdf" → "Report 2.pdf", "Report 3.pdf", … until the name is free.
-    static func uniqueDestination(for name: String, in folder: URL) -> URL {
+    static func uniqueDestination(for name: String, in folder: URL, avoiding taken: Set<String> = []) -> URL {
         let fm = FileManager.default
+        let isTaken = { (url: URL) in fm.fileExists(atPath: url.path) || taken.contains(url.path) }
         var candidate = folder.appendingPathComponent(name)
-        guard fm.fileExists(atPath: candidate.path) else { return candidate }
+        guard isTaken(candidate) else { return candidate }
         let ext = (name as NSString).pathExtension
         let stem = ext.isEmpty ? name : (name as NSString).deletingPathExtension
         var counter = 2
@@ -67,7 +68,7 @@ enum FileTransfer {
             let numbered = "\(stem) \(counter)" + (ext.isEmpty ? "" : ".\(ext)")
             candidate = folder.appendingPathComponent(numbered)
             counter += 1
-        } while fm.fileExists(atPath: candidate.path)
+        } while isTaken(candidate)
         return candidate
     }
 

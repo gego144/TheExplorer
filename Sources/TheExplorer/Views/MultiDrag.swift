@@ -7,8 +7,9 @@ import SwiftUI
 /// never starts a second drag; macOS allows one session at a time) and starts an AppKit
 /// session with every selected item.
 ///
-/// S3 rows always drag this way, one or several: each goes on the drag as a file promise (see
-/// S3FilePromise), which `.draggable` can't carry, so Finder and the Desktop can take them.
+/// S3 and Google Drive rows always drag this way, one or several: each goes on the drag as a
+/// file promise (see RemoteFilePromise), which `.draggable` can't carry, so Finder and the
+/// Desktop can take them.
 /// Every other drag is left to `.draggable`.
 @MainActor
 final class MultiDragSource: NSObject, NSDraggingSource {
@@ -54,7 +55,7 @@ final class MultiDragSource: NSObject, NSDraggingSource {
             guard let url = frames.first(where: { $0.value.contains(point) })?.key else { return event }
             if selection.count > 1 && selection.contains(url) {
                 pressed = (Self.dragged(rows: rows, selection: selection), event.locationInWindow, window)
-            } else if url.scheme == S3Location.scheme {
+            } else if RemoteFiles.isRemote(url) {
                 pressed = (selection.contains(url) ? Self.dragged(rows: rows, selection: selection) : [url], event.locationInWindow, window)
             }
             return event
@@ -82,7 +83,7 @@ final class MultiDragSource: NSObject, NSDraggingSource {
         let point = view.convert(event.locationInWindow, from: nil)
         let generic = NSWorkspace.shared.icon(for: .data)
         let items = urls.enumerated().map { index, url in
-            let promise = S3FilePromise(url)
+            let promise = RemoteFilePromise(url)
             let item = NSDraggingItem(pasteboardWriter: promise ?? url as NSURL)
             // A small fanned pile under the cursor; real icons for the first few.
             let image = index >= 8 ? generic : promise?.icon ?? (url.isFileURL ? NSWorkspace.shared.icon(forFile: url.path) : generic)

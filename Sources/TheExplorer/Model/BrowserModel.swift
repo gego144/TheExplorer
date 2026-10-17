@@ -11,6 +11,11 @@ enum Destination: Hashable {
     case storage
     /// A connection's buckets, or a folder in an S3 bucket (see `s3`).
     case s3
+    /// A Google Drive account, folder or search (see `drive`).
+    case drive
+
+    /// Lists of things that live somewhere else, which TheExplorer browses over the network.
+    var isRemote: Bool { self == .s3 || self == .drive }
 }
 
 enum NewItemKind {
@@ -149,6 +154,7 @@ final class BrowserModel: Identifiable {
     let search = SearchModel()
     let recents = RecentsModel(mode: .opened)
     let s3 = S3Browser()
+    let drive = DriveBrowser()
     let newFiles = RecentsModel(mode: .new)
     @ObservationIgnored private var started = false
     @ObservationIgnored private var pendingSelection: Set<String>?
@@ -187,8 +193,9 @@ final class BrowserModel: Identifiable {
 
     // MARK: - Derived state
 
-    /// Searching files. In S3, the same text filters the folder instead (see S3View).
-    var isSearching: Bool { destination != .s3 && !searchText.trimmingCharacters(in: .whitespaces).isEmpty }
+    /// Searching files. In S3 the same text filters the folder instead (see S3View), and in
+    /// Google Drive it searches Drive (see DriveView).
+    var isSearching: Bool { !destination.isRemote && !searchText.trimmingCharacters(in: .whitespaces).isEmpty }
 
     private func rebuildRows() {
         var folders = 0
@@ -314,6 +321,9 @@ final class BrowserModel: Identifiable {
         case .storage: "Storage"
         case .s3:
             if let location = s3.location, location.bucket != nil { location.name } else { s3.connection?.name ?? "S3" }
+        case .drive:
+            if let location = drive.location, location.id != DriveLocation.homeID { location.name }
+            else { drive.account.map(DriveStore.shared.title) ?? "Google Drive" }
         case .folder: FileManager.default.displayName(atPath: currentURL.path)
         }
     }
@@ -326,6 +336,7 @@ final class BrowserModel: Identifiable {
         case .recents: return recents.selection
         case .newFiles: return newFiles.selection
         case .s3: return s3.selection
+        case .drive: return drive.selection
         case .storage:
             let storage = StorageModel.shared
             guard let id = storage.selection, let node = storage.focus?.children.first(where: { $0.id == id }),
@@ -335,7 +346,11 @@ final class BrowserModel: Identifiable {
     }
 
     var canGoUp: Bool {
-        destination == .s3 ? s3.location?.parent != nil : destination == .folder && !currentURL.isRoot
+        switch destination {
+        case .s3: s3.location?.parent != nil
+        case .drive: drive.parent != nil
+        default: destination == .folder && !currentURL.isRoot
+        }
     }
 
     // MARK: - Navigation
@@ -354,12 +369,16 @@ final class BrowserModel: Identifiable {
             showS3(location, recordHistory: recordHistory)
             return
         }
+        if let location = DriveLocation(url: url) {
+            if location.isFolder { showDrive(location, recordHistory: recordHistory) }
+            return
+        }
         let url = url.standardizedFileURL
         searchText = ""
         let leaving = historyURL
-        let wasS3 = destination == .s3
+        let wasRemote = destination.isRemote
         destination = .folder
-        let arriving = url != currentURL || wasS3
+        let arriving = url != currentURL || wasRemote
         if recordHistory && arriving {
             backStack.append(leaving)
             forwardStack.removeAll()
@@ -387,9 +406,14 @@ final class BrowserModel: Identifiable {
         }
     }
 
-    /// Where history records you are: the S3 location when browsing S3, otherwise the folder.
-    private var historyURL: URL {
-        destination == .s3 ? s3.location?.url ?? currentURL : currentURL
+    /// Where history records you are: the S3 or Drive location when browsing one, otherwise
+    /// the folder.
+    var historyURL: URL {
+        switch destination {
+        case .s3: s3.location?.url ?? currentURL
+        case .drive: drive.location?.url ?? currentURL
+        default: currentURL
+        }
     }
 
     /// Browses a connection's buckets or a folder in a bucket.
@@ -401,6 +425,17 @@ final class BrowserModel: Identifiable {
         }
         destination = .s3
         s3.show(location)
+    }
+
+    /// Browses a Google account's top level, a Drive folder or one of its lists.
+    func showDrive(_ location: DriveLocation, recordHistory: Bool = true) {
+        searchText = ""
+        if recordHistory, historyURL != location.url || destination != .drive {
+            backStack.append(historyURL)
+            forwardStack.removeAll()
+        }
+        destination = .drive
+        drive.show(location)
     }
 
     func goBack() {
@@ -420,6 +455,10 @@ final class BrowserModel: Identifiable {
         guard canGoUp else { return }
         if destination == .s3, let parent = s3.location?.parent {
             showS3(parent)
+            return
+        }
+        if destination == .drive, let parent = drive.parent {
+            showDrive(parent)
             return
         }
         navigate(to: currentURL.deletingLastPathComponent(), select: currentURL)
@@ -574,10 +613,10 @@ final class BrowserModel: Identifiable {
         }
         let target = urls ?? activeSelection
         guard !target.isEmpty else { return }
-        if let first = target.first, first.scheme == S3Location.scheme {
-            // S3 objects are downloaded to a cache first (only the first of a selection).
+        if let first = target.first, RemoteFiles.isRemote(first) {
+            // S3 and Drive files are downloaded to a cache first (only the first of a selection).
             if !first.absoluteString.hasSuffix("/") {
-                S3Transfers.shared.fetchForViewing(first) { [weak self] file in self?.preview(file) }
+                RemoteFiles.fetchForViewing(first) { [weak self] file in self?.preview(file) }
             }
             return
         }
@@ -653,11 +692,16 @@ final class BrowserModel: Identifiable {
         case .folder: selection = [url]
         case .recents: recents.selection = [url]
         case .newFiles: newFiles.selection = [url]
-        case .storage, .s3: break
+        case .storage, .s3, .drive: break
         }
     }
 
     func trash(_ urls: Set<URL>) {
+        // Drive items go to Drive's own trash.
+        let inDrive = urls.filter { $0.scheme == DriveLocation.scheme }
+        if !inDrive.isEmpty { drive.trash(inDrive) }
+        let urls = urls.filter(\.isFileURL)
+        guard !urls.isEmpty else { return }
         var failed: [String] = []
         var trashed: [URL] = []
         var undo: [FileHistory.Step] = []
@@ -692,6 +736,10 @@ final class BrowserModel: Identifiable {
     }
 
     func create(_ kind: NewItemKind, named raw: String) {
+        if destination == .drive {
+            createInDrive(kind, named: raw)
+            return
+        }
         let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, !name.contains("/") else {
             loadError = "“\(raw)” isn't a valid name."
@@ -716,7 +764,49 @@ final class BrowserModel: Identifiable {
         }
     }
 
+    /// A folder in Drive, or an empty file (uploaded, since Drive only makes files from content).
+    private func createInDrive(_ kind: NewItemKind, named raw: String) {
+        let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, let location = drive.location, drive.canAddItems else { return }
+        switch kind {
+        case .folder:
+            drive.createFolder(named: name)
+        case .file:
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("TheExplorer New File \(UUID().uuidString)", isDirectory: true)
+            let file = folder.appendingPathComponent(Transfers.localName(name))
+            do {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                try Data().write(to: file)
+                Transfers.shared.upload([file], toDrive: location)
+            } catch {
+                loadError = error.localizedDescription
+            }
+        }
+    }
+
+    /// Whether Rename… applies: one item in a folder, or in a Drive list.
+    var canRename: Bool {
+        switch destination {
+        case .folder: !isSearching && selection.count == 1
+        case .drive: drive.selection.count == 1 && drive.selection.first.flatMap(DriveLocation.init(url:)).map { !$0.isVirtual } == true
+        default: false
+        }
+    }
+
+    func beginRename() {
+        guard canRename else { return }
+        if destination == .drive {
+            renaming = drive.rows.first { drive.selection.contains($0.id) }?.item
+        } else if let url = selection.first {
+            renaming = FileItem(url: url)
+        }
+    }
+
     func rename(_ item: FileItem, to newName: String) {
+        if DriveLocation(url: item.url) != nil {
+            drive.rename(item.url, to: newName)
+            return
+        }
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != item.name, !trimmed.contains("/") else { return }
         let destination = item.url.deletingLastPathComponent().appendingPathComponent(trimmed)
@@ -751,18 +841,31 @@ final class BrowserModel: Identifiable {
         if let target = S3Location(url: folder) {
             let files = urls.filter(\.isFileURL)
             guard target.bucket != nil, !files.isEmpty else { return false }
-            S3Transfers.shared.upload(files, to: target)
+            Transfers.shared.upload(files, to: target)
+            return true
+        }
+        // Onto a Drive folder: files upload, and Drive items move there (or copy, with ⌥).
+        if let target = DriveLocation(url: folder) {
+            guard target.isFolder, !target.isVirtual else { return false }
+            let files = urls.filter(\.isFileURL)
+            let fromDrive = urls.filter { $0.scheme == DriveLocation.scheme }
+            guard !files.isEmpty || !fromDrive.isEmpty else { return false }
+            if !files.isEmpty { Transfers.shared.upload(files, toDrive: target) }
+            if !fromDrive.isEmpty {
+                let copying = mode == .copy || (mode == nil && NSEvent.modifierFlags.contains(.option))
+                guard copying ? drive.copy(fromDrive, into: target) : drive.move(fromDrive, into: target) else { return !files.isEmpty }
+            }
             return true
         }
         let folder = folder.standardizedFileURL
-        // Items dragged from S3 download into the folder.
-        let fromS3 = urls.filter { $0.scheme == S3Location.scheme }
-        if !fromS3.isEmpty {
-            S3Transfers.shared.download(fromS3, into: folder) { [weak self] placed in
+        // Items dragged from S3 or Drive download into the folder.
+        let remote = urls.filter(RemoteFiles.isRemote)
+        if !remote.isEmpty {
+            RemoteFiles.download(remote, into: folder) { [weak self] placed in
                 guard let self, folder == self.currentURL else { return }
                 self.reload(selecting: placed)
             }
-            if fromS3.count == urls.count { return true }
+            if remote.count == urls.count { return true }
         }
         let sources = FileTransfer.validSources(urls.filter(\.isFileURL), into: folder, duplicating: mode == .copy)
         guard !sources.isEmpty else { return false }
@@ -794,16 +897,17 @@ final class BrowserModel: Identifiable {
         return true
     }
 
-    var canCreateItems: Bool { destination == .folder && !isSearching }
+    var canCreateItems: Bool { (destination == .folder && !isSearching) || (destination == .drive && drive.canAddItems) }
 
     // MARK: - Clipboard
 
-    /// Where ⌘V puts things: the folder being shown, or the S3 folder.
+    /// Where ⌘V puts things: the folder being shown, or the S3 or Drive folder.
     var pasteTarget: URL? {
         guard !isSearching else { return nil }
         switch destination {
         case .folder: return currentURL
         case .s3: return s3.location.flatMap { $0.bucket == nil ? nil : $0.url }
+        case .drive: return drive.canAddItems ? drive.location?.url : nil
         default: return nil
         }
     }
@@ -840,6 +944,7 @@ final class BrowserModel: Identifiable {
         case .recents: recents.selection = Set(recents.rows.map(\.id))
         case .newFiles: newFiles.selection = Set(newFiles.rows.map(\.id))
         case .s3: s3.selection = Set(s3.rows.map(\.id))
+        case .drive: drive.selection = Set(drive.rows.map(\.id))
         case .storage: break
         }
     }
