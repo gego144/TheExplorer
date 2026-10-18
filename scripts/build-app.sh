@@ -2,11 +2,14 @@
 # Builds TheExplorer.app: release into build/, debug (CONFIG=debug) into build/debug/
 # with a separate bundle identifier (com.gego.TheExplorer.debug).
 #
-# Signing: macOS keys privacy permissions (Full Disk Access, Desktop, Documents…) to the
-# app's signature. Ad-hoc signatures change on every build, so permissions would reset each
-# time. The script signs with SIGN_IDENTITY if set, otherwise with the local
-# "TheExplorer Local Signing" certificate if it's in the keychain, and only falls back to
-# ad-hoc signing when neither exists.
+# Signing: macOS keys privacy permissions (Full Disk Access, Desktop, Documents…) and
+# Keychain access to the app's signature. Ad-hoc signatures change on every build, so
+# permissions would reset each time. Without a Team ID, Keychain access is keyed to each
+# build's hash, so the Keychain asks again after every build; an Apple Development
+# certificate (free, from Xcode › Settings › Accounts) has one and avoids that. The script
+# signs with SIGN_IDENTITY if set, otherwise with an Apple Development certificate, then the
+# local "TheExplorer Local Signing" certificate, and only falls back to ad-hoc signing when
+# none exists.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -20,7 +23,11 @@ else
 fi
 
 if [[ -z "${SIGN_IDENTITY:-}" ]]; then
-    if security find-certificate -c "$LOCAL_IDENTITY" >/dev/null 2>&1; then
+    # By its hash, which stays unambiguous if several certificates share a name.
+    DEVELOPMENT_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | awk '/"Apple Development: / && !found { print $2; found = 1 }')"
+    if [[ -n "$DEVELOPMENT_IDENTITY" ]]; then
+        SIGN_IDENTITY="$DEVELOPMENT_IDENTITY"
+    elif security find-certificate -c "$LOCAL_IDENTITY" >/dev/null 2>&1; then
         SIGN_IDENTITY="$LOCAL_IDENTITY"
     else
         SIGN_IDENTITY="-"
@@ -49,4 +56,5 @@ if [[ -f Resources/AppIcon.icns ]]; then
 fi
 
 codesign --force --sign "$SIGN_IDENTITY" "$APP"
-echo "Built $APP (signed: $([[ "$SIGN_IDENTITY" == "-" ]] && echo ad-hoc || echo "$SIGN_IDENTITY"))"
+SIGNED_BY="$(codesign -dvv "$APP" 2>&1 | awk -F= '/^Authority=/ && !found { print $2; found = 1 }')"
+echo "Built $APP (signed: ${SIGNED_BY:-ad-hoc})"
