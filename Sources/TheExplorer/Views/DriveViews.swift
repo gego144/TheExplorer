@@ -294,6 +294,9 @@ struct DriveInspector: View {
 
     @ViewBuilder private func single(_ row: ListRow) -> some View {
         let file = DriveStore.shared.file(at: row.id)
+        RemotePreviewCard(url: row.id, size: row.size, version: "\(file?.modified?.timeIntervalSince1970 ?? 0)") {
+            model.quickLook([row.id])
+        }
         HStack(spacing: 8) {
             TypeChip(item: row.item)
             Text(row.item.name)

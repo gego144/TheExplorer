@@ -79,6 +79,36 @@ struct DriveModelTests {
         #expect(Transfers.localName("..") == "Untitled")
     }
 
+    @Test func thumbnailLinksAskForBiggerSizes() {
+        #expect(DriveClient.sized("https://lh3.googleusercontent.com/drive-storage/AJQ=s220", 900) == "https://lh3.googleusercontent.com/drive-storage/AJQ=s900")
+        #expect(DriveClient.sized("https://lh3.googleusercontent.com/abc=s220-c-k-no", 900) == "https://lh3.googleusercontent.com/abc=s900")
+        #expect(DriveClient.sized("https://example.com/thumb.png", 900) == "https://example.com/thumb.png")
+    }
+
+    @Test func textPreviewsKeepWholeLinesAndSkipBinary() throws {
+        guard case .text(let text, true) = try #require(RemotePreviews.text(from: Data("one\ntwo\nthr".utf8), truncated: true)) else {
+            Issue.record("Expected text")
+            return
+        }
+        #expect(text == "one\ntwo")
+        // A multi-byte character cut in half at the end of the range is dropped with its line.
+        let cut = Data("héllo\nwörld".utf8).dropLast(1)
+        guard case .text(let partial, _) = try #require(RemotePreviews.text(from: Data(cut), truncated: true)) else { return }
+        #expect(partial == "héllo")
+        #expect(RemotePreviews.text(from: Data([0x89, 0x50, 0x4E, 0x47, 0x00, 0x01]), truncated: false) == nil)
+
+        // Only as much as the card shows: a long log stops at a line limit, minified JSON at a length.
+        let log = Data((0..<1000).map { "line \($0)\n" }.joined().utf8)
+        guard case .text(let head, true) = try #require(RemotePreviews.text(from: log, truncated: false)) else { return }
+        #expect(head.split(separator: "\n").count == RemotePreviews.previewLines)
+        #expect(head.hasSuffix("line \(RemotePreviews.previewLines - 1)"))
+        let minified = Data(("{" + String(repeating: "\"k\":1,", count: 6000) + "}").utf8)
+        guard case .text(let json, true) = try #require(RemotePreviews.text(from: minified, truncated: false)) else { return }
+        #expect(json.count == RemotePreviews.previewCharacters)
+        guard case .text(let short, false) = try #require(RemotePreviews.text(from: Data("a\nb\n".utf8), truncated: false)) else { return }
+        #expect(short == "a\nb\n")
+    }
+
     @Test func errorsSayWhatToDo() {
         let disabled = Data(#"{"error": {"code": 403, "message": "Drive API has not been used", "errors": [{"reason": "accessNotConfigured"}]}}"#.utf8)
         let error = DriveClient.error(403, disabled)
@@ -197,6 +227,12 @@ struct DriveClientTests {
         let back = work.appendingPathComponent("back.txt")
         try await drive.download(uploaded.id, to: back) { _, _ in }
         #expect(try Data(contentsOf: back) == Data(contentsOf: source))
+
+        // Previews read just the start of a file.
+        let head = try await drive.data(uploaded.id, range: 0...9)
+        #expect(head == Data(repeating: 65, count: 10))
+        let thumbnail = try await drive.thumbnail(try #require(try await drive.file("report").thumbnailLink), size: 300)
+        #expect(thumbnail.starts(with: Data([0x89, 0x50, 0x4E, 0x47])))
 
         let pdf = work.appendingPathComponent("plan.pdf")
         try await drive.export("plan", as: .pdf, to: pdf) { _, _ in }

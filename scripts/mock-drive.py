@@ -9,10 +9,13 @@ DEVELOPMENT.md). The sign-in page redirects straight back as if you'd approved i
 """
 
 import json
+import os
 import re
+import struct
 import sys
 import threading
 import uuid
+import zlib
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse
@@ -60,6 +63,21 @@ def tiny_pdf(text):
     return out
 
 
+def png(width, height, seed):
+    """A gradient PNG standing in for one of Drive's thumbnails."""
+    rows = b""
+    for y in range(height):
+        rows += b"\x00" + bytes(
+            v for x in range(width) for v in ((x * 255 // width + seed) % 256, (y * 255 // height) % 256, (seed * 3) % 256))
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+
+
+THUMBNAILED = ("image/", "video/", "application/pdf", GOOGLE + "document", GOOGLE + "spreadsheet", GOOGLE + "presentation")
+
+
 def seed():
     add("root-id", "My Drive", FOLDER, [])
     add("projects", "Projects", FOLDER, ["root-id"], starred=True)
@@ -72,7 +90,8 @@ def seed():
     add("budget", "Budget", GOOGLE + "spreadsheet", ["root-id"])
     add("plan", "Launch plan", GOOGLE + "document", ["projects"])
     add("survey", "Survey", GOOGLE + "form", ["projects"])
-    add("beach", "beach.jpg", "image/jpeg", ["photos"], b"\xff\xd8\xff\xe0" + b"0" * 2000)
+    add("beach", "beach.png", "image/png", ["photos"], png(64, 48, 7))
+    add("long", "server.log", "text/plain", ["root-id"], b"".join(b"line %d: all good\n" % i for i in range(5000)))
     add("shortcut", "Projects shortcut", "application/vnd.google-apps.shortcut", ["root-id"],
         shortcutDetails={"targetId": "projects", "targetMimeType": FOLDER})
     # Shared with you from someone else's Drive: its folder isn't visible.
@@ -83,7 +102,7 @@ def seed():
     add("roadmap", "Roadmap.txt", "text/plain", ["team-drive"], b"Q4: ship it\n", driveId="team-drive")
 
 
-def public(f):
+def public(f, fresh=True):
     out = {k: v for k, v in f.items() if k not in ("content", "trashed", "starred", "shared")}
     if not f["mimeType"].startswith(GOOGLE):
         out["size"] = str(len(f["content"]))
@@ -91,6 +110,11 @@ def public(f):
     out["webViewLink"] = f"https://drive.google.com/{kind}/{f['id']}/view"
     out["owners"] = [{"displayName": "Someone Else" if f["shared"] else "Test User"}]
     out["capabilities"] = {"canAddChildren": f["mimeType"] == FOLDER, "canRename": True, "canTrash": True}
+    if f["mimeType"].startswith(THUMBNAILED):
+        # With MOCK_EXPIRE_THUMBS set, links from listings have expired, like Google's do after
+        # a few hours; asking for the file alone gives a working one.
+        stale = not fresh and os.environ.get("MOCK_EXPIRE_THUMBS")
+        out["thumbnailLink"] = f"{HOST}/{'expired' if stale else 'thumb'}/{f['id']}=s220"
     return out
 
 
@@ -156,6 +180,13 @@ class Handler(BaseHTTPRequestHandler):
 
         if not self.authorized():
             return
+        if path.startswith("/expired/"):
+            return self.error(403, "forbidden", "The thumbnail link has expired.")
+        if m := re.fullmatch(r"/thumb/([^=]+)=s(\d+)", path):
+            if m[1] not in files:
+                return self.error(404, "notFound", "No thumbnail")
+            side = min(int(m[2]), 480)
+            return self.send(200, png(side, side * 3 // 4, sum(map(ord, m[1]))), "image/png")
         with lock:
             return self.drive(method, path, query)
 
@@ -220,7 +251,11 @@ class Handler(BaseHTTPRequestHandler):
         if query.get("alt") == "media":
             if f["mimeType"].startswith(GOOGLE):
                 return self.error(403, "fileNotDownloadable", "Only files with binary content can be downloaded. Use Export with Docs Editors files.")
-            return self.send(200, f["content"], f["mimeType"])
+            content = f["content"]
+            if r := re.fullmatch(r"bytes=(\d+)-(\d+)", self.headers.get("Range", "")):
+                part = content[int(r[1]):int(r[2]) + 1]
+                return self.send(206, part, f["mimeType"], {"Content-Range": f"bytes {r[1]}-{int(r[1]) + len(part) - 1}/{len(content)}"})
+            return self.send(200, content, f["mimeType"])
         return self.send(200, public(f))
 
     def list(self, query):
@@ -243,7 +278,7 @@ class Handler(BaseHTTPRequestHandler):
         size = int(query.get("pageSize", 100))
         start = int(query.get("pageToken", 0))
         page = found[start:start + size]
-        reply = {"files": [public(f) for f in page]}
+        reply = {"files": [public(f, fresh=False) for f in page]}
         if start + size < len(found):
             reply["nextPageToken"] = str(start + size)
         return self.send(200, reply)
@@ -264,5 +299,7 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     seed()
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5056
+    # MOCK_HOST: the address clients use, when they reach the mock through a proxy.
+    HOST = os.environ.get("MOCK_HOST", f"http://127.0.0.1:{port}")
     print(f"mock Google Drive on http://127.0.0.1:{port}", flush=True)
     ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()

@@ -130,6 +130,13 @@ actor S3Client {
         }
     }
 
+    /// An object's bytes straight into memory: all of it, or just `range` (inclusive), for
+    /// previews that only need the start of a file.
+    func data(bucket: String, key: String, range: ClosedRange<Int64>? = nil) async throws -> Data {
+        let headers = range.map { ["Range": "bytes=\($0.lowerBound)-\($0.upperBound)"] } ?? [:]
+        return try await send("GET", bucket: bucket, key: key, headers: headers).0
+    }
+
     /// A link anyone can download from until it expires (S3 allows up to 7 days).
     func shareURL(bucket: String, key: String, expires: Int = 604_800) async throws -> URL {
         let credentials = try await currentCredentials()

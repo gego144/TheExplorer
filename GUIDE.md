@@ -90,6 +90,7 @@ Connect S3 in Settings › Cloud and your buckets show up in the sidebar. Browse
 
 - **Upload:** drop files or folders onto an S3 folder, a folder row, a breadcrumb or the sidebar connection. Folders upload with everything in them, and big files upload in parallel parts.
 - **Download:** drag S3 items onto Finder, the desktop, or any folder, tab, sidebar place or breadcrumb in TheExplorer, or right-click › Download. Folders come down with everything in them, and a name that's taken gets a number instead of being overwritten. Double-click opens a file and Space previews it.
+- **Previews:** select a file and the inspector previews it without downloading it: the first 32 KB of text files, a frame from about a second into videos (streamed, so only the start of the video is read), and images and PDFs up to 25 and 20 MB read into memory. Bigger photos show the thumbnail embedded at their start. Space downloads the file for the full Quick Look.
 - **Share and manage:** right-click to copy an `s3://` URI or a share link that works for 7 days, create folders, or delete.
 - **Progress:** the status bar shows progress with Stop for every transfer.
 - **Credentials:** use your AWS CLI profiles as they are. That includes SSO and assumed roles, through `aws configure export-credentials`. Or add access keys, which are kept in your Keychain.
@@ -118,6 +119,7 @@ Google Drive shows up under Cloud in the sidebar once you've signed in. TheExplo
 - **Moving and copying:** drag Drive items onto another Drive folder to move them; hold ⌥ to copy. Copy and paste works the same way. Drive can't copy folders, so those move or download instead.
 - **Rename, new folder and trash:** ⇧⌘↩, ⇧⌘N and ⌘⌫ work as they do for local files. Trashed items go to Drive's trash, where you can restore them for 30 days.
 - **Links:** right-click › Copy Link copies the Drive link, which opens the item for anyone it's shared with; Open in Browser opens it at drive.google.com.
+- **Previews:** the inspector shows Drive's own thumbnail for images, videos, PDFs, Docs, Sheets and Slides, and the first 32 KB of text files, without downloading anything.
 - **Storage:** the status bar and inspector show how much of your Drive is used.
 
 The client secret and each account's sign-in are kept in your Keychain. Removing an account in Settings also signs it out with Google, and nothing in your Drive is touched.

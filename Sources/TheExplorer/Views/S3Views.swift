@@ -250,6 +250,9 @@ struct S3Inspector: View {
         let selected = model.s3.rows.filter { model.s3.selection.contains($0.id) }
         VStack(alignment: .leading, spacing: 12) {
             if selected.count == 1, let row = selected.first, let location = S3Location(url: row.id) {
+                RemotePreviewCard(url: row.id, size: row.size, version: "\(row.date?.timeIntervalSince1970 ?? 0)-\(row.size ?? 0)") {
+                    model.quickLook([row.id])
+                }
                 HStack(spacing: 8) {
                     TypeChip(item: row.item)
                     Text(row.item.name)

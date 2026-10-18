@@ -45,6 +45,10 @@ struct S3ClientTests {
         try await client.download(bucket: bucket, key: "docs/notes 1.txt", to: back) { _, _ in }
         #expect(try Data(contentsOf: back) == Data(contentsOf: small))
 
+        // Previews read just a range, into memory.
+        let head = try await client.data(bucket: bucket, key: "docs/notes 1.txt", range: 0...99)
+        #expect(head == (try Data(contentsOf: small)).prefix(100))
+
         // A share link works without credentials.
         let link = try await client.shareURL(bucket: bucket, key: "docs/notes 1.txt", expires: 600)
         let (shared, response) = try await URLSession.shared.data(from: link)

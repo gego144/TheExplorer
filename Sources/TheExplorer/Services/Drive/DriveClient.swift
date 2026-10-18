@@ -29,6 +29,8 @@ struct DriveFile: Sendable, Hashable {
     /// Where a shortcut points.
     var targetID: String?
     var targetType: String?
+    /// Drive's own preview image (images, videos, PDFs, Google Docs…); a short-lived link.
+    var thumbnailLink: String?
     var canAddChildren = true
     var canRename = true
     var canTrash = true
@@ -81,6 +83,7 @@ struct DriveFile: Sendable, Hashable {
         driveID = json["driveId"] as? String
         webLink = json["webViewLink"] as? String
         owner = ((json["owners"] as? [[String: Any]])?.first?["displayName"] as? String)
+        thumbnailLink = json["thumbnailLink"] as? String
         if let shortcut = json["shortcutDetails"] as? [String: Any] {
             targetID = shortcut["targetId"] as? String
             targetType = shortcut["targetMimeType"] as? String
@@ -167,7 +170,7 @@ final class DriveClient: Sendable {
     static var api: String { (GoogleOAuth.testEndpoint ?? "https://www.googleapis.com") + "/drive/v3" }
     static var uploadAPI: String { (GoogleOAuth.testEndpoint ?? "https://www.googleapis.com") + "/upload/drive/v3" }
 
-    static let fileFields = "id,name,mimeType,size,modifiedTime,createdTime,parents,driveId,webViewLink,owners(displayName),shortcutDetails(targetId,targetMimeType),capabilities(canAddChildren,canRename,canTrash)"
+    static let fileFields = "id,name,mimeType,size,modifiedTime,createdTime,parents,driveId,webViewLink,owners(displayName),shortcutDetails(targetId,targetMimeType),thumbnailLink,capabilities(canAddChildren,canRename,canTrash)"
 
     init(auth: GoogleAuth) {
         self.auth = auth
@@ -324,6 +327,25 @@ final class DriveClient: Sendable {
     func export(_ id: String, as format: DriveExport, to destination: URL, progress: @escaping @Sendable (Int64, Int64) -> Void) async throws {
         try await fetch(request("GET", Self.api, "/files/" + Self.encode(id) + "/export", query: [("mimeType", format.mimeType)], allDrives: false),
                         to: destination, progress: progress)
+    }
+
+    /// The start of a file's content (`range`, inclusive) straight into memory, for previews.
+    func data(_ id: String, range: ClosedRange<Int64>) async throws -> Data {
+        var request = request("GET", Self.api, "/files/" + Self.encode(id), query: [("alt", "media")])
+        request.setValue("bytes=\(range.lowerBound)-\(range.upperBound)", forHTTPHeaderField: "Range")
+        return try await send(request).0
+    }
+
+    /// Drive's thumbnail for a file, about `size` pixels on its long side. The link from a
+    /// listing ends in "=s220"; asking for another size is a matter of changing that.
+    func thumbnail(_ link: String, size: Int) async throws -> Data {
+        guard let url = URL(string: Self.sized(link, size)) else { throw DriveError(message: "Drive gave a broken preview link.") }
+        return try await send(URLRequest(url: url)).0
+    }
+
+    nonisolated static func sized(_ link: String, _ size: Int) -> String {
+        guard let range = link.range(of: #"=s\d+(-[a-z0-9-]+)?$"#, options: .regularExpression) else { return link }
+        return link.replacingCharacters(in: range, with: "=s\(size)")
     }
 
     private func fetch(_ request: URLRequest, to destination: URL, progress: @escaping @Sendable (Int64, Int64) -> Void) async throws {

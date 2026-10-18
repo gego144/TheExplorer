@@ -410,3 +410,111 @@ private struct ArchiveItemTransfer: Transferable {
         }
     }
 }
+
+// MARK: - S3 and Google Drive
+
+/// The inspector's preview of an S3 or Drive file, fetched without downloading it (see
+/// RemotePreviews). Click it, or press Space, for the full Quick Look.
+struct RemotePreviewCard: View {
+    let url: URL
+    let size: Int64?
+    /// Changes when the file does (its modified date), so a stale preview isn't reused.
+    let version: String
+    let onExpand: () -> Void
+
+    var body: some View {
+        if RemotePreviews.plan(for: url, size: size) != nil {
+            // A fresh loader for each file, so nothing from the previous one carries over.
+            RemotePreviewLoader(url: url, size: size, version: version, onExpand: onExpand)
+                .id(url.absoluteString + "|" + version)
+        }
+    }
+}
+
+private struct RemotePreviewLoader: View {
+    let url: URL
+    let size: Int64?
+    let version: String
+    let onExpand: () -> Void
+
+    private enum Load {
+        case loading
+        case done(RemotePreview?)
+    }
+
+    @State private var load: Load
+
+    init(url: URL, size: Int64?, version: String, onExpand: @escaping () -> Void) {
+        self.url = url
+        self.size = size
+        self.version = version
+        self.onExpand = onExpand
+        // One seen before shows straight away, without a spinner first.
+        _load = State(initialValue: RemotePreviews.cached(url, version: version).map(Load.done) ?? .loading)
+    }
+
+    var body: some View {
+        content
+            .task {
+                guard case .loading = load else { return }
+                // A beat first, so arrowing through a list doesn't fetch every file on the way.
+                try? await Task.sleep(for: .milliseconds(160))
+                guard !Task.isCancelled else { return }
+                let preview = await RemotePreviews.load(url, size: size, version: version)
+                guard !Task.isCancelled else { return }
+                load = .done(preview)
+            }
+    }
+
+    @ViewBuilder private var content: some View {
+        switch load {
+        case .loading:
+            frame { ProgressView().controlSize(.small) }
+                .frame(height: 180)
+        case .done(.image(let image)):
+            let aspect = CGFloat(image.width) / CGFloat(max(image.height, 1))
+            frame {
+                Image(decorative: image, scale: 1)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+            }
+            .aspectRatio(max(aspect, 0.75), contentMode: .fit)
+            .frame(maxHeight: 260)
+            .onTapGesture(perform: onExpand)
+        case .done(.text(let text, let truncated)):
+            frame {
+                ScrollView {
+                    Text(text + (truncated ? "\n…" : ""))
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundStyle(Theme.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .textSelection(.enabled)
+                }
+                .scrollIndicators(.never)
+            }
+            .frame(height: 200)
+        case .done(nil):
+            EmptyView()
+        }
+    }
+
+    private func frame(@ViewBuilder _ content: () -> some View) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8).fill(Theme.field)
+            content()
+        }
+        .clipShape(.rect(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border))
+        .overlay(alignment: .bottomTrailing) {
+            Button(action: onExpand) {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(.system(size: 10, weight: .bold))
+            }
+            .buttonStyle(FloatingIconStyle())
+            .padding(6)
+            .help("Quick Look (Space) downloads it for the full preview")
+        }
+    }
+}
