@@ -36,11 +36,12 @@ A debug build (`CONFIG=debug ./scripts/build-app.sh`) goes to `build/debug/` wit
 
 ## Signing and permissions
 
-macOS remembers privacy permissions (Desktop, Documents, Downloads, Full Disk Access…) per app, identified by its code signature. An ad-hoc signature changes on every build, which makes macOS ask for permissions again after every rebuild. To avoid that, the build script signs with a stable identity:
+macOS remembers privacy permissions (Desktop, Documents, Downloads, Full Disk Access…) per app, identified by its code signature. An ad-hoc signature changes on every build, which makes macOS ask for permissions again after every rebuild. The Keychain is stricter: for an app without a Team ID it trusts each build's exact hash, so the S3 and Google Drive secrets prompt again after every rebuild unless the app is signed with a certificate that has a Team ID. The build script signs with the steadiest identity it finds:
 
-1. `SIGN_IDENTITY`, if you set it (for example an Apple Development certificate).
-2. Otherwise, a self-signed certificate called **TheExplorer Local Signing**, if it's in your keychain.
-3. Otherwise, ad-hoc, with a warning.
+1. `SIGN_IDENTITY`, if you set it.
+2. Otherwise, an **Apple Development** certificate. It's free: in Xcode, open Settings (⌘,) › Accounts, add your Apple Account, select your Personal Team, then Manage Certificates… › + › Apple Development. If `security find-identity -v -p codesigning` doesn't list it as valid, Apple's intermediate certificate is missing; add it with `curl -fsSLO https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer && security add-certificates AppleWWDRCAG3.cer`.
+3. Otherwise, a self-signed certificate called **TheExplorer Local Signing**, if it's in your keychain. Privacy permissions stick with it, but Keychain access doesn't.
+4. Otherwise, ad-hoc, with a warning.
 
 To create the local certificate on a new Mac:
 
