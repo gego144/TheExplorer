@@ -65,13 +65,18 @@ enum RecentsRange: Int, CaseIterable, Identifiable {
     }
 }
 
-/// Live Spotlight query over your home folder, newest first, loaded a page at a time.
+/// Recents and New, newest first, loaded a page at a time.
+///
+/// New with clutter hidden reads TheExplorer's own file index, which already leaves clutter
+/// out: a pass over its arrays takes milliseconds and keeps nothing alive, and it follows changes
+/// through the index. Everything else is a live Spotlight query over your home folder.
 ///
 /// A week of a developer's home folder is easily half a million items (mostly dependency folders),
 /// so the query runs off the main thread, sorted newest first, and only the items up to the
 /// current page are ever resolved. Scrolling to the end loads the next page; paths already
 /// resolved are cached, so each page only costs its own items. The main thread only receives
-/// the finished rows.
+/// the finished rows. Every match is held in memory, though (over a gigabyte for 90 days of
+/// everything), which is why New avoids it when it can.
 @MainActor
 @Observable
 final class RecentsModel {
@@ -94,6 +99,7 @@ final class RecentsModel {
     private(set) var isGathering = false
 
     @ObservationIgnored private var query: SpotlightQuery?
+    @ObservationIgnored private var indexed: IndexedRecents?
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var limit = RecentsModel.pageSize
     @ObservationIgnored private var loadingMore = false
@@ -104,19 +110,29 @@ final class RecentsModel {
         hideNoise = Prefs.shared.newHidesClutter
     }
 
-    var isActive: Bool { query != nil }
+    var isActive: Bool { query != nil || indexed != nil }
 
     /// The date the list is about, as a column title.
     var dateTitle: String { mode == .opened ? "Opened" : dateKind.rawValue }
 
     func start() {
-        guard query == nil else { return }
+        guard !isActive else { return }
         restart()
+    }
+
+    /// Whether the list is off screen, where live updates wait.
+    @ObservationIgnored var isPaused = false {
+        didSet {
+            guard isPaused != oldValue else { return }
+            query?.setPaused(isPaused)
+            indexed?.setPaused(isPaused)
+        }
     }
 
     func stop() {
         query?.stop()
         query = nil
+        indexed = nil
         generation += 1
         isGathering = false
         loadingMore = false
@@ -124,10 +140,26 @@ final class RecentsModel {
 
     /// Loads the next page; called when the list scrolls to its end.
     func loadMore() {
-        guard hasMore, !loadingMore, let query else { return }
+        guard hasMore, !loadingMore else { return }
+        if let indexed {
+            loadingMore = true
+            limit += Self.pageSize
+            indexed.load(limit: limit)
+            return
+        }
+        guard let query else { return }
         loadingMore = true
         limit += Self.pageSize
         query.setHandler(makeHandler())
+    }
+
+    /// New with clutter hidden is exactly what the file index holds.
+    private var usesIndex: Bool { mode == .new && hideNoise }
+
+    private var cutoff: Date {
+        range == .all
+            ? Date(timeIntervalSince1970: 0)
+            : Calendar.current.date(byAdding: .day, value: -range.rawValue, to: Date()) ?? Date()
     }
 
     private var attribute: String {
@@ -136,24 +168,65 @@ final class RecentsModel {
 
     private func restart() {
         query?.stop()
+        query = nil
+        indexed = nil
         limit = Self.pageSize
+        generation += 1
+        isGathering = true
+        if usesIndex {
+            startIndexed()
+            return
+        }
         let attribute = attribute
-        let cutoff = range == .all
-            ? Date(timeIntervalSince1970: 0)
-            : Calendar.current.date(byAdding: .day, value: -range.rawValue, to: Date()) ?? Date()
+        let cutoff = cutoff
         let query = SpotlightQuery(
             predicate: NSPredicate(format: "%K >= %@", attribute, cutoff as NSDate),
             scopes: [NSMetadataQueryUserHomeScope],
             sortedBy: attribute
         )
         self.query = query
+        if isPaused { query.setPaused(true) }
         isGathering = true
         query.start(makeHandler())
     }
 
     private func refilter() {
+        guard isActive else { return }
+        // Hiding clutter switches between the index and Spotlight.
+        if usesIndex != (indexed != nil) {
+            restart()
+            return
+        }
         limit = Self.pageSize
-        query?.setHandler(makeHandler())
+        if let indexed {
+            indexed.reset(kind: kindFilter)
+            indexed.load(limit: limit)
+        } else {
+            query?.setHandler(makeHandler())
+        }
+    }
+
+    private func startIndexed() {
+        let generation = generation
+        let date: FileIndex.RecentDate = switch dateKind {
+        case .created: .created
+        case .modified: .modified
+        case .added: .added
+        }
+        let indexed = IndexedRecents(date: date, cutoff: cutoff, kind: kindFilter, groups: .days) { [weak self] snapshot in
+            guard let self, self.generation == generation else { return }
+            self.isGathering = false
+            self.loadingMore = false
+            self.rows = snapshot.rows
+            self.totalCount = snapshot.total
+            self.hasMore = snapshot.hasMore
+            if !self.selection.isEmpty {
+                self.selection.formIntersection(snapshot.rows.map(\.id))
+            }
+        }
+        self.indexed = indexed
+        indexed.setPaused(isPaused)
+        indexed.load(limit: limit)
     }
 
     /// Builds the background handler for the current filters; results from older handlers are dropped.
@@ -255,10 +328,9 @@ private struct RecentsFilter: Sendable {
             guard kind.matches(isFolder: results.isFolder(at: index)) else { continue }
             if documentsOnly && !Self.isDocument(results.contentType(at: index)) { continue }
             if kept.count >= limit {
-                // With the noise filter, counting the rest would mean resolving every path.
-                if hideNoise { return Snapshot(rows: grouped(kept), total: nil, hasMore: true, walked: index) }
-                matching += 1
-                continue
+                // Counting the rest would mean walking every result on every live update, and
+                // with clutter shown that can be millions.
+                return Snapshot(rows: grouped(kept), total: nil, hasMore: true, walked: index)
             }
             if hideNoise && results.isNoisy(at: index) { continue }
             guard let date: Date = results.value(attribute, at: index),
@@ -302,7 +374,7 @@ private struct RecentsFilter: Sendable {
 
     /// Puts a group header on the first row of each group. Rows arrive newest first, so the
     /// title is only recomputed when the day changes.
-    private func grouped(_ rows: [ListRow]) -> [ListRow] {
+    func grouped(_ rows: [ListRow]) -> [ListRow] {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
         var currentDay: Date?
@@ -322,7 +394,7 @@ private struct RecentsFilter: Sendable {
         }
     }
 
-    private func bucket(_ day: Date, today: Date, calendar: Calendar) -> String {
+    fileprivate func bucket(_ day: Date, today: Date, calendar: Calendar) -> String {
         let days = calendar.dateComponents([.day], from: day, to: today).day ?? 0
         if days <= 0 { return "Today" }
         if days == 1 { return "Yesterday" }
@@ -336,5 +408,130 @@ private struct RecentsFilter: Sendable {
             if days < 30 { return "Previous 30 Days" }
         }
         return day.formatted(.dateTime.month(.wide).year())
+    }
+}
+
+/// New's rows from the file index. Each load is one pass over a snapshot of the index off the
+/// main thread; the index's changes reload it, at most every two seconds.
+@MainActor
+private final class IndexedRecents {
+    typealias Snapshot = RecentsFilter.Snapshot
+
+    private let date: FileIndex.RecentDate
+    private let cutoff: Date
+    private var kind: KindFilter
+    private let groups: RecentsFilter.Groups
+    private let deliver: (Snapshot) -> Void
+    private var limit = RecentsModel.pageSize
+    private var loading: Task<Void, Never>?
+    private var pending: Task<Void, Never>?
+    private var observer: NSObjectProtocol?
+    private var paused = false
+    private var missedChange = false
+    /// Items already read from disk, by path, with the change time they were read at.
+    private var items = ItemCache()
+    private let addedTimes = FileIndex.AddedTimes()
+
+    init(date: FileIndex.RecentDate, cutoff: Date, kind: KindFilter, groups: RecentsFilter.Groups,
+         deliver: @escaping (Snapshot) -> Void) {
+        self.date = date
+        self.cutoff = cutoff
+        self.kind = kind
+        self.groups = groups
+        self.deliver = deliver
+        observer = NotificationCenter.default.addObserver(forName: FileIndex.didChange, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.indexChanged() }
+        }
+    }
+
+    deinit {
+        loading?.cancel()
+        pending?.cancel()
+        if let observer { NotificationCenter.default.removeObserver(observer) }
+    }
+
+    func reset(kind: KindFilter) {
+        self.kind = kind
+    }
+
+    func setPaused(_ paused: Bool) {
+        self.paused = paused
+        if !paused && missedChange {
+            missedChange = false
+            load(limit: limit)
+        }
+    }
+
+    func load(limit: Int) {
+        self.limit = limit
+        loading?.cancel()
+        let (date, cutoff, kind, groups, items, addedTimes) = (date, cutoff, kind, groups, items, addedTimes)
+        loading = Task { [weak self] in
+            let snapshot = await Task.detached(priority: .userInitiated) {
+                await FileIndex.shared.waitUntilReady()
+                return Self.collect(date: date, cutoff: cutoff, kind: kind, groups: groups, limit: limit, items: items, addedTimes: addedTimes)
+            }.value
+            guard !Task.isCancelled else { return }
+            self?.deliver(snapshot)
+        }
+    }
+
+    private func indexChanged() {
+        guard !paused else {
+            missedChange = true
+            return
+        }
+        guard pending == nil else { return }
+        pending = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard let self, !Task.isCancelled else { return }
+            self.pending = nil
+            self.load(limit: self.limit)
+        }
+    }
+
+    nonisolated private static func collect(date: FileIndex.RecentDate, cutoff: Date, kind: KindFilter,
+                                            groups: RecentsFilter.Groups, limit: Int, items: ItemCache,
+                                            addedTimes: FileIndex.AddedTimes) -> Snapshot {
+        let storage = FileIndex.shared.snapshot()
+        let home = URL.home.path
+        let found = FileIndex.recent(in: storage, scopes: [home], since: cutoff, by: date, kind: kind, addedTimes: addedTimes)
+        var rows: [ListRow] = []
+        rows.reserveCapacity(min(limit, found.count))
+        var walked = 0
+        for entry in found {
+            guard rows.count < limit else { break }
+            walked += 1
+            let path = storage.path(entry.index)
+            guard let item = items.item(path, changed: storage.changed[Int(entry.index)]) else { continue }
+            rows.append(ListRow(
+                item: item,
+                size: item.isFolder ? nil : item.fileSize,
+                date: Date(timeIntervalSinceReferenceDate: TimeInterval(entry.date)),
+                location: (path as NSString).deletingLastPathComponent
+            ))
+        }
+        let filter = RecentsFilter(attribute: "", kind: kind, documentsOnly: false, hideNoise: true, limit: limit, groups: groups)
+        // Items that vanished since the index saw them are skipped, so the count is approximate
+        // by those few.
+        let total = found.count - (walked - rows.count)
+        return Snapshot(rows: filter.grouped(rows), total: total, hasMore: walked < found.count)
+    }
+}
+
+/// Items read from disk for New, reused while their change time stays the same.
+private final class ItemCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var entries: [String: (changed: Int32, item: FileItem)] = [:]
+
+    func item(_ path: String, changed: Int32) -> FileItem? {
+        if let hit = lock.withLock({ entries[path] }), hit.changed == changed { return hit.item }
+        guard let item = FileItem(url: URL(fileURLWithPath: path)) else { return nil }
+        lock.withLock {
+            // Bounded: a few pages' worth is all that's ever shown.
+            if entries.count > 20_000 { entries.removeAll(keepingCapacity: true) }
+            entries[path] = (changed, item)
+        }
+        return item
     }
 }

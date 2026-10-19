@@ -80,6 +80,45 @@ enum DebugSnapshots {
                     StorageModel.shared.scan()
                     while StorageModel.shared.isScanning { try? await Task.sleep(for: .milliseconds(200)) }
                 }
+            case "drill":
+                // drill:<name> opens a folder in Storage, as double-clicking it does, and logs
+                // what's inside once its files are listed.
+                let storage = StorageModel.shared
+                if let node = (storage.focus ?? storage.result?.root)?.children.first(where: { $0.name == parts[1] }) {
+                    storage.drill(into: node)
+                    try? await Task.sleep(for: .milliseconds(500))
+                    log("\(scene): \(node.children.prefix(8).map { "\($0.name)=\(Format.bytes($0.size))" }) of \(Format.bytes(node.size)), \(node.fileCount) files")
+                } else {
+                    log("\(scene): no folder named that")
+                }
+            case "scrollviews":
+                // scrollviews logs every scroll view in the window: frame, and content height.
+                var found: [String] = []
+                func visit(_ view: NSView) {
+                    if let scroll = view as? NSScrollView {
+                        found.append("\(Int(scroll.frame.width))x\(Int(scroll.frame.height)) content \(Int(scroll.documentView?.frame.height ?? 0)) at y \(Int(scroll.contentView.bounds.origin.y))")
+                    }
+                    view.subviews.forEach(visit)
+                }
+                if let content = InputDriver.window?.contentView { visit(content) }
+                log("\(scene): \(found)")
+                wait = 0
+            case "pressed":
+                // pressed logs the rows the last mouse press landed on, as a drag would carry them.
+                log("\(scene): \(MultiDragSource.debugLastPress)")
+                wait = 0
+            case "foldersize":
+                // foldersize:<path> logs the folder's measured size, if there is one yet.
+                let size = FolderSizeStore.shared.size(for: argument)
+                log("\(scene): \(size.map { "\($0.bytes) bytes, \($0.files) files" } ?? "none")\(FolderSizeStore.shared.isCalculating(argument) ? ", calculating" : "")")
+                wait = 0
+            case "idle":
+                // idle:<seconds> sits still and logs the CPU the app used meanwhile, all threads.
+                let seconds = Double(argument) ?? 10
+                let before = InputDriver.processCPU()
+                try? await Task.sleep(for: .seconds(seconds))
+                log("\(scene): cpu \(Int((InputDriver.processCPU() - before) * 1000))ms over \(Int(seconds))s")
+                wait = 0
             case "newtab": workspace.newTab(URL(fileURLWithPath: argument))
             case "tab": workspace.select((Int(argument) ?? 1) - 1)
             case "omnibox": model.omniboxRequest = OmniboxRequest(text: parts.count > 1 ? parts[1] : "")

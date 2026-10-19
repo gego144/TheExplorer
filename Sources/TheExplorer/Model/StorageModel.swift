@@ -58,12 +58,36 @@ final class StorageModel {
     private(set) var hasFullDiskAccess = StorageModel.checkFullDiskAccess()
 
     /// The folder currently drilled into.
-    var focus: SizeNode?
+    var focus: SizeNode? {
+        didSet { if let focus, focus !== oldValue { listFiles(of: focus) } }
+    }
+
+    /// Fills in an opened folder's own files, which the scan only counted.
+    private func listFiles(of node: SizeNode) {
+        guard node.isFolder, !node.filesListed else { return }
+        let path = node.path
+        Task {
+            guard let files = await Task.detached(priority: .userInitiated, operation: { DiskScanner.listFiles(in: path) }).value,
+                  !node.filesListed else { return }
+            DiskScanner.attachListedFiles(files, to: node)
+            // SizeNode isn't observable; reassigning focus redraws views reading the mutated tree.
+            if focus === node { focus = node }
+        }
+    }
     var selection: SizeNode.ID?
     /// Awaiting confirmation before moving to the Trash.
-    var pendingTrash: SizeNode?
+    var pendingTrash: SizeNode? {
+        didSet { pendingTrashURL = pendingTrash?.url }
+    }
+    /// Its location when it was asked about: a node's path comes from the tree it's in, so it
+    /// isn't to be trusted once that tree is gone.
+    @ObservationIgnored private var pendingTrashURL: URL?
 
     @ObservationIgnored private var scanTask: Task<Void, Never>?
+    /// The FSEvents event current when the shown scan began (its sizes reflect changes up to
+    /// it), and when it finished.
+    @ObservationIgnored private var scanEventID: UInt64 = 0
+    @ObservationIgnored private var scanFinishedAt = Date()
 
     init() {
         refreshVolume()
@@ -89,8 +113,10 @@ final class StorageModel {
 
     func scan() {
         cancel()
+        pendingTrash = nil
         let root = target.url
         let progress = ScanProgress()
+        let startEvent = FSEventsGetCurrentEventId()
         isScanning = true
         scanStarted = Date()
         progressFiles = 0
@@ -117,9 +143,11 @@ final class StorageModel {
             self.isScanning = false
             if let outcome {
                 self.result = outcome
+                self.scanEventID = startEvent
+                self.scanFinishedAt = Date()
                 self.focus = outcome.root
                 self.selection = nil
-                FolderSizeStore.shared.absorb(outcome.root)
+                FolderSizeStore.shared.absorb(outcome.root, eventID: startEvent, finishedAt: self.scanFinishedAt)
             }
         }
     }
@@ -155,7 +183,7 @@ final class StorageModel {
     }
 
     /// Without Full Disk Access, protected folders (Mail, Messages, Safari, other apps' data) are skipped.
-    static func checkFullDiskAccess() -> Bool {
+    nonisolated static func checkFullDiskAccess() -> Bool {
         let probe = URL.home.appendingPathComponent("Library/Application Support/com.apple.TCC")
         return (try? FileManager.default.contentsOfDirectory(atPath: probe.path)) != nil
     }
@@ -169,13 +197,13 @@ final class StorageModel {
     var errorMessage: String?
 
     func confirmTrash() {
-        guard let node = pendingTrash else { return }
+        guard let node = pendingTrash, let url = pendingTrashURL else { return }
         pendingTrash = nil
         do {
             var inTrash: NSURL?
-            try FileManager.default.trashItem(at: node.url, resultingItemURL: &inTrash)
+            try FileManager.default.trashItem(at: url, resultingItemURL: &inTrash)
             if let inTrash = inTrash as URL? {
-                FileHistory.shared.record("Move to Trash of “\(node.name)”", undo: [.restore(inTrash, to: node.url)])
+                FileHistory.shared.record("Move to Trash of “\(node.name)”", undo: [.restore(inTrash, to: url)])
             }
             didTrash(node)
         } catch {
@@ -185,9 +213,10 @@ final class StorageModel {
 
     /// Removes a node from the tree after it's been trashed, so totals stay honest without a rescan.
     private func didTrash(_ node: SizeNode) {
+        // Before it's detached: the path comes from its parents.
+        let removed = node.path
         node.detachFromParent()
         if selection == node.id { selection = nil }
-        let removed = node.path
         result = result.map {
             ScanResult(root: $0.root,
                        largestFiles: $0.largestFiles.filter { $0.path != removed && !$0.path.hasPrefix(removed + "/") },
@@ -197,7 +226,7 @@ final class StorageModel {
         // SizeNode isn't observable; reassigning focus redraws views reading the mutated tree.
         let current = focus
         focus = current
-        if let root = result?.root { FolderSizeStore.shared.absorb(root) }
+        if let root = result?.root { FolderSizeStore.shared.absorb(root, eventID: scanEventID, finishedAt: scanFinishedAt) }
         refreshVolume()
     }
 }

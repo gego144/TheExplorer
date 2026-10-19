@@ -160,6 +160,23 @@ enum FileOpener {
         ruleApp(for: url) ?? NSWorkspace.shared.urlForApplication(toOpen: url)
     }
 
+    /// One file per extension (and folders apart from files): which apps open a file goes by
+    /// its type, so asking about each of thousands of selected files would repeat the same
+    /// Launch Services lookups. Files without an extension are typed by their contents, so a
+    /// few of those are kept.
+    static func oneOfEachKind(_ urls: [URL]) -> [URL] {
+        var seen = Set<String>()
+        var bare = 0
+        return urls.filter { url in
+            let ext = url.pathExtension.lowercased()
+            if ext.isEmpty && !url.hasDirectoryPath {
+                bare += 1
+                return bare <= 8
+            }
+            return seen.insert((url.hasDirectoryPath ? "/" : "") + ext).inserted
+        }
+    }
+
     /// Apps that can open every one of `urls`, by name, one copy of each.
     static func apps(for urls: [URL]) -> [URL] {
         var common: [String: URL]?

@@ -2,7 +2,9 @@ import SwiftUI
 
 struct SidebarView: View {
     let model: BrowserModel
-    @State private var volumes: [URL] = SidebarView.mountedVolumes()
+    /// Read when the sidebar appears and when disks come and go. Not in the property's
+    /// initializer: that runs every time the window redraws and makes a new SidebarView.
+    @State private var volumes: [(url: URL, name: String)] = []
     @State private var pinTargeted = false
     @Environment(\.openTab) private var openTab
 
@@ -45,8 +47,9 @@ struct SidebarView: View {
                 }
 
                 caption("Drives")
-                ForEach(volumes, id: \.self) { url in
-                    SidebarRow(title: FileManager.default.displayName(atPath: url.path),
+                ForEach(volumes, id: \.url) { volume in
+                    let url = volume.url
+                    SidebarRow(title: volume.name,
                                systemImage: url.isRoot ? "internaldrive" : "externaldrive",
                                isSelected: isShowing(url), dropURL: url, model: model,
                                trailing: url.isRoot ? nil : AnyView(EjectButton(url: url))) {
@@ -59,12 +62,17 @@ struct SidebarView: View {
         }
         .scrollContentBackground(.hidden)
         .background(Theme.background)
+        .onAppear { if volumes.isEmpty { readVolumes() } }
         .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didMountNotification)) { _ in
-            volumes = Self.mountedVolumes()
+            readVolumes()
         }
         .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didUnmountNotification)) { _ in
-            volumes = Self.mountedVolumes()
+            readVolumes()
         }
+    }
+
+    private func readVolumes() {
+        volumes = Self.mountedVolumes().map { ($0, FileManager.default.displayName(atPath: $0.path)) }
     }
 
     private func caption(_ title: String) -> some View {
@@ -220,9 +228,9 @@ private struct PinnedRow: View {
     private var favorites: FavoritesStore { .shared }
 
     var body: some View {
-        let exists = favorite.exists
+        let exists = favorites.exists(favorite)
         let isCurrent = !model.isSearching && model.destination == .folder && model.currentURL.path == favorite.path
-        SidebarRow(title: favorite.name, dotColor: Theme.paletteColor(for: favorite.path), isSelected: isCurrent,
+        SidebarRow(title: favorites.name(of: favorite), dotColor: Theme.paletteColor(for: favorite.path), isSelected: isCurrent,
                    dimmed: !exists, dropURL: favorite.isDirectory && exists ? favorite.url : nil, model: model) {
             model.openFavorite(favorite.path)
         }

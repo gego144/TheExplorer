@@ -163,9 +163,36 @@ final class BrowserModel: Identifiable {
     /// Counts the folder as visited once you've stayed in it (see FolderVisits).
     @ObservationIgnored private var visitTask: Task<Void, Never>?
     /// The git repository the folder is in, if any; rows show their status from it.
-    private(set) var git: GitRepository?
+    private(set) var git: GitRepository? {
+        didSet {
+            guard oldValue !== git else { return }
+            oldValue?.setShown(by: self, false)
+            git?.setShown(by: self, isShown)
+        }
+    }
+    /// Whether the pane is on screen (see Workspace). Hidden panes don't reload when their
+    /// folder changes, which in a busy folder (Downloads mid-download, a build folder) can be
+    /// many times a second; they reload once when shown again.
+    @ObservationIgnored var isShown = true {
+        didSet {
+            guard isShown != oldValue else { return }
+            git?.setShown(by: self, isShown)
+            recents.isPaused = !isShown
+            newFiles.isPaused = !isShown
+            if isShown && missedChange {
+                missedChange = false
+                reload(keepSelection: true)
+            } else if started {
+                showSizes()
+            }
+        }
+    }
+    @ObservationIgnored private var missedChange = false
     @ObservationIgnored private var gitTask: Task<Void, Never>?
-    @ObservationIgnored private lazy var watcher = DirectoryWatcher { [weak self] in self?.reload(keepSelection: true) }
+    @ObservationIgnored private lazy var watcher = DirectoryWatcher { [weak self] in
+        guard let self else { return }
+        if self.isShown { self.reload(keepSelection: true) } else { self.missedChange = true }
+    }
     @ObservationIgnored private var sizeObserver: NSObjectProtocol?
 
     init(url: URL? = nil) {
@@ -272,8 +299,13 @@ final class BrowserModel: Identifiable {
                 measure += contents.filter(\.isFolder).map(\.path)
             }
             self.rebuildRows()
-            FolderSizeStore.shared.request(measure)
+            if !measure.isEmpty { self.showSizes() }
         }
+    }
+
+    /// Tells the size store which folders this list shows (none while it's hidden).
+    private func showSizes() {
+        FolderSizeStore.shared.show(isShown ? listedItems.filter(\.isFolder).map(\.path) : [], by: self)
     }
 
     /// Everything listed: the folder's items plus the contents of expanded folders.
@@ -528,7 +560,7 @@ final class BrowserModel: Identifiable {
                 } else if keepSelection {
                     self.selection = previousSelection.intersection(Set(self.listedItems.map(\.url)))
                 }
-                FolderSizeStore.shared.request(items.filter(\.isFolder).map(\.path))
+                self.showSizes()
                 // Refresh expanded folders too; drop the ones that are gone.
                 let present = Set(items.map(\.url))
                 self.expanded = self.expanded.filter { folder in

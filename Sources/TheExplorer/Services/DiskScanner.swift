@@ -1,26 +1,44 @@
 import Darwin
 import Foundation
 
-/// A node in a disk-usage tree. Built off the main thread, then treated as read-only.
+/// A node in a disk-usage tree. Built off the main thread, then only changed on the main thread.
+///
+/// A home folder scan is hundreds of thousands of folders, so nodes are kept small: a node holds
+/// its name, not its path (that comes from its parents), and a folder's own files are one
+/// "N files" node until the folder is opened (see DiskScanner.listFiles), rather than a node
+/// for each of its largest files in every folder of the tree. That took a home scan from about
+/// a gigabyte to a tenth of that.
 final class SizeNode: Identifiable, @unchecked Sendable {
     enum Kind { case folder, file, otherFiles }
 
     let name: String
-    let path: String
+    /// Only the scan's root (and folders scanned on their own) keep a path.
+    private let rootPath: String?
     let kind: Kind
     fileprivate(set) var size: Int64 = 0
     fileprivate(set) var fileCount: Int = 0
     fileprivate(set) var children: [SizeNode] = []
     fileprivate(set) var isReadable = true
+    /// Whether the folder's own files are listed, or still one node for all of them.
+    fileprivate(set) var filesListed = false
     fileprivate(set) weak var parent: SizeNode?
 
     var id: ObjectIdentifier { ObjectIdentifier(self) }
     var url: URL { URL(fileURLWithPath: path) }
     var isFolder: Bool { kind == .folder }
 
-    init(name: String, path: String, kind: Kind, size: Int64 = 0, fileCount: Int = 0) {
+    /// Built from the parents; "other files" nodes share their folder's.
+    var path: String {
+        if let rootPath { return rootPath }
+        guard let parent else { return name }
+        let base = parent.path
+        if kind == .otherFiles { return base }
+        return base == "/" ? "/" + name : base + "/" + name
+    }
+
+    init(name: String, path: String? = nil, kind: Kind, size: Int64 = 0, fileCount: Int = 0) {
         self.name = name
-        self.path = path
+        rootPath = path
         self.kind = kind
         self.size = size
         self.fileCount = fileCount
@@ -39,12 +57,17 @@ final class SizeNode: Identifiable, @unchecked Sendable {
         self.parent = nil
     }
 
-    /// Walks every folder in the tree (pre-order).
-    func forEachFolder(_ body: (SizeNode) -> Void) {
+    /// Walks the folders in the tree (pre-order) with their paths and depth below this one,
+    /// going into a folder only when `descend` says so.
+    func forEachFolder(path: String? = nil, depth: Int = 0, descend: (SizeNode, Int) -> Bool = { _, _ in true },
+                       _ body: (SizeNode, String, Int) -> Void) {
         guard kind == .folder else { return }
-        body(self)
+        let path = path ?? self.path
+        body(self, path, depth)
+        guard descend(self, depth) else { return }
         for child in children where child.kind == .folder {
-            child.forEachFolder(body)
+            child.forEachFolder(path: path == "/" ? "/" + child.name : path + "/" + child.name, depth: depth + 1,
+                                descend: descend, body)
         }
     }
 }
@@ -95,11 +118,22 @@ enum DiskScanner {
     /// Paths never descended into: virtual filesystems and automount points that can hang.
     static let excludedPaths: Set<String> = ["/dev", "/net", "/home", "/Volumes", "/System/Volumes", "/private/var/vm"]
 
+    /// Other apps' data. Without Full Disk Access, macOS asks before each app's container is
+    /// read, and the read waits for an answer, so a scan would stop there behind a prompt
+    /// nobody asked for. Without it they're skipped and counted as unreadable.
+    static func protectedPaths() -> Set<String> {
+        guard !StorageModel.checkFullDiskAccess() else { return [] }
+        let library = URL.home.path + "/Library"
+        return [library + "/Containers", library + "/Group Containers"]
+    }
+
     /// Scans `root`, fanning out across its top-level folders in parallel.
     static func scan(root: URL, progress: ScanProgress) async throws -> ScanResult {
         let start = Date()
         let rootPath = root.standardizedFileURL.path
         let rootNode = SizeNode(name: displayName(for: rootPath), path: rootPath, kind: .folder)
+        rootNode.filesListed = true
+        let skipped = protectedPaths()
 
         let entries = (try? FileManager.default.contentsOfDirectory(atPath: rootPath)) ?? []
         var folderPaths: [String] = []
@@ -108,7 +142,7 @@ enum DiskScanner {
 
         for name in entries {
             let path = rootPath == "/" ? "/" + name : rootPath + "/" + name
-            if excludedPaths.contains(path) { continue }
+            if excludedPaths.contains(path) || skipped.contains(path) { continue }
             var st = stat()
             guard lstat(path, &st) == 0 else { continue }
             if (st.st_mode & S_IFMT) == S_IFDIR {
@@ -128,7 +162,7 @@ enum DiskScanner {
             let width = max(4, ProcessInfo.processInfo.activeProcessorCount)
             func launchNext() {
                 guard let path = pending.popFirst() else { return }
-                group.addTask { try scanSubtree(path: path, progress: progress) }
+                group.addTask { try scanSubtree(path: path, skipping: skipped, progress: progress) }
             }
             for _ in 0..<width { launchNext() }
             while let result = try await group.next() {
@@ -155,13 +189,54 @@ enum DiskScanner {
         )
     }
 
+    /// A folder's own files, and its subfolders (to add up from their sizes).
+    struct ShallowSize: Sendable {
+        let path: String
+        let bytes: Int64
+        let files: Int
+        let folders: [String]
+        let complete: Bool
+    }
+
+    static func shallowSize(path: String) -> ShallowSize? {
+        guard let dir = opendir(path) else { return nil }
+        defer { closedir(dir) }
+        let skipped = protectedPaths()
+        var bytes: Int64 = 0
+        var files = 0
+        var folders: [String] = []
+        var complete = true
+        while let entry = readdir(dir) {
+            let name = withUnsafeBytes(of: entry.pointee.d_name) { raw in
+                String(decoding: raw.prefix(Int(entry.pointee.d_namlen)), as: UTF8.self)
+            }
+            if name == "." || name == ".." { continue }
+            let child = path == "/" ? "/" + name : path + "/" + name
+            var st = stat()
+            guard lstat(child, &st) == 0 else { continue }
+            if (st.st_mode & S_IFMT) == S_IFDIR {
+                if excludedPaths.contains(child) { continue }
+                // Skipped the way a walk would skip them.
+                if skipped.contains(child) {
+                    complete = false
+                    continue
+                }
+                folders.append(child)
+            } else {
+                bytes += Int64(st.st_blocks) * 512
+                files += 1
+            }
+        }
+        return ShallowSize(path: path, bytes: bytes, files: files, folders: folders, complete: complete)
+    }
+
     /// Total allocated size and file count of a folder, without building a tree.
     static func folderSize(path: String) -> (bytes: Int64, files: Int, complete: Bool)? {
         var bytes: Int64 = 0
         var files = 0
         var complete = true
         var seenInodes = Set<HardLinkKey>()
-        let ok = walk(path: path) { event in
+        let ok = walk(path: path, skipping: protectedPaths()) { event in
             switch event {
             case .file(let st, _):
                 if st.st_nlink > 1, !seenInodes.insert(HardLinkKey(st)).inserted { return true }
@@ -187,10 +262,12 @@ enum DiskScanner {
 
     private struct Frame {
         let node: SizeNode
-        var files: FileCollector
+        /// The folder's own files, which become one node until it's opened.
+        var files = 0
+        var bytes: Int64 = 0
     }
 
-    private static func scanSubtree(path: String, progress: ScanProgress) throws -> SubtreeResult {
+    private static func scanSubtree(path: String, skipping skipped: Set<String>, progress: ScanProgress) throws -> SubtreeResult {
         var stack: [Frame] = []
         var top: SizeNode?
         var largest = FileCollector(limit: largestFileCount)
@@ -199,22 +276,28 @@ enum DiskScanner {
         var pendingFiles = 0
         var pendingBytes: Int64 = 0
 
-        let finished = walk(path: path) { event in
+        let finished = walk(path: path, skipping: skipped) { event in
             switch event {
             case .enterFolder(let folderPath):
-                let node = SizeNode(name: (folderPath as NSString).lastPathComponent, path: folderPath, kind: .folder)
+                let node: SizeNode
                 if let parent = stack.last?.node {
+                    node = SizeNode(name: name(of: folderPath), kind: .folder)
                     node.parent = parent
                     parent.children.append(node)
                 } else {
+                    node = SizeNode(name: name(of: folderPath), path: folderPath, kind: .folder)
                     top = node
                 }
-                stack.append(Frame(node: node, files: FileCollector(limit: filesPerFolder)))
+                stack.append(Frame(node: node))
 
             case .exitFolder:
                 guard let frame = stack.popLast() else { break }
                 let node = frame.node
-                attachFiles(frame.files, to: node)
+                if frame.files > 0 {
+                    let summary = SizeNode(name: filesTitle(frame.files), kind: .otherFiles, size: frame.bytes, fileCount: frame.files)
+                    summary.parent = node
+                    node.children.append(summary)
+                }
                 node.children.sort { $0.size > $1.size }
                 if let parent = stack.last?.node {
                     parent.size += node.size
@@ -230,21 +313,25 @@ enum DiskScanner {
                 guard !stack.isEmpty else { break }
                 stack[stack.count - 1].node.size += size
                 stack[stack.count - 1].node.fileCount += 1
-                stack[stack.count - 1].files.add(size: size, path: pathProvider)
+                stack[stack.count - 1].files += 1
+                stack[stack.count - 1].bytes += size
                 largest.add(size: size, path: pathProvider)
                 pendingFiles += 1
                 pendingBytes += size
 
             case .unreadable(let folderPath):
                 unreadable += 1
-                let node = SizeNode(name: (folderPath as NSString).lastPathComponent, path: folderPath, kind: .folder)
-                node.isReadable = false
+                let node: SizeNode
                 if let parent = stack.last?.node {
+                    node = SizeNode(name: name(of: folderPath), kind: .folder)
                     node.parent = parent
                     parent.children.append(node)
                 } else {
+                    node = SizeNode(name: name(of: folderPath), path: folderPath, kind: .folder)
                     top = node
                 }
+                node.isReadable = false
+                node.filesListed = true
             }
             return !Task.isCancelled
         }
@@ -256,15 +343,82 @@ enum DiskScanner {
     private static func attachFiles(_ collector: FileCollector, to node: SizeNode) {
         let (files, otherCount, otherSize) = collector.finalized()
         for file in files {
-            let child = SizeNode(name: (file.path as NSString).lastPathComponent, path: file.path, kind: .file, size: file.size, fileCount: 1)
+            let child = SizeNode(name: name(of: file.path), kind: .file, size: file.size, fileCount: 1)
             child.parent = node
             node.children.append(child)
         }
         if otherCount > 0 {
-            let other = SizeNode(name: "\(otherCount.formatted()) smaller files", path: node.path, kind: .otherFiles, size: otherSize, fileCount: otherCount)
+            let other = SizeNode(name: "\(otherCount.formatted()) smaller files", kind: .otherFiles, size: otherSize, fileCount: otherCount)
             other.parent = node
             node.children.append(other)
         }
+    }
+
+    /// The last path component as a native string: names of 15 bytes or less then take no
+    /// memory of their own, where NSString's lastPathComponent keeps an object per name.
+    private static func name(of path: String) -> String {
+        guard let slash = path.lastIndex(of: "/"), path.index(after: slash) < path.endIndex else { return path }
+        return String(path[path.index(after: slash)...])
+    }
+
+    private static func filesTitle(_ count: Int) -> String {
+        count == 1 ? "1 file" : "\(count.formatted()) files"
+    }
+
+    // MARK: - Files, when a folder is opened
+
+    /// A folder's own files, largest first: read when the folder is opened in Storage (a
+    /// listing, not a scan), since the tree only counts them.
+    static func listFiles(in path: String) -> [(name: String, size: Int64)]? {
+        guard let dir = opendir(path) else { return nil }
+        defer { closedir(dir) }
+        var files: [(name: String, size: Int64)] = []
+        while let entry = readdir(dir) {
+            let name = withUnsafeBytes(of: entry.pointee.d_name) { raw in
+                String(decoding: raw.prefix(Int(entry.pointee.d_namlen)), as: UTF8.self)
+            }
+            if name == "." || name == ".." { continue }
+            var st = stat()
+            guard lstat(path == "/" ? "/" + name : path + "/" + name, &st) == 0, (st.st_mode & S_IFMT) != S_IFDIR else { continue }
+            files.append((name, Int64(st.st_blocks) * 512))
+        }
+        files.sort { $0.size > $1.size }
+        return files
+    }
+
+    /// Swaps a folder's "N files" node for its largest files and one node for the rest. If
+    /// the files changed since the scan, the folder's totals (and its parents') follow the
+    /// listing.
+    static func attachListedFiles(_ files: [(name: String, size: Int64)], to node: SizeNode) {
+        guard !node.filesListed else { return }
+        node.filesListed = true
+        let summary = node.children.firstIndex(where: { $0.kind == .otherFiles }).map { node.children.remove(at: $0) }
+        var listedSize: Int64 = 0
+        for (index, file) in files.enumerated() {
+            listedSize += file.size
+            guard index < filesPerFolder else { continue }
+            let child = SizeNode(name: file.name, kind: .file, size: file.size, fileCount: 1)
+            child.parent = node
+            node.children.append(child)
+        }
+        if files.count > filesPerFolder {
+            let rest = files.dropFirst(filesPerFolder)
+            let other = SizeNode(name: "\(rest.count.formatted()) smaller files", kind: .otherFiles,
+                                 size: rest.reduce(0) { $0 + $1.size }, fileCount: rest.count)
+            other.parent = node
+            node.children.append(other)
+        }
+        let sizeChange = listedSize - (summary?.size ?? 0)
+        let countChange = files.count - (summary?.fileCount ?? 0)
+        if sizeChange != 0 || countChange != 0 {
+            var ancestor: SizeNode? = node
+            while let current = ancestor {
+                current.size += sizeChange
+                current.fileCount += countChange
+                ancestor = current.parent
+            }
+        }
+        node.children.sort { $0.size > $1.size }
     }
 
     // MARK: - fts walking
@@ -279,7 +433,7 @@ enum DiskScanner {
 
     /// Walks `path` with fts. The visitor returns false to stop early. Returns false if stopped.
     @discardableResult
-    private static func walk(path: String, visitor: (WalkEvent) -> Bool) -> Bool {
+    private static func walk(path: String, skipping skipped: Set<String> = [], visitor: (WalkEvent) -> Bool) -> Bool {
         guard let cPath = strdup(path) else { return false }
         defer { free(cPath) }
         var paths: [UnsafeMutablePointer<CChar>?] = [cPath, nil]
@@ -297,6 +451,12 @@ enum DiskScanner {
                 let folderPath = String(cString: ent.fts_path)
                 if excludedPaths.contains(folderPath) {
                     fts_set(fts, entry, FTS_SKIP)
+                    continue
+                }
+                if skipped.contains(folderPath) {
+                    fts_set(fts, entry, FTS_SKIP)
+                    keepGoing = visitor(.unreadable(folderPath))
+                    if !keepGoing { return false }
                     continue
                 }
                 openFolders.append(level)

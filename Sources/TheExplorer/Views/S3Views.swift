@@ -574,6 +574,9 @@ struct ConnectionEditor: View {
     let onDone: () -> Void
     @State private var testResult: (ok: Bool, text: String)?
     @State private var testing = false
+    /// Whether the Keychain already has this connection's secret key. Read once, off the main
+    /// thread, rather than on every keystroke.
+    @State private var hasSavedSecret = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 13) {
@@ -634,6 +637,11 @@ struct ConnectionEditor: View {
         .frame(width: 500)
         .background(Theme.background)
         .preferredColorScheme(Theme.colorScheme)
+        .task {
+            guard !draft.isNew else { return }
+            let account = draft.connection.id.uuidString
+            hasSavedSecret = await Task.detached { Keychain.get(account: account) != nil }.value
+        }
     }
 
     private var isComplete: Bool {
@@ -641,7 +649,7 @@ struct ConnectionEditor: View {
         guard !built.name.isEmpty else { return false }
         if draft.usesProfile { return !draft.profile.isEmpty }
         return !draft.accessKeyID.trimmingCharacters(in: .whitespaces).isEmpty
-            && (!draft.secret.isEmpty || (!draft.isNew && Keychain.get(account: built.id.uuidString) != nil))
+            && (!draft.secret.isEmpty || (!draft.isNew && hasSavedSecret))
     }
 
     /// Lists buckets (or the chosen bucket) with what's in the form, without saving anything.

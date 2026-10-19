@@ -5,14 +5,16 @@ import SwiftUI
 struct ActionsMenu: View {
     let urls: Set<URL>
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.listedItems) private var listed
 
     var body: some View {
-        let ordered = urls.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
-        let items = ordered.compactMap(FileItem.init(url:))
+        let items = urls.compactMap { listed?.item($0) ?? FileItem(url: $0) }
         let actions = ActionsStore.shared.applicable(to: items)
         Menu("Actions") {
             ForEach(actions) { action in
-                Button(Self.title(action, items: items)) { ActionRunner.shared.run(action, on: ordered) }
+                Button(Self.title(action, items: items)) {
+                    ActionRunner.shared.run(action, on: urls.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending })
+                }
             }
             if !actions.isEmpty { Divider() }
             Button(ActionsStore.shared.actions.isEmpty ? "Add an Action…" : "Edit Actions…") {

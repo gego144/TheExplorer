@@ -22,6 +22,18 @@ struct ListRow: Identifiable, Sendable {
     var id: URL { item.url }
 }
 
+/// A list's items by URL, for menus that need to know about every selected item (thousands,
+/// after ⌘A). The lookup table is only built if something asks.
+final class ListedItems {
+    private let rows: [ListRow]
+    private lazy var byURL: [URL: FileItem] = Dictionary(rows.map { ($0.id, $0.item) }, uniquingKeysWith: { first, _ in first })
+
+    init(_ rows: [ListRow]) { self.rows = rows }
+
+    /// The listed item, or else what's on disk.
+    func item(_ url: URL) -> FileItem? { byURL[url] ?? FileItem(url: url) }
+}
+
 /// What an empty list says.
 struct EmptyState {
     var symbol: String
@@ -134,6 +146,7 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
                     // cursor itself. SwiftUI gives a list-wide drop target every drop, even over
                     // rows with their own, so folder rows never received theirs.
                     .coordinateSpace(.named(Self.listSpace))
+                    .onGeometryChange(for: CGPoint.self) { $0.frame(in: .global).origin } action: { multiDrag.listOrigin = $0 }
                     .onDrop(of: [.fileURL, .url], delegate: ListDropDelegate(
                         frames: rowFrames, folders: { url in rows.first { $0.id == url }?.item.isFolder == true },
                         canDropInto: onDropInto != nil, canDropOnBackground: onDropBackground != nil,
@@ -216,6 +229,7 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
             // character); never pull focus out of a text field you're typing in. In a split
             // tab, only the active pane's list takes it.
             if isActivePane && !NSApp.windows.contains(where: { $0.isVisible && $0.firstResponder is NSText }) { focused = true }
+            multiDrag.rowFrames = rowFrames
             multiDrag.install()
         }
         .onDisappear { multiDrag.uninstall() }
@@ -287,23 +301,23 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
             .equatable()
             .contentShape(.rect)
             .clickable()
+            // One gesture for both: the second click of a double-click also opens. A separate
+            // double-tap gesture would be one more recognizer on every row.
             .onTapGesture { click(row.id) }
             .simultaneousGesture(TapGesture(count: 2).onEnded {
                 onOpen([row.id], NSEvent.modifierFlags.contains(.command))
             })
             .draggable(row.item.url)
-            // Frames for drops (list coordinates) and for multi-item drags (window coordinates).
+            // Frames for drops and multi-item drags, in list coordinates, which stay put as the
+            // list scrolls.
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.listSpace)) } action: { rowFrames.frames[row.id] = $0 }
-            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { multiDrag.frames[row.id] = $0 }
-            .onDisappear {
-                rowFrames.frames[row.id] = nil
-                multiDrag.frames[row.id] = nil
-            }
+            .onDisappear { rowFrames.frames[row.id] = nil }
             #if DEBUG
             .debugRowFrame(row)
             #endif
             .contextMenu {
                 rowMenu(selection.contains(row.id) ? selection : [row.id])
+                    .environment(\.listedItems, ListedItems(rows))
             }
     }
 
@@ -432,9 +446,15 @@ private struct RowContent: View, Equatable {
     var body: some View {
         let item = row.item
         HStack(spacing: Column.spacing) {
-            disclosure
-                .padding(.leading, CGFloat(row.depth) * Self.indent)
-                .opacity(item.isFolder ? 1 : 0)
+            // Files only need the arrow's space, not a hidden arrow.
+            Group {
+                if item.isFolder {
+                    disclosure
+                } else {
+                    Color.clear.frame(width: Column.marker, height: 1)
+                }
+            }
+            .padding(.leading, CGFloat(row.depth) * Self.indent)
             HStack(spacing: 5) {
                 Text(item.name)
                     .font(.system(size: 12.5, weight: item.isFolder ? .semibold : .regular))
@@ -527,16 +547,19 @@ private struct RowContent: View, Equatable {
         let partial = measured.map { !$0.complete } ?? false
         HStack(spacing: 8) {
             if let size, maxSize > 0 {
-                HeatBar(fraction: Double(size) / Double(maxSize), height: 3, track: Theme.hoverFill, hidesTiny: true)
-                    .frame(width: 30)
+                HeatBar(fraction: Double(size) / Double(maxSize), height: 3, track: Theme.hoverFill, hidesTiny: true, width: 30)
             } else {
                 Color.clear.frame(width: 30, height: 3)
             }
             Group {
                 if let size {
-                    Text((partial ? "≥ " : "") + Format.bytes(size))
-                        .foregroundStyle(Theme.text)
-                        .help(partial ? "Some subfolders couldn't be read, so this is a minimum." : "")
+                    if partial {
+                        Text("≥ " + Format.bytes(size))
+                            .foregroundStyle(Theme.text)
+                            .help("Some subfolders couldn't be read, so this is a minimum.")
+                    } else {
+                        Text(Format.bytes(size)).foregroundStyle(Theme.text)
+                    }
                 } else if row.liveFolderSize && FolderSizeStore.shared.isCalculating(row.item.path) {
                     Text("···").foregroundStyle(Theme.textTertiary)
                         .help("Calculating…")
@@ -566,7 +589,8 @@ private struct HeaderCellStyle: ButtonStyle {
 }
 
 /// Folder rows accept drops (items go inside); other rows don't.
-/// Row frames in the list's coordinate space. Not observed: they change on every scroll.
+/// Row frames in the list's coordinate space (which scrolls with the rows). Not observed, so
+/// recording them never redraws anything.
 final class RowFrames {
     var frames: [URL: CGRect] = [:]
 

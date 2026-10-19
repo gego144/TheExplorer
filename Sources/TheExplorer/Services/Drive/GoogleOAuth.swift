@@ -177,20 +177,30 @@ enum GoogleOAuth {
 /// Keeps an account's access token fresh, refreshing it (once, however many requests ask) a
 /// minute before it runs out.
 actor GoogleAuth {
-    private let client: GoogleClient
-    private let refreshToken: String
+    typealias Credentials = (client: GoogleClient, refreshToken: String)
+
+    /// Reads the client and the sign-in, from the Keychain, the first time a token is needed.
+    /// Keychain reads are round trips to securityd (and wait on any access prompt), so they
+    /// happen here on the actor, never on the main thread.
+    private let load: @Sendable () throws -> Credentials
+    private var credentials: Credentials?
     private var tokens: GoogleTokens?
     private var refreshing: Task<GoogleTokens, Error>?
 
+    init(credentials load: @escaping @Sendable () throws -> Credentials) {
+        self.load = load
+    }
+
     init(client: GoogleClient, refreshToken: String) {
-        self.client = client
-        self.refreshToken = refreshToken
+        self.init { (client, refreshToken) }
     }
 
     func token(forceRefresh: Bool = false) async throws -> String {
         if !forceRefresh, let tokens, tokens.expires.timeIntervalSinceNow > 60 { return tokens.accessToken }
         if let refreshing { return try await refreshing.value.accessToken }
-        let task = Task { [client, refreshToken] in try await GoogleOAuth.refresh(refreshToken, client: client) }
+        let (client, refreshToken) = try credentials ?? load()
+        credentials = (client, refreshToken)
+        let task = Task { try await GoogleOAuth.refresh(refreshToken, client: client) }
         refreshing = task
         defer { refreshing = nil }
         let fresh = try await task.value

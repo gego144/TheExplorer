@@ -39,6 +39,20 @@ final class FavoritesStore {
     /// Demo pins (debug screenshots) are never written over your real ones.
     @ObservationIgnored private var isDemo = false
 
+    /// Names and whether each pin is still there, looked up at most every few seconds. Pinned
+    /// rows redraw on every navigation and search keystroke, and each check is a disk lookup.
+    @ObservationIgnored private var looks: [String: (name: String, exists: Bool, at: Date)] = [:]
+
+    private func look(_ favorite: Favorite) -> (name: String, exists: Bool) {
+        if let cached = looks[favorite.path], cached.at.timeIntervalSinceNow > -3 { return (cached.name, cached.exists) }
+        let fresh = (name: favorite.name, exists: favorite.exists)
+        looks[favorite.path] = (fresh.name, fresh.exists, Date())
+        return fresh
+    }
+
+    func name(of favorite: Favorite) -> String { look(favorite).name }
+    func exists(_ favorite: Favorite) -> Bool { look(favorite).exists }
+
     func contains(_ url: URL) -> Bool {
         favorites.contains { $0.path == url.path }
     }

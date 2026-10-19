@@ -6,7 +6,7 @@ Everything TheExplorer does and how to use it. For building and working on the c
 
 ## Real folder sizes
 
-Every folder's total size is calculated in the background and drawn as a bar, so the heavy folders stand out. Type chips (`DIR`, `SWIFT`, `PDF`, `ZIP`…) tell folders from files at a glance, and you can filter to just folders or just files. Click a folder's arrow (or press →) to expand it in place; double-click still opens it.
+Every folder's total size is calculated in the background and drawn as a bar, so the heavy folders stand out. Sizes are kept between launches and stay put until something inside the folder changes (FSEvents says what), so a big folder is only walked again when it needs to be, and at most every few minutes if it never stops changing. Type chips (`DIR`, `SWIFT`, `PDF`, `ZIP`…) tell folders from files at a glance, and you can filter to just folders or just files. Click a folder's arrow (or press →) to expand it in place; double-click still opens it.
 
 <img src="docs/screenshots/folder-sizes.png" alt="A folder listing with size bars, type chips and the inspector" width="100%">
 
@@ -143,7 +143,7 @@ Commands run in zsh with your login profile, so Homebrew tools like `ffmpeg` are
 ## Recents and New
 
 - **Recents** works like Finder's: every document you've opened, newest first, grouped into Today, Yesterday, Previous 7 Days, Previous 30 Days and then by month.
-- **New** shows the newest files and folders in your home folder by date created, modified or added, from the last 24 hours to 90 days. It updates live, can hide clutter, and keeps loading as you scroll.
+- **New** shows the newest files and folders in your home folder by date created, modified or added, from the last 24 hours to 90 days. It updates live, can hide clutter, and keeps loading as you scroll. With clutter hidden it reads TheExplorer's own index, which leaves out the same things search does (Library, hidden and dependency folders, ignored folders), so it's instant and light; showing clutter asks Spotlight, which is slower and can use a lot of memory for long ranges.
 
 ## Settings
 

@@ -25,6 +25,9 @@ final class SpotlightQuery: @unchecked Sendable {
     private let cache = Cache()
     private var lastDelivery: CFTimeInterval = 0
     private var deferredDelivery = false
+    private var isPaused = false
+    /// Results (or a new handler) came in while paused.
+    private var missedDelivery = false
 
     /// Once gathering is done, live updates (files changing anywhere in scope, often thousands
     /// a second in dependency folders) are coalesced to at most one handler run per interval.
@@ -59,6 +62,8 @@ final class SpotlightQuery: @unchecked Sendable {
 
     /// Swaps the handler (e.g. after a filter change) and runs it over the current results.
     func setHandler(_ handler: @escaping Handler) {
+        // You asked for this (a filter, the next page), so it's not background work.
+        queue.qualityOfService = .userInitiated
         queue.addOperation { [self] in
             self.handler = handler
             deliver()
@@ -67,6 +72,21 @@ final class SpotlightQuery: @unchecked Sendable {
 
     deinit {
         observers.forEach(NotificationCenter.default.removeObserver)
+    }
+
+    /// Holds live updates while nobody's looking (the window is hidden or covered); resuming
+    /// delivers what changed meanwhile in one go.
+    func setPaused(_ paused: Bool) {
+        queue.addOperation { [self] in
+            guard paused != isPaused else { return }
+            isPaused = paused
+            if paused {
+                query.disableUpdates()
+            } else {
+                query.enableUpdates()
+                if missedDelivery { deliver() }
+            }
+        }
     }
 
     func stop() {
@@ -80,6 +100,8 @@ final class SpotlightQuery: @unchecked Sendable {
     }
 
     private func resultsChanged() {
+        // Once the first results are in, keeping them current is background work.
+        if !query.isGathering && queue.qualityOfService != .utility { queue.qualityOfService = .utility }
         let elapsed = CACurrentMediaTime() - lastDelivery
         if query.isGathering || elapsed >= Self.liveUpdateInterval {
             deliver()
@@ -97,6 +119,11 @@ final class SpotlightQuery: @unchecked Sendable {
 
     private func deliver() {
         guard let handler else { return }
+        guard !isPaused else {
+            missedDelivery = true
+            return
+        }
+        missedDelivery = false
         query.disableUpdates()
         defer {
             query.enableUpdates()

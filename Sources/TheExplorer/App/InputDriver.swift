@@ -170,6 +170,13 @@ enum InputDriver {
         var gaps: [Double] = []
         /// Longest time spent stuck at the bottom before more rows arrived (a page load).
         var longestWait: Double = 0
+        /// CPU time the whole app used while scrolling (all threads), and the time that took.
+        var cpu: Double = 0
+        /// The part of `cpu` spent in the kernel.
+        var system: Double = 0
+        /// Instructions retired: unlike CPU time, the same whichever kind of core ran them.
+        var instructions: UInt64 = 0
+        var elapsed: Double = 0
 
         var description: String {
             let sorted = gaps.sorted()
@@ -177,7 +184,7 @@ enum InputDriver {
             let p95 = sorted.isEmpty ? 0 : sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))]
             // Steps are paced at ~16ms; anything past 33ms dropped at least one frame.
             let hitches = gaps.filter { $0 > 0.033 }.count
-            return "scrolled \(Int(scrolled))pt in \(frames) steps · frame p95 \(ms(p95)) max \(ms(sorted.last ?? 0)) · hitches(>33ms) \(hitches) · longest wait at bottom \(ms(longestWait))"
+            return "scrolled \(Int(scrolled))pt in \(frames) steps · frame p95 \(ms(p95)) max \(ms(sorted.last ?? 0)) · hitches(>33ms) \(hitches) · longest wait at bottom \(ms(longestWait)) · cpu \(ms(cpu)) over \(ms(elapsed)) (\(elapsed > 0 ? Int((cpu / elapsed * 100).rounded()) : 0)%, kernel \(ms(system))) · \(instructions / 1_000_000)M instructions"
         }
     }
 
@@ -192,6 +199,10 @@ enum InputDriver {
         var stuck = 0
         var stuckSince: CFTimeInterval?
         var last = CACurrentMediaTime()
+        let began = last
+        let cpuBefore = processCPU()
+        let splitBefore = processCPUSplit()
+        let instructionsBefore = processInstructions()
         while report.scrolled < target && stuck < 150 {
             let before = scrollView.contentView.bounds.origin.y
             if let cgEvent = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1,
@@ -215,7 +226,33 @@ enum InputDriver {
                 report.scrolled += moved
             }
         }
+        report.cpu = processCPU() - cpuBefore
+        let splitAfter = processCPUSplit()
+        report.system = splitAfter.system - splitBefore.system
+        report.instructions = processInstructions() - instructionsBefore
+        report.elapsed = CACurrentMediaTime() - began
         return report
+    }
+
+    /// CPU seconds the process has used, user and system, all threads.
+    static func processCPU() -> Double {
+        let (user, system) = processCPUSplit()
+        return user + system
+    }
+
+    static func processInstructions() -> UInt64 {
+        var info = rusage_info_v4()
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(getpid(), RUSAGE_INFO_V4, $0) }
+        }
+        return result == 0 ? info.ri_instructions : 0
+    }
+
+    static func processCPUSplit() -> (user: Double, system: Double) {
+        var usage = rusage()
+        getrusage(RUSAGE_SELF, &usage)
+        func seconds(_ time: timeval) -> Double { Double(time.tv_sec) + Double(time.tv_usec) / 1_000_000 }
+        return (seconds(usage.ru_utime), seconds(usage.ru_stime))
     }
 
     /// The largest scroll view in the window: the file list.

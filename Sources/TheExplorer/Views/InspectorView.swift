@@ -83,6 +83,10 @@ private struct ItemDetails: View {
     let isCurrentFolder: Bool
     /// Dimensions, duration, codecs… read from the file once it's selected.
     @State private var media: MediaInfo?
+    /// Read once per item rather than on every redraw (sizes arriving redraw this often).
+    @State private var lastOpened: Date?
+    /// Registers the folder's size as on screen, so it's kept current while it's shown.
+    @State private var sizeWatch = SizeWatch()
 
     private var sizes: FolderSizeStore { .shared }
     private var favorites: FavoritesStore { .shared }
@@ -181,9 +185,11 @@ private struct ItemDetails: View {
             }
         }
         .onAppear {
-            if item.isFolder { sizes.request([item.path]) }
+            if item.isFolder { sizes.show([item.path], by: sizeWatch) }
         }
+        .onDisappear { sizes.show([], by: sizeWatch) }
         .task(id: item.url) {
+            lastOpened = try? item.url.resourceValues(forKeys: [.contentAccessDateKey]).contentAccessDate
             guard !item.isFolder || item.isPackage else { return }
             media = await MediaInfoReader.read(item.url, type: item.contentType, modified: item.modified)
         }
@@ -229,11 +235,10 @@ private struct ItemDetails: View {
             }
         }
     }
-
-    private var lastOpened: Date? {
-        try? item.url.resourceValues(forKeys: [.contentAccessDateKey]).contentAccessDate
-    }
 }
+
+/// Stands for an inspector card with the size store, which follows what's on screen by owner.
+private final class SizeWatch {}
 
 private struct DetailRow: View {
     let label: String

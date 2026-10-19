@@ -68,8 +68,8 @@ struct DriveLocation: Hashable, Sendable {
 @Observable
 final class DriveStore {
     static let shared = DriveStore()
-    static let keychainService = "TheExplorer Google Drive"
-    private static let clientSecretAccount = "client-secret"
+    nonisolated static let keychainService = "TheExplorer Google Drive"
+    nonisolated private static let clientSecretAccount = "client-secret"
 
     private struct Saved: Codable {
         var clientID = ""
@@ -145,10 +145,24 @@ final class DriveStore {
         accounts.count == 1 ? "Google Drive" : account.email
     }
 
+    /// Whether an OAuth client is set up. Known without reading the Keychain, so views can ask.
+    var hasClient: Bool { !clientID.isEmpty }
+
+    /// The account's client. Its secrets are read from the Keychain on first use, off the main
+    /// thread; a missing one fails that first request.
     func client(for id: UUID) -> DriveClient? {
         if let client = clients[id] { return client }
-        guard account(id) != nil, let google = googleClient, let refresh = Self.secret(id.uuidString) else { return nil }
-        let client = DriveClient(auth: GoogleAuth(client: google, refreshToken: refresh))
+        guard account(id) != nil, hasClient else { return nil }
+        let clientID = clientID
+        let client = DriveClient(auth: GoogleAuth {
+            guard let secret = Self.secret(Self.clientSecretAccount) else {
+                throw DriveError(message: "Google Drive's client secret isn't in the Keychain. Set up the client again in Settings → Cloud.")
+            }
+            guard let refresh = Self.secret(id.uuidString) else {
+                throw DriveError(message: "This Google account isn't signed in. Sign in again in Settings → Cloud.")
+            }
+            return (GoogleClient(id: clientID, secret: secret), refresh)
+        })
         clients[id] = client
         return client
     }
@@ -180,10 +194,11 @@ final class DriveStore {
 
     /// Signs out: Google forgets the sign-in, and nothing in Drive is touched.
     func remove(_ account: DriveAccount) {
-        if let refresh = Self.secret(account.id.uuidString) {
-            Task.detached { await GoogleOAuth.revoke(refresh) }
+        let keychainAccount = account.id.uuidString
+        Task.detached {
+            if let refresh = Self.secret(keychainAccount) { await GoogleOAuth.revoke(refresh) }
+            Keychain.delete(account: keychainAccount, service: Self.keychainService)
         }
-        Keychain.delete(account: account.id.uuidString, service: Self.keychainService)
         accounts.removeAll { $0.id == account.id }
         clients[account.id] = nil
         usage[account.id] = nil
@@ -334,7 +349,7 @@ final class DriveStore {
 
     // MARK: Saving
 
-    private static func secret(_ account: String) -> String? {
+    nonisolated private static func secret(_ account: String) -> String? {
         #if DEBUG
         // Test runs bring their own sign-in rather than touching the Keychain.
         if let token = ProcessInfo.processInfo.environment["EXPLORER_DRIVE_TOKEN"] {

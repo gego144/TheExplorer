@@ -13,6 +13,35 @@ extension EnvironmentValues {
     @Entry var switchPane: (() -> Void)?
     /// The window, when its tab is split, for Copy and Move to Other Pane.
     @Entry var splitWorkspace: Workspace?
+    /// The items of the list a context menu was opened in, so the menu needn't read each
+    /// selected file from disk.
+    @Entry var listedItems: ListedItems?
+}
+
+/// The inspector, or nothing when there's nothing to show. Its own view, so selecting files
+/// (which decides whether there's anything) redraws only this, not the whole window.
+private struct InspectorColumn: View {
+    let model: BrowserModel
+
+    var body: some View {
+        if InspectorView.hasContent(model) {
+            InspectorView(model: model)
+                .frame(width: 272)
+                .padding([.vertical, .trailing], 10)
+                // Clear of the list's last column.
+                .padding(.leading, 14)
+        }
+    }
+}
+
+/// Keeps Quick Look on the selection. Its own view for the same reason as InspectorColumn.
+private struct SelectionFollower: View {
+    let model: BrowserModel
+
+    var body: some View {
+        Color.clear
+            .onChange(of: model.activeSelection) { model.followSelectionInPreview() }
+    }
 }
 
 /// A whole window: tab strip, command bar, sidebar, content, inspector and status bar.
@@ -36,12 +65,8 @@ struct WorkspaceView: View {
                 }
                 panes(model)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                if prefs.showInspector && InspectorView.hasContent(model) {
-                    InspectorView(model: model)
-                        .frame(width: 272)
-                        .padding([.vertical, .trailing], 10)
-                        // Clear of the list's last column.
-                        .padding(.leading, 14)
+                if prefs.showInspector {
+                    InspectorColumn(model: model)
                 }
             }
             StatusBar(model: model)
@@ -72,8 +97,8 @@ struct WorkspaceView: View {
         } message: { _ in
             Text("In “\(model.destination == .drive ? model.drive.location?.name ?? "" : FileManager.default.displayName(atPath: model.currentURL.path))”")
         }
-        .onChange(of: searchKey(model), initial: true) { runSearch(model) }
-        .onChange(of: model.activeSelection) { model.followSelectionInPreview() }
+        .background(SearchRunner(model: model))
+        .background(SelectionFollower(model: model))
         .focusedSceneValue(\.workspace, workspace)
     }
 
@@ -109,8 +134,16 @@ struct WorkspaceView: View {
         }
     }
 
-    @ViewBuilder
     private func content(_ model: BrowserModel) -> some View {
+        PaneContent(model: model)
+    }
+}
+
+/// What a pane shows. Its own view, so typing a search redraws the pane rather than the window.
+private struct PaneContent: View {
+    let model: BrowserModel
+
+    var body: some View {
         if model.isSearching {
             SearchResultsView(model: model)
         } else {
@@ -124,12 +157,22 @@ struct WorkspaceView: View {
             }
         }
     }
+}
 
-    private func searchKey(_ model: BrowserModel) -> String {
+/// Runs the search as you type. Its own view, so each keystroke doesn't redraw the window.
+private struct SearchRunner: View {
+    let model: BrowserModel
+
+    var body: some View {
+        Color.clear
+            .onChange(of: searchKey, initial: true) { run() }
+    }
+
+    private var searchKey: String {
         "\(ObjectIdentifier(model).hashValue)|\(model.searchText)|\(model.searchScope)|\(model.currentURL.path)|\(model.showHidden)"
     }
 
-    private func runSearch(_ model: BrowserModel) {
+    private func run() {
         if model.isSearching {
             model.search.run(text: model.searchText, scope: model.searchScope, folder: model.currentURL, includeHidden: model.showHidden)
         } else {

@@ -327,19 +327,28 @@ struct HeatBar: View {
     var track: Color = Theme.border
     /// Leaves out fills too small to read (in dense lists they'd just be dots).
     var hidesTiny = false
+    /// A known width skips measuring the space (a GeometryReader per bar), which adds up in
+    /// lists, where every row that scrolls in builds one.
+    var width: CGFloat?
 
     var body: some View {
-        GeometryReader { proxy in
-            ZStack(alignment: .leading) {
-                Capsule().fill(track)
-                if !(hidesTiny && fraction < 0.04) {
-                    Capsule()
-                        .fill(color ?? Theme.heatColor(fraction))
-                        .frame(width: max(fraction > 0 ? height : 0, proxy.size.width * min(1, fraction)))
-                }
+        if let width {
+            bar(width: width).frame(width: width, height: height)
+        } else {
+            GeometryReader { proxy in bar(width: proxy.size.width) }
+                .frame(height: height)
+        }
+    }
+
+    private func bar(width: CGFloat) -> some View {
+        ZStack(alignment: .leading) {
+            Capsule().fill(track)
+            if !(hidesTiny && fraction < 0.04) {
+                Capsule()
+                    .fill(color ?? Theme.heatColor(fraction))
+                    .frame(width: max(fraction > 0 ? height : 0, width * min(1, fraction)))
             }
         }
-        .frame(height: height)
     }
 }
 

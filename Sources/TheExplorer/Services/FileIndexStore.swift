@@ -17,7 +17,7 @@ enum FileIndexStore {
 
     private static let magic: UInt32 = 0x5854_4958 // "XIXT"
     /// Bumped whenever what gets indexed changes, so older saved indexes are rebuilt.
-    private static let version: UInt32 = 2
+    private static let version: UInt32 = 3
 
     static var defaultURL: URL {
         #if DEBUG
@@ -59,6 +59,8 @@ enum FileIndexStore {
         appendArray(storage.nameLength, to: &data)
         appendArray(storage.flags.map(\.rawValue), to: &data)
         appendArray(storage.modified, to: &data)
+        appendArray(storage.created, to: &data)
+        appendArray(storage.changed, to: &data)
         appendArray(storage.names, to: &data)
         append(UInt32(storage.roots.count), to: &data)
         appendArray(storage.roots, to: &data)
@@ -106,6 +108,8 @@ enum FileIndexStore {
               let nameLength = reader.readArray(UInt16.self, count: count),
               let flags = reader.readArray(UInt8.self, count: count),
               let modified = reader.readArray(Int32.self, count: count),
+              let created = reader.readArray(Int32.self, count: count),
+              let changed = reader.readArray(Int32.self, count: count),
               let names = reader.readArray(UInt8.self, count: nameBytes),
               let rootIndexCount = reader.read(UInt32.self).map(Int.init),
               let rootIndices = reader.readArray(Int32.self, count: rootIndexCount),
@@ -131,6 +135,8 @@ enum FileIndexStore {
         storage.nameLength = nameLength
         storage.flags = flags.map(FileIndex.Flags.init(rawValue:))
         storage.modified = modified
+        storage.created = created
+        storage.changed = changed
         storage.names = names
         storage.folded = folded
         storage.roots = rootIndices

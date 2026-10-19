@@ -21,10 +21,12 @@ struct WindowState: Codable, Hashable {
 @Observable
 final class Workspace {
     /// Each tab's first (left) pane, which stands for the tab.
-    private(set) var tabs: [BrowserModel]
-    private(set) var selectedIndex: Int
+    private(set) var tabs: [BrowserModel] { didSet { updateShown() } }
+    private(set) var selectedIndex: Int { didSet { updateShown() } }
     /// The second (right) pane of each split tab, by its first pane.
-    private var splits: [ObjectIdentifier: BrowserModel] = [:]
+    private var splits: [ObjectIdentifier: BrowserModel] = [:] { didSet { updateShown() } }
+    /// Whether any of the window is on screen: not minimized, on another Space, or covered.
+    var isWindowVisible = true { didSet { if isWindowVisible != oldValue { updateShown() } } }
     /// Split tabs whose second pane is the active one.
     private var secondActive: Set<ObjectIdentifier> = []
     /// Where split tabs' dividers were dragged to, as a fraction of the width (half otherwise).
@@ -70,7 +72,44 @@ final class Workspace {
 
     func start() {
         startPanes()
+        updateShown()
         Session.register(self)
+    }
+
+    @ObservationIgnored private var occlusionObserver: NSObjectProtocol?
+
+    /// Follows whether the window is on screen.
+    func observeOcclusion(of window: NSWindow?) {
+        if let occlusionObserver { NotificationCenter.default.removeObserver(occlusionObserver) }
+        occlusionObserver = nil
+        // Scripted runs' windows sit behind whatever you're doing, which would count as hidden.
+        guard !Session.isScripted else { return }
+        // A closed window's panes stop following their folders.
+        guard let window else {
+            isWindowVisible = false
+            return
+        }
+        // Until the window is on screen it says it isn't visible; the notification follows.
+        if window.isVisible { isWindowVisible = window.occlusionState.contains(.visible) }
+        occlusionObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main
+        ) { [weak self, weak window] _ in
+            MainActor.assumeIsolated {
+                guard let window else { return }
+                self?.isWindowVisible = window.occlusionState.contains(.visible)
+            }
+        }
+    }
+
+    /// Tells each pane whether it's on screen. Only those follow their folder (and repository)
+    /// as it changes; the others catch up once they're shown.
+    private func updateShown() {
+        let current = tabs.indices.contains(selectedIndex) ? tabs[selectedIndex] : nil
+        for tab in tabs {
+            let shown = isWindowVisible && tab === current
+            tab.isShown = shown
+            splits[ObjectIdentifier(tab)]?.isShown = shown
+        }
     }
 
     private func startPanes() {
@@ -168,6 +207,7 @@ final class Workspace {
         let first = currentTab
         let key = ObjectIdentifier(first)
         guard let second = splits[key] else { return }
+        pane.isShown = false
         splits[key] = nil
         secondActive.remove(key)
         fractions[key] = nil
@@ -277,6 +317,9 @@ final class Workspace {
     @discardableResult
     func close(_ tab: BrowserModel) -> Bool {
         guard tabs.count > 1, let index = tabs.firstIndex(where: { $0 === tab }) else { return false }
+        // Closed panes stop following their folders and repositories.
+        tab.isShown = false
+        secondPane(of: tab)?.isShown = false
         tabs.remove(at: index)
         splits[ObjectIdentifier(tab)] = nil
         secondActive.remove(ObjectIdentifier(tab))
@@ -289,6 +332,10 @@ final class Workspace {
     }
 
     func closeOthers(than tab: BrowserModel) {
+        for other in tabs where other !== tab {
+            other.isShown = false
+            secondPane(of: other)?.isShown = false
+        }
         tabs = tabs.filter { $0 === tab }
         splits = splits.filter { $0.key == ObjectIdentifier(tab) }
         secondActive = secondActive.filter { $0 == ObjectIdentifier(tab) }
@@ -348,7 +395,7 @@ enum Session {
     }
 
     /// Scripted debug runs start from a clean slate and leave nothing behind.
-    private static var isScripted: Bool {
+    static var isScripted: Bool {
         #if DEBUG
         ProcessInfo.processInfo.environment["EXPLORER_SCENES"] != nil
         #else

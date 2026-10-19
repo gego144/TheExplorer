@@ -181,14 +181,33 @@ final class GitRepository {
     @ObservationIgnored private var watcher: GitWatcher?
     @ObservationIgnored private var running = false
     @ObservationIgnored private var again = false
+    /// Panes on screen showing the repository. Held weakly, so closed tabs drop out.
+    @ObservationIgnored private let viewers = NSHashTable<AnyObject>.weakObjects()
+    /// Something changed while no pane on screen showed it.
+    @ObservationIgnored private var stale = false
 
     init(root: String, gitFolders: [String], git: String) {
         self.root = root
         self.git = git
         watcher = GitWatcher(root: root, gitFolders: gitFolders) { [weak self] in
-            Task { @MainActor in self?.refresh() }
+            Task { @MainActor in self?.changed() }
         }
         refresh()
+    }
+
+    /// A pane showing the repository came on screen or left it.
+    func setShown(by viewer: AnyObject, _ shown: Bool) {
+        if shown { viewers.add(viewer) } else { viewers.remove(viewer) }
+        if shown && stale {
+            stale = false
+            refresh()
+        }
+    }
+
+    /// Only runs `git status` for repositories on screen: during a build or a dev server's
+    /// rebuilds, a hidden tab would otherwise run it after every burst of changes.
+    private func changed() {
+        if viewers.anyObject != nil { refresh() } else { stale = true }
     }
 
     /// Runs `git status` again (once more after the current run, if one is going).

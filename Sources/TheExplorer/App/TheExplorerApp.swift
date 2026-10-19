@@ -88,6 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated { Session.save() }
         FileIndex.shared.saveIfNeeded()
         FolderVisits.shared.saveIfNeeded()
+        MainActor.assumeIsolated { FolderSizeStore.shared.save() }
     }
 
     /// Triggers File › New Window, the only way to open a SwiftUI window from outside a view.
@@ -136,6 +137,9 @@ private struct WorkspaceWindow: View {
             .onChange(of: controlActiveState) { _, active in
                 if active == .key { Session.activated(workspace) }
             }
+            .background(WindowReader { window in
+                workspace.observeOcclusion(of: window)
+            })
             .onChange(of: workspace.state.paths) { state = workspace.state }
             .onChange(of: workspace.state.selected) { state = workspace.state }
             #if DEBUG
@@ -152,18 +156,24 @@ struct ExplorerCommands: Commands {
 
     private var model: BrowserModel? { workspace?.selected }
 
+    /// Lists make folder URLs with a trailing slash, so files (most of a big selection) are
+    /// ruled out without reading the disk. This runs whenever the selection changes.
+    private static func isFolder(_ url: URL) -> Bool {
+        url.hasDirectoryPath && FileItem(url: url)?.isFolder == true
+    }
+
     var body: some Commands {
         CommandGroup(after: .newItem) {
             Button("New Tab") { workspace?.newTab() }
                 .keyboardShortcut("t")
             Button("Open in New Tab") {
                 guard let workspace, let model else { return }
-                for url in model.activeSelection.sorted(by: { $0.path < $1.path }) where FileItem(url: url)?.isFolder == true {
+                for url in model.activeSelection.sorted(by: { $0.path < $1.path }) where Self.isFolder(url) {
                     workspace.newTab(url, select: false)
                 }
             }
             .keyboardShortcut(.downArrow, modifiers: [.command, .option])
-            .disabled(!(model?.activeSelection.contains { FileItem(url: $0)?.isFolder == true } ?? false))
+            .disabled(!(model?.activeSelection.contains(where: Self.isFolder) ?? false))
             Button(workspace?.isSplit == true ? "Close Pane" : "Close Tab") {
                 guard let workspace else { return }
                 if !workspace.closeActivePane() { NSApp.keyWindow?.performClose(nil) }

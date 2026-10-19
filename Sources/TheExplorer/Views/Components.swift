@@ -6,8 +6,12 @@ struct FileContextMenu: View {
     let model: BrowserModel
     @Environment(\.openTab) private var openTab
     @Environment(\.splitWorkspace) private var split
+    @Environment(\.listedItems) private var listed
 
     private var favorites: FavoritesStore { .shared }
+
+    /// From the list when it's there: a selection can be thousands of items.
+    private func item(_ url: URL) -> FileItem? { listed?.item(url) ?? FileItem(url: url) }
 
     var body: some View {
         if !urls.isEmpty {
@@ -16,13 +20,13 @@ struct FileContextMenu: View {
             if urls.allSatisfy(\.isFileURL) {
                 OpenWithMenu(urls: urls)
             }
-            let folders = urls.filter { FileItem(url: $0)?.isFolder == true }
+            let folders = urls.filter { item($0)?.isFolder == true }
             if !folders.isEmpty {
                 Button(folders.count == 1 ? "Open in New Tab" : "Open \(folders.count) Folders in New Tabs") {
                     folders.sorted { $0.path < $1.path }.forEach(openTab)
                 }
             }
-            if let single, let item = FileItem(url: single) {
+            if let single, let item = item(single) {
                 if item.isPackage {
                     Button("Show Package Contents") { model.navigate(to: single) }
                 }
@@ -33,15 +37,15 @@ struct FileContextMenu: View {
             Button("Quick Look") { model.quickLook(urls) }
             ActionsMenu(urls: urls)
             Divider()
-            let sorted = urls.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+            // Sorted when chosen, not while the menu is built: selections can be thousands.
             if urls.allSatisfy(\.isFileURL) {
-                Button("Cut") { FileClipboard.shared.cut(sorted) }
+                Button("Cut") { FileClipboard.shared.cut(sortedURLs) }
             }
-            Button("Copy") { FileClipboard.shared.copy(sorted) }
+            Button("Copy") { FileClipboard.shared.copy(sortedURLs) }
             if urls.allSatisfy(\.isFileURL) {
                 Button("Duplicate") { model.duplicate(urls) }
             }
-            PasteItems(model: model, folder: single.flatMap { FileItem(url: $0)?.isFolder == true ? $0 : nil })
+            PasteItems(model: model, folder: single.flatMap { item($0)?.isFolder == true ? $0 : nil })
             if let split, let other = split.pane(oppositeTo: model), split.dropFolder(of: other) != nil {
                 Divider()
                 Button("Copy to Other Pane") { split.sendToOtherPane(urls, from: model, mode: .copy) }
@@ -60,12 +64,12 @@ struct FileContextMenu: View {
             Button(urls.count == 1 ? "Copy Path" : "Copy Paths") { FileActions.copyPaths(urls) }
             Button(FileActions.revealTitle) { FileActions.revealInFinder(urls) }
             if let single {
-                let isFolder = FileItem(url: single)?.isFolder == true
+                let isFolder = item(single)?.isFolder == true
                 Button(isFolder ? FileActions.openInTerminalTitle : "Open Enclosing Folder in \(Prefs.shared.terminal.name)") {
                     FileActions.openInTerminal(isFolder ? single : single.deletingLastPathComponent())
                 }
             }
-            if let single, let item = FileItem(url: single), model.destination == .folder, !model.isSearching {
+            if let single, let item = item(single), model.destination == .folder, !model.isSearching {
                 Button("Rename…") { model.renaming = item }
             }
             Divider()
@@ -73,8 +77,12 @@ struct FileContextMenu: View {
         }
     }
 
+    private var sortedURLs: [URL] {
+        urls.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+    }
+
     private func open() {
-        if urls.count == 1, let url = urls.first, FileItem(url: url)?.isFolder == true {
+        if urls.count == 1, let url = urls.first, item(url)?.isFolder == true {
             model.navigate(to: url)
         } else {
             FileOpener.open(urls.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending })

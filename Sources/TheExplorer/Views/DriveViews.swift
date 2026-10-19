@@ -391,7 +391,7 @@ struct DriveSettings: View {
             HStack {
                 SectionCaption(title: "Google Drive")
                 Spacer()
-                if store.googleClient != nil {
+                if store.hasClient {
                     Button("Edit Client…") { editingClient = true }.buttonStyle(SubtleButtonStyle())
                     Button(action: startSignIn) {
                         Label("Add Account", systemImage: "plus").font(.system(size: 11.5, weight: .semibold))
@@ -401,7 +401,7 @@ struct DriveSettings: View {
                 }
             }
             VStack(spacing: 0) {
-                if store.googleClient == nil {
+                if !store.hasClient {
                     VStack(spacing: 8) {
                         Text("Not set up yet").font(.system(size: 12.5, weight: .medium))
                         Text("Google Drive works through an OAuth client from your own Google Cloud project, so it talks to Google directly with nothing in between. Setting one up is free and takes about five minutes.")
@@ -560,7 +560,7 @@ struct GoogleClientEditor: View {
         .preferredColorScheme(Theme.colorScheme)
     }
 
-    private var isEditing: Bool { DriveStore.shared.googleClient != nil }
+    private var isEditing: Bool { DriveStore.shared.hasClient }
 
     private var isComplete: Bool {
         let id = clientID.trimmingCharacters(in: .whitespacesAndNewlines)

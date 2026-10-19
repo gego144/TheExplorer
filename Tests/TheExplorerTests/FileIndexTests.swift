@@ -214,6 +214,9 @@ struct FileIndexStoreTests {
         #expect(saved.historyID == "history")
         #expect(saved.storage.removedCount == 0)
         #expect(saved.storage.liveCount == storage.liveCount)
+        let report = try #require(FileIndex.resolve(tree.path("docs/report.pdf"), in: saved.storage))
+        let original = try #require(FileIndex.resolve(tree.path("docs/report.pdf"), in: storage))
+        #expect(saved.storage.times(report) == storage.times(original) && storage.times(original).created > 0)
         for query in ["report", "resume", "node_modules", "notes"] {
             #expect(FileIndex.search(query, in: saved.storage, limit: 10).map(\.path)
                     == FileIndex.search(query, in: storage, limit: 10).map(\.path))
@@ -280,6 +283,38 @@ struct IgnoreRulesTests {
         #expect(names("shadercache").isEmpty)
         #expect(names("notes") == ["notes.txt"])
         #expect(Set(names("build")).isSuperset(of: ["build", "build-tools.ts"]))
+    }
+
+    @Test func findsWhatsNewWithoutClutter() throws {
+        let tree = try Tree()
+        try tree.make("Dev/app/new.swift", "Dev/app/node_modules/pkg/new.js", "Docs/old.pdf", "Docs/", ".hidden-new",
+                      "Inbox/")
+        let old = Date(timeIntervalSinceNow: -40 * 86_400)
+        // An old file, last changed long ago, then moved into Inbox: its added date is now.
+        try tree.make("moved.txt")
+        try FileManager.default.setAttributes([.modificationDate: old, .creationDate: old], ofItemAtPath: tree.path("moved.txt"))
+        try FileManager.default.setAttributes([.modificationDate: old, .creationDate: old], ofItemAtPath: tree.path("Docs/old.pdf"))
+        try FileManager.default.moveItem(atPath: tree.path("moved.txt"), toPath: tree.path("Inbox/moved.txt"))
+        let storage = FileIndex.build(roots: [tree.root.path])
+        let week = Date(timeIntervalSinceNow: -7 * 86_400)
+        let names = { (date: FileIndex.RecentDate, kind: KindFilter) in
+            Set(FileIndex.recent(in: storage, scopes: [tree.root.path], since: week, by: date, kind: kind)
+                .map { (storage.path($0.index) as NSString).lastPathComponent })
+        }
+
+        // Dependency folders' insides and hidden files aren't listed; folders are, unless filtered out.
+        #expect(names(.created, .files) == ["new.swift"])
+        #expect(!names(.created, .all).contains("new.js") && !names(.created, .all).contains(".hidden-new"))
+        #expect(names(.created, .folders).isSuperset(of: ["Dev", "app", "node_modules", "Inbox"]))
+        #expect(!names(.modified, .files).contains("old.pdf") && !names(.modified, .files).contains("moved.txt"))
+        #expect(names(.added, .files).contains("moved.txt"))
+        let added = try #require(FileIndex.addedTime(tree.path("Inbox/moved.txt")))
+        #expect(abs(Double(added) - Date().timeIntervalSinceReferenceDate) < 120)
+        // Out of scope.
+        #expect(FileIndex.recent(in: storage, scopes: ["/nowhere"], since: week, by: .created, kind: .all).isEmpty)
+        // Newest first.
+        let dates = FileIndex.recent(in: storage, scopes: [tree.root.path], since: week, by: .modified, kind: .all).map(\.date)
+        #expect(dates == dates.sorted(by: >))
     }
 
     @Test func hashNamesRankLower() {

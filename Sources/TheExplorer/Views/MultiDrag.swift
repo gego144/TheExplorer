@@ -16,12 +16,20 @@ final class MultiDragSource: NSObject, NSDraggingSource {
     /// The list's rows in order and its selection, refreshed every time the list redraws.
     private var rows: [ListRow] = []
     private var selection: Set<URL> = []
-    /// Where the rows on screen are, in window coordinates (top-left origin), and the list's
-    /// window, so a press can be matched to a row.
-    var frames: [URL: CGRect] = [:]
+    /// Where the rows on screen are, in the list's coordinates, and where the list is in its
+    /// window (top-left origin), so a press can be matched to a row. Rows don't move within the
+    /// list as it scrolls; only the list's one offset does, so scrolling updates one value
+    /// rather than every visible row's.
+    var rowFrames: RowFrames?
+    var listOrigin: CGPoint = .zero
     weak var window: NSWindow?
     private var pressed: (urls: [URL], location: NSPoint, window: NSWindow)?
     private var monitor: Any?
+
+    #if DEBUG
+    /// The rows the last press would drag, for scripted runs (the `pressed` scene).
+    static var debugLastPress: [String] = []
+    #endif
 
     /// How far the mouse moves before a press becomes a drag, so clicks stay clicks.
     private static let threshold: CGFloat = 4
@@ -51,13 +59,17 @@ final class MultiDragSource: NSObject, NSDraggingSource {
         case .leftMouseDown:
             pressed = nil
             guard let window, event.window === window, let content = window.contentView else { return event }
-            let point = CGPoint(x: event.locationInWindow.x, y: content.bounds.height - event.locationInWindow.y)
-            guard let url = frames.first(where: { $0.value.contains(point) })?.key else { return event }
+            let point = CGPoint(x: event.locationInWindow.x - listOrigin.x,
+                                y: content.bounds.height - event.locationInWindow.y - listOrigin.y)
+            guard let url = rowFrames?.frames.first(where: { $0.value.contains(point) })?.key else { return event }
             if selection.count > 1 && selection.contains(url) {
                 pressed = (Self.dragged(rows: rows, selection: selection), event.locationInWindow, window)
             } else if RemoteFiles.isRemote(url) {
                 pressed = (selection.contains(url) ? Self.dragged(rows: rows, selection: selection) : [url], event.locationInWindow, window)
             }
+            #if DEBUG
+            Self.debugLastPress = (pressed?.urls ?? [url]).map(\.lastPathComponent)
+            #endif
             return event
         case .leftMouseDragged:
             guard let pressed, event.window === pressed.window else { return event }

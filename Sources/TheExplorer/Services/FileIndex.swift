@@ -15,6 +15,8 @@ import Foundation
 /// saved copy loads in milliseconds and catches up on whatever changed while the app was closed.
 final class FileIndex: @unchecked Sendable {
     static let shared = FileIndex()
+    /// Posted on the main thread after the index changes.
+    static let didChange = Notification.Name("FileIndex.didChange")
 
     struct Flags: OptionSet, Sendable {
         let rawValue: UInt8
@@ -40,6 +42,12 @@ final class FileIndex: @unchecked Sendable {
         var flags: [Flags] = []
         /// Content modification time, in seconds since 2001.
         var modified: [Int32] = []
+        /// Creation time, in seconds since 2001.
+        var created: [Int32] = []
+        /// Last change to the entry itself (content, name, folder, permissions), in seconds since
+        /// 2001. Moving or copying something into a folder sets it, so it's never earlier than
+        /// the date the item was added there.
+        var changed: [Int32] = []
         /// Names as stored on disk, UTF-8. Roots hold their full path.
         var names: [UInt8] = []
         /// Lowercased, accent-free spellings of names that aren't plain ASCII.
@@ -75,7 +83,12 @@ final class FileIndex: @unchecked Sendable {
             return depth
         }
 
-        mutating func add(name: UnsafeBufferPointer<UInt8>, parent: Int32, flags: Flags, modified: Int32) -> Int32 {
+        func times(_ index: Int32) -> Times {
+            let i = Int(index)
+            return Times(modified: modified[i], created: created[i], changed: changed[i])
+        }
+
+        mutating func add(name: UnsafeBufferPointer<UInt8>, parent: Int32, flags: Flags, times: Times) -> Int32 {
             let index = Int32(count)
             var flags = flags
             if name.contains(where: { $0 >= 0x80 }) {
@@ -89,13 +102,15 @@ final class FileIndex: @unchecked Sendable {
             nameLength.append(UInt16(min(name.count, Int(UInt16.max))))
             names.append(contentsOf: name.prefix(Int(UInt16.max)))
             self.flags.append(flags)
-            self.modified.append(modified)
+            modified.append(times.modified)
+            created.append(times.created)
+            changed.append(times.changed)
             return index
         }
 
-        mutating func add(name: String, parent: Int32, flags: Flags, modified: Int32) -> Int32 {
+        mutating func add(name: String, parent: Int32, flags: Flags, times: Times) -> Int32 {
             var name = name
-            return name.withUTF8 { add(name: $0, parent: parent, flags: flags, modified: modified) }
+            return name.withUTF8 { add(name: $0, parent: parent, flags: flags, times: times) }
         }
 
         /// Adds an entry to the front of its parent's children.
@@ -121,6 +136,8 @@ final class FileIndex: @unchecked Sendable {
             nameLength.append(contentsOf: chunk.nameLength)
             flags.append(contentsOf: chunk.flags)
             modified.append(contentsOf: chunk.modified)
+            created.append(contentsOf: chunk.created)
+            changed.append(contentsOf: chunk.changed)
             names.append(contentsOf: chunk.names)
             for (key, value) in chunk.folded { folded[key + offset] = value }
             // In reverse, so children end up listed in index order.
@@ -169,7 +186,7 @@ final class FileIndex: @unchecked Sendable {
                 let start = Int(nameStart[i])
                 let index = names.withUnsafeBufferPointer { buffer in
                     result.add(name: UnsafeBufferPointer(rebasing: buffer[start..<start + Int(nameLength[i])]),
-                               parent: newParent, flags: flags[i], modified: modified[i])
+                               parent: newParent, flags: flags[i], times: times(Int32(i)))
                 }
                 map[i] = index
             }
@@ -192,7 +209,18 @@ final class FileIndex: @unchecked Sendable {
     private var waiters: [CheckedContinuation<Void, Never>] = []
     /// Index changes run here, one at a time: the build, then FSEvents updates.
     private let queue = DispatchQueue(label: "FileIndex", qos: .utility)
-    private var stream: FSEventStreamRef?
+    /// One stream for the roots outside ~/Library, which skips Library's constant churn
+    /// (Biome, caches, preferences: most of a home folder's events), and one for the cloud roots
+    /// inside it. Excluding a path silences roots under it too, hence two.
+    private var streams: [FSEventStreamRef] = []
+    /// The latest event each stream has delivered.
+    private var streamEventIDs: [FSEventStreamEventId] = []
+    /// When each stream last called back.
+    private var streamHeardAt: [CFAbsoluteTime] = []
+    /// Streams still replaying what changed while the app was closed.
+    private var streamReplaying: [Bool] = []
+    /// The current event ID now and then, with when it was read (see settledEventID).
+    private var idSamples: [(time: CFAbsoluteTime, id: FSEventStreamEventId)] = []
     private var started = false
     private(set) var lastBuildDuration: TimeInterval = 0
     /// How the index came to be this session, for diagnostics ("loaded in 9ms").
@@ -207,6 +235,18 @@ final class FileIndex: @unchecked Sendable {
 
     var isReady: Bool { lock.withLock { ready } }
     var itemCount: Int { lock.withLock { storage.liveCount } }
+
+    /// Whether FSEvents reports changes inside `path` (see watch): the indexed roots, apart
+    /// from Library's churn.
+    static func watches(_ path: String) -> Bool {
+        let library = URL.home.path + "/Library"
+        let roots = defaultRoots
+        guard roots.contains(where: { path == $0 || path.hasPrefix($0 + "/") }) else { return false }
+        if path == library || path.hasPrefix(library + "/") {
+            return roots.contains { $0.hasPrefix(library + "/") && (path == $0 || path.hasPrefix($0 + "/")) }
+        }
+        return true
+    }
 
     /// The folders indexed by default.
     static var defaultRoots: [String] {
@@ -233,7 +273,10 @@ final class FileIndex: @unchecked Sendable {
                 origin = String(format: "loaded in %.0fms", Date().timeIntervalSince(began) * 1000)
                 if saved.historyID == historyID && saved.eventID > 0 {
                     // FSEvents replays what changed while the app was closed, then keeps going.
+                    // Saved folder sizes are good if the replay covers everything since they
+                    // were saved; it tells them what changed.
                     lastEventID = saved.eventID
+                    FolderSizeStore.restoreSaved(replayingFrom: saved.eventID, historyID: historyID)
                     watch(roots, since: saved.eventID)
                     return
                 }
@@ -267,6 +310,7 @@ final class FileIndex: @unchecked Sendable {
     private func save() {
         pendingSave?.cancel()
         pendingSave = nil
+        lastEventID = max(lastEventID, settledEventID())
         try? FileIndexStore.save(working, roots: lock.withLock { rootPaths }, eventID: lastEventID, historyID: historyID, to: storeURL)
     }
 
@@ -332,6 +376,7 @@ final class FileIndex: @unchecked Sendable {
         let duration = lastBuildDuration
         DispatchQueue.main.async {
             IndexStatus.shared.update(itemCount: count, buildDuration: duration)
+            NotificationCenter.default.post(name: FileIndex.didChange, object: nil)
         }
     }
 
@@ -384,7 +429,7 @@ final class FileIndex: @unchecked Sendable {
         // Each root's top-level folders are walked in parallel, then stitched together.
         var jobs: [(path: String, root: Int32)] = []
         for root in roots {
-            let rootIndex = storage.add(name: root, parent: -1, flags: [.folder, .root], modified: 0)
+            let rootIndex = storage.add(name: root, parent: -1, flags: [.folder, .root], times: .none)
             storage.roots.append(rootIndex)
             for child in shallowList(root) {
                 // Another root nested inside (cloud folders under Library) is walked as its own root.
@@ -392,7 +437,7 @@ final class FileIndex: @unchecked Sendable {
                 if child.flags.contains(.folder) && !child.flags.contains(.pruned) {
                     jobs.append((child.path, rootIndex))
                 } else {
-                    let index = storage.add(name: child.name, parent: rootIndex, flags: child.flags, modified: child.modified)
+                    let index = storage.add(name: child.name, parent: rootIndex, flags: child.flags, times: child.times)
                     storage.link(index)
                 }
             }
@@ -414,7 +459,32 @@ final class FileIndex: @unchecked Sendable {
         let name: String
         let path: String
         let flags: Flags
-        let modified: Int32
+        let times: Times
+    }
+
+    /// An entry's dates, in seconds since 2001.
+    struct Times: Equatable, Sendable {
+        var modified: Int32
+        var created: Int32
+        var changed: Int32
+
+        static let none = Times(modified: 0, created: 0, changed: 0)
+
+        init(modified: Int32, created: Int32, changed: Int32) {
+            self.modified = modified
+            self.created = created
+            self.changed = changed
+        }
+
+        init(_ st: stat) {
+            modified = Self.seconds(st.st_mtimespec)
+            created = Self.seconds(st.st_birthtimespec)
+            changed = Self.seconds(st.st_ctimespec)
+        }
+
+        private static func seconds(_ time: timespec) -> Int32 {
+            Int32(clamping: time.tv_sec - 978_307_200)
+        }
     }
 
     /// A folder's direct contents, classified.
@@ -430,7 +500,7 @@ final class FileIndex: @unchecked Sendable {
             let path = folder == "/" ? "/" + name : folder + "/" + name
             var st = stat()
             guard lstat(path, &st) == 0 else { continue }
-            result.append(Listed(name: name, path: path, flags: classify(name: name, path: path, st: st), modified: seconds(st)))
+            result.append(Listed(name: name, path: path, flags: classify(name: name, path: path, st: st), times: Times(st)))
         }
         return result
     }
@@ -445,10 +515,6 @@ final class FileIndex: @unchecked Sendable {
             if !Rules.descends(name: name, path: path, hidden: hidden) { flags.insert(.pruned) }
         }
         return flags
-    }
-
-    private static func seconds(_ st: stat) -> Int32 {
-        Int32(clamping: st.st_mtimespec.tv_sec - 978_307_200)
     }
 
     /// Walks a folder and everything indexable inside it into `chunk`. The folder itself gets
@@ -479,14 +545,14 @@ final class FileIndex: @unchecked Sendable {
             case FTS_D, FTS_DNR, FTS_DC:
                 let name = String(decoding: nameBytes, as: UTF8.self)
                 let flags = classify(name: name, path: String(cString: fullPath), st: st)
-                let index = chunk.add(name: nameBytes, parent: parent, flags: flags, modified: seconds(st))
+                let index = chunk.add(name: nameBytes, parent: parent, flags: flags, times: Times(st))
                 if parents.count > level { parents.removeSubrange(level...) }
                 parents.append(index)
                 if info == FTS_D && flags.contains(.pruned) { fts_set(fts, entry, FTS_SKIP) }
             case FTS_F, FTS_SL, FTS_SLNONE, FTS_DEFAULT:
                 var flags: Flags = []
                 if nameBytes.first == UInt8(ascii: ".") || (st.st_flags & UInt32(UF_HIDDEN)) != 0 { flags.insert(.hidden) }
-                _ = chunk.add(name: nameBytes, parent: parent, flags: flags, modified: seconds(st))
+                _ = chunk.add(name: nameBytes, parent: parent, flags: flags, times: Times(st))
             default:
                 continue
             }
@@ -497,39 +563,107 @@ final class FileIndex: @unchecked Sendable {
 
     // MARK: - Following changes
 
+    /// Events are batched for this long. A second is fresh enough for search, and wakes the app
+    /// a third as often as a shorter wait while folders churn.
+    private static let eventLatency: CFTimeInterval = 1.0
+
     private func watch(_ roots: [String], since eventID: FSEventStreamEventId) {
+        let library = URL.home.path + "/Library"
+        let inLibrary = roots.filter { $0.hasPrefix(library + "/") }
+        let outside = roots.filter { !$0.hasPrefix(library + "/") }
+        for (group, excluded) in [(outside, [library]), (inLibrary, [])] where !group.isEmpty {
+            guard let stream = makeStream(group, since: eventID) else { continue }
+            if !excluded.isEmpty { FSEventStreamSetExclusionPaths(stream, excluded as CFArray) }
+            FSEventStreamSetDispatchQueue(stream, queue)
+            FSEventStreamStart(stream)
+            streams.append(stream)
+            streamEventIDs.append(eventID == FSEventStreamEventId(kFSEventStreamEventIdSinceNow) ? FSEventsGetCurrentEventId() : eventID)
+            streamHeardAt.append(CFAbsoluteTimeGetCurrent())
+            streamReplaying.append(eventID != FSEventStreamEventId(kFSEventStreamEventIdSinceNow))
+        }
+        noteCurrentEventID()
+    }
+
+    private func makeStream(_ roots: [String], since eventID: FSEventStreamEventId) -> FSEventStreamRef? {
         var context = FSEventStreamContext(version: 0, info: Unmanaged.passUnretained(self).toOpaque(),
                                            retain: nil, release: nil, copyDescription: nil)
-        let callback: FSEventStreamCallback = { _, info, count, paths, flags, ids in
+        let callback: FSEventStreamCallback = { stream, info, count, paths, flags, ids in
             guard let info else { return }
             let index = Unmanaged<FileIndex>.fromOpaque(info).takeUnretainedValue()
             let cPaths = paths.assumingMemoryBound(to: UnsafePointer<CChar>.self)
             var changes: [(path: String, recursive: Bool)] = []
+            var sized: [FolderSizeStore.Change] = []
             var latest: FSEventStreamEventId = 0
             for i in 0..<count {
+                // Marks the end of the replay; not a change (and its ID isn't one to go by).
+                if flags[i] & FSEventStreamEventFlags(kFSEventStreamEventFlagHistoryDone) != 0 {
+                    index.replayDone(stream)
+                    continue
+                }
                 latest = max(latest, ids[i])
-                // Marks the end of the replay; not a change.
-                if flags[i] & FSEventStreamEventFlags(kFSEventStreamEventFlagHistoryDone) != 0 { continue }
                 var path = String(cString: cPaths[i])
                 if path.count > 1 && path.hasSuffix("/") { path.removeLast() }
                 let recursive = flags[i] & FSEventStreamEventFlags(kFSEventStreamEventFlagMustScanSubDirs) != 0
                 changes.append((path, recursive))
+                sized.append((path, recursive, ids[i]))
             }
-            index.apply(changes, through: latest)
+            index.received(through: latest, from: stream)
+            index.apply(changes)
+            FolderSizeStore.filesChanged(sized)
         }
-        guard let stream = FSEventStreamCreate(
-            nil, callback, &context, roots as CFArray, eventID, 0.3,
+        return FSEventStreamCreate(
+            nil, callback, &context, roots as CFArray, eventID, Self.eventLatency,
             FSEventStreamCreateFlags(kFSEventStreamCreateFlagNoDefer)
-        ) else { return }
-        FSEventStreamSetDispatchQueue(stream, queue)
-        FSEventStreamStart(stream)
-        self.stream = stream
+        )
+    }
+
+    /// Records how far a stream has got. The index reflects everything up to the stream that's
+    /// furthest behind, so that's where the next launch replays from. Runs on `queue`.
+    private func received(through eventID: FSEventStreamEventId, from stream: ConstFSEventStreamRef) {
+        guard eventID > 0, let slot = streams.firstIndex(where: { UnsafeRawPointer($0) == UnsafeRawPointer(stream) }) else { return }
+        streamEventIDs[slot] = max(streamEventIDs[slot], eventID)
+        streamHeardAt[slot] = CFAbsoluteTimeGetCurrent()
+        noteCurrentEventID()
+        lastEventID = max(lastEventID, settledEventID())
+    }
+
+    private func replayDone(_ stream: ConstFSEventStreamRef) {
+        guard let slot = streams.firstIndex(where: { UnsafeRawPointer($0) == UnsafeRawPointer(stream) }) else { return }
+        streamReplaying[slot] = false
+    }
+
+    /// The event the index has heard everything before (see settledEventID). Waits for any
+    /// change being handled, so every change before it has been passed on.
+    func heardThrough() -> FSEventStreamEventId {
+        queue.sync { settledEventID() }
+    }
+
+    private func noteCurrentEventID() {
+        idSamples.append((CFAbsoluteTimeGetCurrent(), FSEventsGetCurrentEventId()))
+        if idSamples.count > 64 { idSamples.removeFirst(idSamples.count - 32) }
+    }
+
+    /// How far every stream has got. A quiet stream (iCloud Drive with nothing syncing) hears
+    /// nothing, but that doesn't mean it's behind: once it's been quiet well past its latency,
+    /// anything from before then would have arrived, so it counts as caught up to the event
+    /// current back then. Otherwise the next launch would replay everything since this one began.
+    private func settledEventID() -> FSEventStreamEventId {
+        let now = CFAbsoluteTimeGetCurrent()
+        let margin = Self.eventLatency * 5
+        noteCurrentEventID()
+        let settled = idSamples.last { now - $0.time > margin }?.id
+        var result: FSEventStreamEventId?
+        for (slot, id) in streamEventIDs.enumerated() {
+            var reached = id
+            if let settled, !streamReplaying[slot], now - streamHeardAt[slot] > margin { reached = max(reached, settled) }
+            result = min(result ?? reached, reached)
+        }
+        return result ?? 0
     }
 
     /// Brings the folders FSEvents reported up to date. Runs on `queue`.
-    func apply(_ changes: [(path: String, recursive: Bool)], through eventID: FSEventStreamEventId = 0) {
+    func apply(_ changes: [(path: String, recursive: Bool)]) {
         guard isReady else { return }
-        lastEventID = max(lastEventID, eventID)
         var seen = Set<String>()
         var changed = false
         for change in changes where seen.insert(change.path).inserted {
@@ -608,8 +742,10 @@ final class FileIndex: @unchecked Sendable {
                 let sameKind = old.contains(.folder) == listed.flags.contains(.folder)
                     && old.contains(.pruned) == listed.flags.contains(.pruned)
                 if sameKind {
-                    if storage.modified[Int(child)] != listed.modified {
-                        storage.modified[Int(child)] = listed.modified
+                    if storage.times(child) != listed.times {
+                        storage.modified[Int(child)] = listed.times.modified
+                        storage.created[Int(child)] = listed.times.created
+                        storage.changed[Int(child)] = listed.times.changed
                         changed = true
                     }
                     if recursive && listed.flags.contains(.folder) && !listed.flags.contains(.pruned) {
@@ -625,7 +761,7 @@ final class FileIndex: @unchecked Sendable {
                 walk(listed.path, into: &chunk)
                 storage.append(chunk, under: index)
             } else {
-                storage.link(storage.add(name: listed.name, parent: index, flags: listed.flags, modified: listed.modified))
+                storage.link(storage.add(name: listed.name, parent: index, flags: listed.flags, times: listed.times))
             }
         }
         for gone in existing.values {

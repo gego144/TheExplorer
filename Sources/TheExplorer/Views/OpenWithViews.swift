@@ -7,11 +7,12 @@ struct OpenWithMenu: View {
     let urls: Set<URL>
 
     var body: some View {
-        let files = urls.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
-        let apps = FileOpener.apps(for: files)
-        let defaults = Set(files.compactMap(FileOpener.defaultApp))
+        let samples = FileOpener.oneOfEachKind(Array(urls))
+        let apps = FileOpener.apps(for: samples)
+        let defaults = Set(samples.compactMap(FileOpener.defaultApp))
         let current = defaults.count == 1 ? defaults.first : nil
-        let extensions = Set(files.map { $0.pathExtension.lowercased() })
+        // The samples cover every extension in the selection.
+        let extensions = Set(samples.map { $0.pathExtension.lowercased() })
         let ext = extensions.count == 1 && extensions.first?.isEmpty == false ? extensions.first : nil
 
         Menu("Open With") {
@@ -28,9 +29,14 @@ struct OpenWithMenu: View {
             }
             if let ext {
                 Divider()
-                AlwaysOpenWithMenu(ext: ext, apps: apps, files: files)
+                AlwaysOpenWithMenu(ext: ext, apps: apps, files: { files })
             }
         }
+    }
+
+    /// In name order, worked out when an app is chosen rather than while the menu is built.
+    private var files: [URL] {
+        urls.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
     }
 }
 
@@ -38,7 +44,7 @@ struct OpenWithMenu: View {
 private struct AlwaysOpenWithMenu: View {
     let ext: String
     let apps: [URL]
-    let files: [URL]
+    let files: () -> [URL]
     private var rules: OpenWithRules { .shared }
 
     var body: some View {
@@ -64,7 +70,7 @@ private struct AlwaysOpenWithMenu: View {
     private func choose(_ app: URL) {
         guard let id = FileOpener.bundleID(app) else { return }
         rules.setApp(id, forExtension: ext)
-        FileOpener.open(files, with: app)
+        FileOpener.open(files(), with: app)
     }
 }
 

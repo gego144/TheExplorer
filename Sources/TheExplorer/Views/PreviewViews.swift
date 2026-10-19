@@ -96,8 +96,15 @@ struct QuickLookRepresentable: NSViewRepresentable {
         }
     }
 
+    /// `close()` aborts the app (a Quick Look assertion) when the view has already left its
+    /// window, which SwiftUI often does before dismantling it, e.g. while a list scrolls. Out
+    /// of a window, dropping the item frees the same resources.
     static func dismantleNSView(_ view: QLPreviewView, coordinator: ()) {
-        view.close()
+        if view.window != nil {
+            view.close()
+        } else {
+            view.previewItem = nil
+        }
     }
 }
 
