@@ -103,6 +103,44 @@ enum DebugSnapshots {
                 if let content = InputDriver.window?.contentView { visit(content) }
                 log("\(scene): \(found)")
                 wait = 0
+            case "share":
+                // share:<id> opens the Share sheet for a Drive item in the first account and logs
+                // who has access once it's loaded.
+                model.drive.share(Self.debugURL("drive:" + (parts.count > 1 ? parts[1] : "")))
+                if let sharing = model.drive.sharing {
+                    while sharing.isLoading { try? await Task.sleep(for: .milliseconds(50)) }
+                    log("\(scene): \(Self.sharingSummary(sharing))")
+                }
+            case "shareadd", "sharerole", "shareremove", "shareaccess", "shareclose":
+                // shareadd:<a@x,b@y>><role>[>quiet[>message]], sharerole:<email>><role>,
+                // shareremove:<email>, shareaccess:restricted|anyone:<role>|domain:<name>:<role>,
+                // shareclose: what the Share sheet's controls do, then the result.
+                guard let sharing = model.drive.sharing else {
+                    log("\(scene): no Share sheet open")
+                    break
+                }
+                let fields = (parts.count > 1 ? parts[1] : "").components(separatedBy: ">")
+                let role = { (name: String) in DrivePermission.Role(rawValue: name) ?? .reader }
+                let person = { (email: String) in sharing.people.first { $0.email?.caseInsensitiveCompare(email) == .orderedSame } }
+                switch parts[0] {
+                case "shareadd":
+                    _ = await sharing.add(fields[0].components(separatedBy: ","), role: role(fields.count > 1 ? fields[1] : "reader"),
+                                          notify: fields.count < 3 || fields[2] != "quiet", message: fields.count > 3 ? fields[3] : "")
+                case "sharerole":
+                    if let p = person(fields[0]) { await sharing.setRole(role(fields.count > 1 ? fields[1] : "reader"), for: p) }
+                case "shareremove":
+                    if let p = person(fields[0]) { await sharing.remove(p) }
+                case "shareaccess":
+                    let pieces = fields[0].components(separatedBy: ":")
+                    switch pieces[0] {
+                    case "anyone": await sharing.setAccess(.anyone(role(pieces.count > 1 ? pieces[1] : "reader")))
+                    case "domain": await sharing.setAccess(.domain(pieces.count > 1 ? pieces[1] : "", role(pieces.count > 2 ? pieces[2] : "reader")))
+                    default: await sharing.setAccess(.restricted)
+                    }
+                default:
+                    model.drive.sharing = nil
+                }
+                log("\(scene): \(Self.sharingSummary(sharing))")
             case "pressed":
                 // pressed logs the rows the last mouse press landed on, as a drag would carry them.
                 log("\(scene): \(MultiDragSource.debugLastPress)")
@@ -480,6 +518,19 @@ enum DebugSnapshots {
             if env["EXPLORER_NO_CAPTURE"] == nil { capture(to: "\(dir)/\(index)-\(parts[0]).png") }
         }
         if env["EXPLORER_SNAPSHOT_QUIT"] != nil { NSApp.terminate(nil) }
+    }
+
+    /// "people=[owner:test@example.com(you), writer:ada@example.com] access=anyone/reader canShare=true error=…"
+    private static func sharingSummary(_ sharing: DriveSharing) -> String {
+        let people = sharing.people.map { p in
+            "\(p.role.rawValue):\(p.email ?? p.title)\(sharing.isYou(p) ? "(you)" : "")\(p.inherited ? "(inherited)" : "")"
+        }
+        let access: String = switch sharing.access {
+        case .restricted: "restricted"
+        case .anyone(let role): "anyone/\(role.rawValue)"
+        case .domain(let name, let role): "domain:\(name)/\(role.rawValue)"
+        }
+        return "people=[\(people.joined(separator: ", "))] access=\(access)\(sharing.accessIsInherited ? "(inherited)" : "") canShare=\(sharing.canShare) error=\(sharing.error ?? "none")"
     }
 
     /// "main/2 a.txt:changed(modified),…": the branch, change count and each row's mark.

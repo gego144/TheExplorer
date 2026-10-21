@@ -135,6 +135,9 @@ private struct DriveRowMenu: View {
             Divider()
         }
         if !isPlaces {
+            if let single {
+                Button("Share…") { model.drive.share(single) }
+            }
             Button("Open in Browser") { model.drive.openInBrowser(sorted) }
             Button(urls.count == 1 ? "Copy Link" : "Copy Links") { model.drive.copyLink(sorted) }
             Divider()
@@ -323,20 +326,31 @@ struct DriveInspector: View {
         return row.item.contentType?.localizedDescription ?? "File"
     }
 
+    /// Two rows, so the buttons fit the inspector's width.
     private func buttons(_ urls: [URL], single file: DriveFile?) -> some View {
-        HStack(spacing: 6) {
-            Button("Download") { Transfers.shared.download(drive: urls, into: URL.downloadsDirectory) }
-                .buttonStyle(SubtleButtonStyle())
-                .help(file?.isGoogleDoc == true ? "Download to your Downloads folder as \(DriveExport.formats(for: file!.contentType).first?.title ?? "a file")" : "Download to your Downloads folder")
-            if urls.count == 1 {
-                Button("Copy Link") { model.drive.copyLink(urls) }
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Button("Download") { Transfers.shared.download(drive: urls, into: URL.downloadsDirectory) }
                     .buttonStyle(SubtleButtonStyle())
-                    .help("Copy the Drive link, which opens it for anyone it's shared with")
-                Button("Open") { model.drive.openInBrowser(urls) }
-                    .buttonStyle(SubtleButtonStyle())
-                    .help("Open in your browser")
+                    .help(file?.isGoogleDoc == true ? "Download to your Downloads folder as \(DriveExport.formats(for: file!.contentType).first?.title ?? "a file")" : "Download to your Downloads folder")
+                if urls.count == 1 {
+                    Button("Open") { model.drive.openInBrowser(urls) }
+                        .buttonStyle(SubtleButtonStyle())
+                        .help("Open in your browser")
+                }
+            }
+            if urls.count == 1, let url = urls.first {
+                HStack(spacing: 6) {
+                    Button("Share…") { model.drive.share(url) }
+                        .buttonStyle(SubtleButtonStyle())
+                        .help("See and change who it's shared with")
+                    Button("Copy Link") { model.drive.copyLink(urls) }
+                        .buttonStyle(SubtleButtonStyle())
+                        .help("Copy the Drive link, which opens it for anyone it's shared with")
+                }
             }
         }
+        .fixedSize()
     }
 
     private func detail(_ label: String, _ value: String) -> some View {

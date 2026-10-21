@@ -87,6 +87,9 @@ struct WorkspaceView: View {
             }
         }
         .animation(.easeOut(duration: 0.12), value: model.expandedPreview)
+        .sheet(item: Binding(get: { model.drive.sharing }, set: { model.drive.sharing = $0 })) { sharing in
+            DriveShareSheet(sharing: sharing) { model.drive.sharing = nil }
+        }
         .alert("Rename", isPresented: Binding(get: { model.renaming != nil }, set: { if !$0 { model.renaming = nil } }),
                presenting: model.renaming) { item in
             NamePrompt(initialName: item.name, confirmTitle: "Rename") { model.rename(item, to: $0) }

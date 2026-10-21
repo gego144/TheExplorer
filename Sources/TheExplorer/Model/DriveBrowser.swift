@@ -26,6 +26,8 @@ final class DriveBrowser {
     /// The search being shown, if any.
     private(set) var query = ""
     var selection: Set<URL> = []
+    /// The Share sheet's file, while it's open.
+    var sharing: DriveSharing?
     var sort = SortSpec(key: .name, ascending: true) { didSet { rebuild() } }
 
     @ObservationIgnored private var files: [DriveFile] = []
@@ -345,6 +347,12 @@ final class DriveBrowser {
             NotificationCenter.default.post(name: .driveChanged, object: folder)
         }
         return true
+    }
+
+    /// Opens the Share sheet for a file or folder.
+    func share(_ url: URL) {
+        guard let target = DriveLocation(url: url), !target.isVirtual else { return }
+        sharing = DriveSharing(target)
     }
 
     /// Copies the item's Drive link, which opens it for anyone it's shared with.

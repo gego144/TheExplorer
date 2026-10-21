@@ -34,6 +34,8 @@ struct DriveFile: Sendable, Hashable {
     var canAddChildren = true
     var canRename = true
     var canTrash = true
+    /// Whether you can change who it's shared with.
+    var canShare = true
 
     /// The file a shortcut points at, or the file itself.
     var contentID: String { targetID ?? id }
@@ -92,6 +94,78 @@ struct DriveFile: Sendable, Hashable {
             canAddChildren = capabilities["canAddChildren"] as? Bool ?? true
             canRename = capabilities["canRename"] as? Bool ?? true
             canTrash = capabilities["canTrash"] as? Bool ?? true
+            canShare = capabilities["canShare"] as? Bool ?? true
+        }
+    }
+}
+
+/// Someone (or everyone with the link, or everyone in an organization) who can open a Drive
+/// file, and what they can do with it.
+struct DrivePermission: Sendable, Hashable, Identifiable {
+    enum Kind: String, Sendable {
+        case user, group, domain, anyone
+    }
+
+    enum Role: String, Sendable, CaseIterable {
+        case owner, organizer, fileOrganizer, writer, commenter, reader
+
+        /// What Drive calls it.
+        var title: String {
+            switch self {
+            case .owner: "Owner"
+            case .organizer: "Manager"
+            case .fileOrganizer: "Content manager"
+            case .writer: "Editor"
+            case .commenter: "Commenter"
+            case .reader: "Viewer"
+            }
+        }
+
+        /// The roles you can give someone from here. Making someone owner is a transfer that
+        /// Google confirms by email, so that stays in Drive.
+        static let grantable: [Role] = [.reader, .commenter, .writer]
+    }
+
+    let id: String
+    let kind: Kind
+    let role: Role
+    var email: String?
+    var name: String?
+    /// For `.domain`: the organization, e.g. example.com.
+    var domain: String?
+    /// The account was deleted.
+    var deleted = false
+    /// Comes from the shared drive (or a folder above it in one), so it's changed there.
+    var inherited = false
+
+    init(id: String, kind: Kind, role: Role, email: String? = nil, name: String? = nil, domain: String? = nil) {
+        self.id = id
+        self.kind = kind
+        self.role = role
+        self.email = email
+        self.name = name
+        self.domain = domain
+    }
+
+    init?(json: [String: Any]) {
+        guard let id = json["id"] as? String, let kind = (json["type"] as? String).flatMap(Kind.init(rawValue:)),
+              let role = (json["role"] as? String).flatMap(Role.init(rawValue:)) else { return nil }
+        self.init(id: id, kind: kind, role: role, email: json["emailAddress"] as? String,
+                  name: json["displayName"] as? String, domain: json["domain"] as? String)
+        deleted = json["deleted"] as? Bool ?? false
+        // Shared drive items say where each permission comes from; it's inherited when every
+        // source is (a direct one can sit alongside an inherited one).
+        if let details = json["permissionDetails"] as? [[String: Any]], !details.isEmpty {
+            inherited = details.allSatisfy { $0["inherited"] as? Bool ?? false }
+        }
+    }
+
+    /// Who it is, in a line: a name, or failing that an address or organization.
+    var title: String {
+        switch kind {
+        case .anyone: "Anyone with the link"
+        case .domain: "Anyone at \(domain ?? "your organization")"
+        case .user, .group: deleted ? "Deleted account" : name ?? email ?? "Someone"
         }
     }
 }
@@ -170,7 +244,8 @@ final class DriveClient: Sendable {
     static var api: String { (GoogleOAuth.testEndpoint ?? "https://www.googleapis.com") + "/drive/v3" }
     static var uploadAPI: String { (GoogleOAuth.testEndpoint ?? "https://www.googleapis.com") + "/upload/drive/v3" }
 
-    static let fileFields = "id,name,mimeType,size,modifiedTime,createdTime,parents,driveId,webViewLink,owners(displayName),shortcutDetails(targetId,targetMimeType),thumbnailLink,capabilities(canAddChildren,canRename,canTrash)"
+    static let fileFields = "id,name,mimeType,size,modifiedTime,createdTime,parents,driveId,webViewLink,owners(displayName),shortcutDetails(targetId,targetMimeType),thumbnailLink,capabilities(canAddChildren,canRename,canTrash,canShare)"
+    static let permissionFields = "id,type,role,emailAddress,displayName,domain,deleted,permissionDetails(inherited)"
 
     init(auth: GoogleAuth) {
         self.auth = auth
@@ -291,6 +366,50 @@ final class DriveClient: Sendable {
     func copy(_ id: String, named name: String, to parent: String) async throws -> DriveFile {
         try await fileResponse(request("POST", Self.api, "/files/" + Self.encode(id) + "/copy", query: [("fields", Self.fileFields)],
                                        json: ["name": name, "parents": [parent]]))
+    }
+
+    // MARK: Sharing
+
+    /// Everyone a file is shared with, all pages.
+    func permissions(of fileID: String) async throws -> [DrivePermission] {
+        var permissions: [DrivePermission] = []
+        var token: String?
+        repeat {
+            var items = [("pageSize", "100"), ("fields", "nextPageToken,permissions(\(Self.permissionFields))")]
+            if let token { items.append(("pageToken", token)) }
+            let json = try await object(request("GET", Self.api, "/files/" + Self.encode(fileID) + "/permissions", query: items))
+            permissions += (json["permissions"] as? [[String: Any]] ?? []).compactMap(DrivePermission.init(json:))
+            token = json["nextPageToken"] as? String
+        } while token != nil
+        return permissions
+    }
+
+    /// Shares a file with a person or group (by address), everyone in an organization, or anyone
+    /// with the link. `notify` emails people and groups, with `message` if there is one.
+    func share(_ fileID: String, kind: DrivePermission.Kind, role: DrivePermission.Role, email: String? = nil,
+               domain: String? = nil, notify: Bool = false, message: String? = nil) async throws -> DrivePermission {
+        var body: [String: Any] = ["type": kind.rawValue, "role": role.rawValue]
+        if let email { body["emailAddress"] = email }
+        if let domain { body["domain"] = domain }
+        var items = [("fields", Self.permissionFields)]
+        if kind == .user || kind == .group {
+            items.append(("sendNotificationEmail", notify ? "true" : "false"))
+            if notify, let message, !message.isEmpty { items.append(("emailMessage", message)) }
+        }
+        let json = try await object(request("POST", Self.api, "/files/" + Self.encode(fileID) + "/permissions", query: items, json: body))
+        guard let permission = DrivePermission(json: json) else { throw DriveError(message: "Drive sent back something unexpected.") }
+        return permission
+    }
+
+    func setRole(_ role: DrivePermission.Role, of permissionID: String, on fileID: String) async throws -> DrivePermission {
+        let path = "/files/" + Self.encode(fileID) + "/permissions/" + Self.encode(permissionID)
+        let json = try await object(request("PATCH", Self.api, path, query: [("fields", Self.permissionFields)], json: ["role": role.rawValue]))
+        guard let permission = DrivePermission(json: json) else { throw DriveError(message: "Drive sent back something unexpected.") }
+        return permission
+    }
+
+    func unshare(_ permissionID: String, on fileID: String) async throws {
+        _ = try await send(request("DELETE", Self.api, "/files/" + Self.encode(fileID) + "/permissions/" + Self.encode(permissionID)))
     }
 
     // MARK: Transfers
@@ -446,6 +565,21 @@ final class DriveClient: Sendable {
             friendly = "You don't have permission to do that in Drive. " + message
         case "fileNotDownloadable", "cannotDownloadAbusiveFile":
             friendly = "Drive won't let this file be downloaded. " + message
+        case "publishOutNotPermitted":
+            friendly = "Your organization doesn't allow sharing this with anyone who has the link."
+        case "cannotShareTeamDriveTopFolderWithAnyoneOrDomains":
+            friendly = "A shared drive can't be shared by link. Share the files and folders in it, or add people to the drive."
+        case "teamDriveDomainUsersOnlyRestriction":
+            friendly = "This shared drive only lets files be shared with people in your organization."
+        case "teamDriveTeamMembersOnlyRestriction":
+            friendly = "This shared drive only lets files be shared with its members."
+        case "cannotModifyInheritedTeamDrivePermission", "cannotDeletePermission":
+            friendly = "This access comes from the shared drive or a folder above it, so it's changed there."
+        case "sharingRateLimitExceeded":
+            friendly = "Google limits how many people you can share with at once. Try again in a few minutes."
+        case "invalidSharingRequest":
+            // Google's own message says what was wrong ("…not a Google account…").
+            friendly = message.replacingOccurrences(of: "Bad Request. User message: ", with: "")
         default:
             friendly = status == 404 ? "Not found in Drive. It may have been moved, deleted or unshared." : message
         }

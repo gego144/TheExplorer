@@ -109,6 +109,34 @@ struct DriveModelTests {
         #expect(short == "a\nb\n")
     }
 
+    @Test func permissionsParseFromDriveJSON() throws {
+        let owner = try #require(DrivePermission(json: ["id": "p1", "type": "user", "role": "owner", "emailAddress": "a@x.com", "displayName": "Ada"]))
+        #expect(owner.kind == .user && owner.role == .owner && owner.title == "Ada" && !owner.inherited)
+        let link = try #require(DrivePermission(json: ["id": "anyoneWithLink", "type": "anyone", "role": "reader"]))
+        #expect(link.title == "Anyone with the link")
+        let domain = try #require(DrivePermission(json: ["id": "d", "type": "domain", "role": "commenter", "domain": "example.com"]))
+        #expect(domain.title == "Anyone at example.com" && domain.role.title == "Commenter")
+        // Shared drive members: inherited only when every source is.
+        let member = try #require(DrivePermission(json: ["id": "m", "type": "user", "role": "writer", "emailAddress": "g@x.com",
+                                                          "permissionDetails": [["inherited": true]]]))
+        #expect(member.inherited)
+        let both = try #require(DrivePermission(json: ["id": "b", "type": "user", "role": "writer",
+                                                        "permissionDetails": [["inherited": true], ["inherited": false]]]))
+        #expect(!both.inherited)
+        #expect(DrivePermission(json: ["id": "x", "type": "user", "role": "emperor"]) == nil)
+        #expect(DrivePermission(json: ["id": "x", "type": "user", "role": "writer", "deleted": true])?.title == "Deleted account")
+        #expect(DrivePermission.Role.grantable == [.reader, .commenter, .writer])
+    }
+
+    @Test func sharingErrorsSayWhatToDo() {
+        let invite = Data(#"{"error": {"code": 400, "message": "Bad Request. User message: You must check the Notify people box.", "errors": [{"reason": "invalidSharingRequest"}]}}"#.utf8)
+        #expect(DriveClient.error(400, invite).message == "You must check the Notify people box.")
+        let inherited = Data(#"{"error": {"errors": [{"reason": "cannotModifyInheritedTeamDrivePermission"}]}}"#.utf8)
+        #expect(DriveClient.error(403, inherited).message.contains("comes from the shared drive"))
+        let policy = Data(#"{"error": {"errors": [{"reason": "publishOutNotPermitted"}]}}"#.utf8)
+        #expect(DriveClient.error(403, policy).message.contains("organization doesn't allow"))
+    }
+
     @Test func errorsSayWhatToDo() {
         let disabled = Data(#"{"error": {"code": 403, "message": "Drive API has not been used", "errors": [{"reason": "accessNotConfigured"}]}}"#.utf8)
         let error = DriveClient.error(403, disabled)
@@ -209,6 +237,54 @@ struct DriveClientTests {
             #expect(error.status == 404)
             #expect(error.message.hasPrefix("Not found in Drive"))
         }
+    }
+
+    @Test func sharesChangesAndUnshares() async throws {
+        let drive = client()
+        let folder = try await drive.createFolder(named: "Sharing \(UUID().uuidString.prefix(6))", in: "root")
+        let created = try await drive.file(folder.id)
+        #expect(created.canShare)
+        let start = try await drive.permissions(of: folder.id)
+        #expect(start.map(\.role) == [.owner])
+
+        let ada = try await drive.share(folder.id, kind: .user, role: .commenter, email: "ada@example.com", notify: true, message: "Hi Ada")
+        #expect(ada.role == .commenter && ada.email == "ada@example.com")
+        _ = try await drive.share(folder.id, kind: .user, role: .reader, email: "quiet@example.com", notify: false)
+        let all = try await mockSent()
+        let sent = all.filter { $0["file"] == folder.id }
+        #expect(sent.map { $0["to"] } == ["ada@example.com"])
+        #expect(sent.first?["message"] == "Hi Ada")
+
+        #expect(try await drive.setRole(.writer, of: ada.id, on: folder.id).role == .writer)
+        let link = try await drive.share(folder.id, kind: .anyone, role: .reader)
+        let linked = try await drive.permissions(of: folder.id)
+        #expect(linked.contains { $0.kind == .anyone && $0.role == .reader })
+        try await drive.unshare(link.id, on: folder.id)
+        try await drive.unshare(ada.id, on: folder.id)
+        let left = try await drive.permissions(of: folder.id)
+        #expect(Set(left.compactMap(\.email)) == ["test@example.com", "quiet@example.com"])
+
+        // Shared with you as a viewer: you can look, not change.
+        let invite = try await drive.file("invite")
+        #expect(!invite.canShare)
+        await #expect(throws: DriveError.self) { try await drive.share("invite", kind: .user, role: .reader, email: "x@example.com") }
+        // A shared drive's members are inherited, so they're changed in the drive.
+        let roadmap = try await drive.permissions(of: "roadmap")
+        #expect(roadmap.allSatisfy { $0.inherited })
+        do {
+            try await drive.unshare(try #require(roadmap.first { $0.email == "grace@example.com" }).id, on: "roadmap")
+            Issue.record("Expected an error")
+        } catch let error as DriveError {
+            #expect(error.reason == "cannotModifyInheritedTeamDrivePermission")
+        }
+    }
+
+    /// The emails the mock would have sent.
+    private func mockSent() async throws -> [[String: String]] {
+        var request = URLRequest(url: URL(string: (GoogleOAuth.testEndpoint ?? "") + "/mock/sent")!)
+        request.setValue("Bearer access-test", forHTTPHeaderField: "Authorization")
+        let (data, _) = try await URLSession.shared.data(for: request)
+        return (try JSONSerialization.jsonObject(with: data) as? [[String: Any]] ?? []).map { $0.compactMapValues { $0 as? String } }
     }
 
     @Test func uploadsDownloadsExportsAndChanges() async throws {

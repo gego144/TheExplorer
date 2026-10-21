@@ -27,6 +27,9 @@ files = {}
 drives = {"team-drive": {"id": "team-drive", "name": "Team", "createdTime": "2025-02-01T09:00:00.000Z"}}
 sessions = {}
 tokens = {"issued": 0}
+# Sharing emails Drive would have sent, for tests to check (GET /mock/sent).
+sent = []
+ME = {"id": "perm-me", "type": "user", "role": "owner", "emailAddress": "test@example.com", "displayName": "Test User"}
 
 
 def now():
@@ -37,7 +40,8 @@ def add(id, name, mime, parents, content=b"", **extra):
     files[id] = {
         "id": id, "name": name, "mimeType": mime, "parents": parents, "content": content,
         "modifiedTime": extra.pop("modified", "2026-10-01T10:00:00.000Z"), "createdTime": "2026-01-15T08:30:00.000Z",
-        "trashed": False, "starred": extra.pop("starred", False), "shared": extra.pop("shared", False), **extra,
+        "trashed": False, "starred": extra.pop("starred", False), "shared": extra.pop("shared", False),
+        "permissions": extra.pop("permissions", [dict(ME)]), **extra,
     }
 
 
@@ -95,21 +99,36 @@ def seed():
     add("shortcut", "Projects shortcut", "application/vnd.google-apps.shortcut", ["root-id"],
         shortcutDetails={"targetId": "projects", "targetMimeType": FOLDER})
     # Shared with you from someone else's Drive: its folder isn't visible.
-    add("invite", "Wedding invite.pdf", "application/pdf", ["hidden-folder"], tiny_pdf("You're invited"), shared=True)
+    add("invite", "Wedding invite.pdf", "application/pdf", ["hidden-folder"], tiny_pdf("You're invited"), shared=True,
+        permissions=[{"id": "perm-someone", "type": "user", "role": "owner", "emailAddress": "someone@example.org", "displayName": "Someone Else"},
+                     {"id": "perm-me", "type": "user", "role": "reader", "emailAddress": "test@example.com", "displayName": "Test User"}])
+    files["projects"]["permissions"].append(
+        {"id": "perm-ada", "type": "user", "role": "writer", "emailAddress": "ada@example.com", "displayName": "Ada Lovelace"})
+    files["report"]["permissions"].append({"id": "anyoneWithLink", "type": "anyone", "role": "reader"})
     add("team-root", "Team", FOLDER, [], driveId="team-drive")
     files["team-root"]["id"] = "team-drive"
     files["team-drive"] = files.pop("team-root")
-    add("roadmap", "Roadmap.txt", "text/plain", ["team-drive"], b"Q4: ship it\n", driveId="team-drive")
+    # In a shared drive, access comes from the drive's members.
+    add("roadmap", "Roadmap.txt", "text/plain", ["team-drive"], b"Q4: ship it\n", driveId="team-drive",
+        permissions=[{"id": "perm-me", "type": "user", "role": "organizer", "emailAddress": "test@example.com", "displayName": "Test User",
+                      "permissionDetails": [{"permissionType": "member", "role": "organizer", "inherited": True, "inheritedFrom": "team-drive"}]},
+                     {"id": "perm-grace", "type": "user", "role": "writer", "emailAddress": "grace@example.com", "displayName": "Grace Hopper",
+                      "permissionDetails": [{"permissionType": "member", "role": "writer", "inherited": True, "inheritedFrom": "team-drive"}]}])
+
+
+def can_share(f):
+    return any(p["emailAddress" if "emailAddress" in p else "id"] == ME["emailAddress"] and p["role"] in ("owner", "organizer", "fileOrganizer", "writer")
+               for p in f["permissions"])
 
 
 def public(f, fresh=True):
-    out = {k: v for k, v in f.items() if k not in ("content", "trashed", "starred", "shared")}
+    out = {k: v for k, v in f.items() if k not in ("content", "trashed", "starred", "shared", "permissions")}
     if not f["mimeType"].startswith(GOOGLE):
         out["size"] = str(len(f["content"]))
     kind = "folders" if f["mimeType"] == FOLDER else "file/d"
     out["webViewLink"] = f"https://drive.google.com/{kind}/{f['id']}/view"
     out["owners"] = [{"displayName": "Someone Else" if f["shared"] else "Test User"}]
-    out["capabilities"] = {"canAddChildren": f["mimeType"] == FOLDER, "canRename": True, "canTrash": True}
+    out["capabilities"] = {"canAddChildren": f["mimeType"] == FOLDER, "canRename": True, "canTrash": True, "canShare": can_share(f)}
     if f["mimeType"].startswith(THUMBNAILED):
         # With MOCK_EXPIRE_THUMBS set, links from listings have expired, like Google's do after
         # a few hours; asking for the file alone gives a working one.
@@ -219,6 +238,11 @@ class Handler(BaseHTTPRequestHandler):
             add(id, meta["name"], mime, meta.get("parents", ["root-id"]), self.body(), modified=now())
             return self.send(200, public(files[id]))
 
+        if path == "/mock/sent":
+            return self.send(200, sent)
+        if m := re.fullmatch(r"/drive/v3/files/([^/]+)/permissions(?:/([^/]+))?", path):
+            return self.permissions(method, m[1], m[2], query)
+
         m = re.fullmatch(r"/drive/v3/files/([^/]+)(/export|/copy)?", path)
         if not m:
             return self.error(404, "notFound", "No such endpoint " + path)
@@ -258,6 +282,58 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, content, f["mimeType"])
         return self.send(200, public(f))
 
+    def permissions(self, method, id, permission_id, query):
+        f = files.get(id)
+        if not f or f["trashed"]:
+            return self.error(404, "notFound", f"File not found: {id}.")
+        perms = f["permissions"]
+        if method == "GET" and not permission_id:
+            return self.send(200, {"permissions": perms})
+        if not can_share(f):
+            return self.error(403, "insufficientFilePermissions", "The user does not have sufficient permissions for this file.")
+        if method == "POST":
+            new = json.loads(self.body() or b"{}")
+            kind, role = new.get("type"), new.get("role")
+            if role not in ("reader", "commenter", "writer", "fileOrganizer", "organizer", "owner") or kind not in ("user", "group", "domain", "anyone"):
+                return self.error(400, "invalid", "Invalid permission.")
+            if kind in ("user", "group"):
+                email = new.get("emailAddress", "")
+                if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+                    return self.error(400, "invalid", f"Invalid email address: {email}")
+                if email.endswith("@nogoogle.example") and query.get("sendNotificationEmail") == "false":
+                    return self.error(400, "invalidSharingRequest", f"Bad Request. User message: \"You are trying to invite {email}. Since there is no Google account associated with this email address, you must check the 'Notify people' box to invite this recipient.\"")
+                existing = next((p for p in perms if p.get("emailAddress", "").lower() == email.lower()), None)
+                if existing:
+                    existing["role"] = role
+                    return self.send(200, existing)
+                p = {"id": "perm-" + uuid.uuid4().hex[:8], "type": kind, "role": role, "emailAddress": email,
+                     "displayName": email.split("@")[0].title()}
+                if query.get("sendNotificationEmail", "true") == "true":
+                    sent.append({"file": id, "to": email, "role": role, "message": query.get("emailMessage", "")})
+            elif kind == "anyone":
+                if f.get("driveId") and id == f.get("driveId"):
+                    return self.error(403, "cannotShareTeamDriveTopFolderWithAnyoneOrDomains", "Cannot share a shared drive with anyone.")
+                p = {"id": "anyoneWithLink", "type": "anyone", "role": role}
+                perms[:] = [q for q in perms if q["type"] != "anyone"]
+            else:
+                p = {"id": "domain-" + new.get("domain", ""), "type": "domain", "role": role, "domain": new.get("domain", "")}
+            perms.append(p)
+            return self.send(200, p)
+        p = next((q for q in perms if q["id"] == permission_id), None)
+        if not p:
+            return self.error(404, "notFound", f"Permission not found: {permission_id}.")
+        if any(d.get("inherited") for d in p.get("permissionDetails", [])):
+            return self.error(403, "cannotModifyInheritedTeamDrivePermission", "Cannot modify an inherited permission.")
+        if p["role"] == "owner":
+            return self.error(403, "forbidden", "The owner of a file can't be changed or removed.")
+        if method == "PATCH":
+            p["role"] = json.loads(self.body() or b"{}").get("role", p["role"])
+            return self.send(200, p)
+        if method == "DELETE":
+            perms.remove(p)
+            return self.send(204)
+        return self.error(405, "invalid", "Method not allowed")
+
     def list(self, query):
         q = query.get("q", "")
         live = [f for f in files.values() if not f["trashed"] and f["id"] != "root-id"]
@@ -294,6 +370,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         self.route("PUT")
+
+    def do_DELETE(self):
+        self.route("DELETE")
 
 
 if __name__ == "__main__":
