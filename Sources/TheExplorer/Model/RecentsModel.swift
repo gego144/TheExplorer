@@ -120,6 +120,17 @@ final class RecentsModel {
         restart()
     }
 
+    /// Shows a renamed item under its new name (and keeps it selected) until the next update
+    /// lists it anyway.
+    func renamed(_ old: URL, to new: URL) {
+        guard let index = rows.firstIndex(where: { $0.id == old }), let item = FileItem(url: new) else { return }
+        var row = rows[index]
+        row = ListRow(item: item, size: row.size, liveFolderSize: row.liveFolderSize, date: row.date,
+                      location: row.location, group: row.group)
+        rows[index] = row
+        if selection.remove(old) != nil { selection.insert(new) }
+    }
+
     /// Whether the list is off screen, where live updates wait.
     @ObservationIgnored var isPaused = false {
         didSet {

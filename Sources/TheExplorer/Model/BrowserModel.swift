@@ -819,8 +819,16 @@ final class BrowserModel: Identifiable {
     /// Whether Rename… applies: one item in a folder, or in a Drive list.
     var canRename: Bool {
         switch destination {
-        case .folder: !isSearching && selection.count == 1
         case .drive: drive.selection.count == 1 && drive.selection.first.flatMap(DriveLocation.init(url:)).map { !$0.isVirtual } == true
+        default: canRename(in: destination) && activeSelection.count == 1
+        }
+    }
+
+    /// Whether a view's files can be renamed here: folders, Recents and New (not search
+    /// results, Storage's tree or S3).
+    func canRename(in destination: Destination) -> Bool {
+        switch destination {
+        case .folder, .recents, .newFiles: !isSearching
         default: false
         }
     }
@@ -829,7 +837,7 @@ final class BrowserModel: Identifiable {
         guard canRename else { return }
         if destination == .drive {
             renaming = drive.rows.first { drive.selection.contains($0.id) }?.item
-        } else if let url = selection.first {
+        } else if let url = activeSelection.first {
             renaming = FileItem(url: url)
         }
     }
@@ -845,7 +853,12 @@ final class BrowserModel: Identifiable {
         do {
             try FileManager.default.moveItem(at: item.url, to: destination)
             FileHistory.shared.record("Rename of “\(item.name)”", undo: [.move(destination, to: item.url)])
-            reload(selecting: [destination])
+            switch self.destination {
+            // Their lists catch up on their own; this shows the new name right away.
+            case .recents: recents.renamed(item.url, to: destination)
+            case .newFiles: newFiles.renamed(item.url, to: destination)
+            default: reload(selecting: [destination])
+            }
         } catch {
             loadError = error.localizedDescription
         }

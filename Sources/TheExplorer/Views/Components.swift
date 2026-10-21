@@ -69,7 +69,7 @@ struct FileContextMenu: View {
                     FileActions.openInTerminal(isFolder ? single : single.deletingLastPathComponent())
                 }
             }
-            if let single, let item = item(single), model.destination == .folder, !model.isSearching {
+            if let single, let item = item(single), model.canRename(in: model.destination) {
                 Button("Rename…") { model.renaming = item }
             }
             Divider()
