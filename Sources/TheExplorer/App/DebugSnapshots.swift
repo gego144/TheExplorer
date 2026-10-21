@@ -9,7 +9,7 @@ import SwiftUI
 ///     CONFIG=debug ./scripts/build-app.sh
 ///     open -g -n --env EXPLORER_SNAPSHOT_DIR=/tmp/shots --env EXPLORER_SNAPSHOT_QUIT=1 \
 ///         --env "EXPLORER_SCENES=folder:~/Dev;recents;search:swift;searchmac:swift;storage:~/Dev" \
-///         build/debug/TheExplorer.app
+///         build.noindex/debug/TheExplorer.app
 /// Debug-only demo mode for README screenshots (EXPLORER_DEMO=1): only the startup disk in the
 /// sidebar, pins from EXPLORER_DEMO_PINS (paths separated by ";", never saved), and windows
 /// placed on a Retina screen when there is one, so captures are sharp.

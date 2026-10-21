@@ -13,7 +13,7 @@ make test       # run the test suite
 make clean
 ```
 
-`make app` runs `scripts/build-app.sh`, which builds with SwiftPM and wraps the binary in an app bundle in `build/`. To work on the code in Xcode, run `open Package.swift`.
+`make app` runs `scripts/build-app.sh`, which builds with SwiftPM and wraps the binary in an app bundle in `build.noindex/` (the suffix keeps Spotlight from listing it). To work on the code in Xcode, run `open Package.swift`.
 
 ## Layout
 
@@ -30,7 +30,7 @@ Tests/        Swift Testing suites
 docs/         Screenshots for the README and guide
 ```
 
-A debug build (`CONFIG=debug ./scripts/build-app.sh`) goes to `build/debug/` with its own bundle identifier, so it never replaces the copy you use.
+A debug build (`CONFIG=debug ./scripts/build-app.sh`) goes to `build.noindex/debug/` with its own bundle identifier, so it never replaces the copy you use.
 
 **Speed is a feature.** Anything proportional to the number of files (listing, sorting, search, Spotlight results, folder sizes, path suggestions) runs off the main thread, or runs once and is cached, never per redraw.
 
@@ -64,7 +64,7 @@ Debug builds can drive themselves through a scripted set of scenes and save a sc
 CONFIG=debug ./scripts/build-app.sh
 open -g -n --env EXPLORER_SNAPSHOT_DIR=/tmp/shots --env EXPLORER_SNAPSHOT_QUIT=1 \
     --env "EXPLORER_SCENES=folder:~/Dev;newtab:~/Downloads;recents;search:swift;searchmac:swift;storage:~/Dev" \
-    build/debug/TheExplorer.app
+    build.noindex/debug/TheExplorer.app
 ```
 
 Scenes are separated by `;`. The available scenes are `folder:<path>`, `select:<path>`, `newtab:<path>`, `tab:<n>`, `omnibox:<text>`, `expand:<path>`, `recents`, `new`, `range:<days>` (0 for all time), `more` (load the next page), `search:<text>`, `searchmac:<text>`, `scope:mac|folder`, `create:folder|file`, `drop:<source>><folder>`, `storage[:<path>]`, `drill:<name>` (opens a folder in Storage and logs what's inside), `settings[:actions|openwith|cloud]` (shows the Settings window, optionally on that tab), `openrule:<types>><bundle id>` (adds an Open With rule for the run, e.g. `openrule:png,jpg>com.apple.Preview`), `actioneditor` (shows the action editor; `type:` scenes after it go to the command field), `editortext` (logs the command field), `runs` (logs every action run's state and output), `stop` (stops the newest running action), `menu:<name>` (logs a menu bar menu's items), `s3:[bucket/prefix/]` (browses the first S3 connection), `transfers` (logs uploads and downloads), `showdownload` (does what a finished download's Show button does), `promise:<bucket/key>><folder>` (delivers an S3 item the way a drop on Finder asks for it, and logs what the drag carries; `promise:drive:<id>><folder>` does the same for a Drive file), `drive:[<id>/]` (browses the first Google account: My Drive, a folder by ID, or `~/`, `~shared/`, `~starred/` and `~drives/` for its lists), `drivesignin` (signs in the way Add Account does), `googleclient` (shows the Google client sheet), `beginrename` (shows the rename prompt for the selection, as ⇧⌘↩ does), `theme:<system|dark|graphite|midnight|light>` (shows a theme for the run without saving it), `split` (splits the tab, or closes the split), `pane:1|2` (makes that side active), `back`, `bigpreview:<path>` (opens a Markdown, CSV, JSON or font file in the large preview; leave out the path to close it), `reveal:<path>[,<path>…]` (sends the app the reveal event other apps' "Show in Finder" uses), `viewer:<bundle id>` (sets the file viewer and logs it back; pass the current one to change nothing) `idle:<seconds>` (sits still and logs the CPU the app used meanwhile), `foldersize:<path>` (logs a folder's measured size), `pressed` (logs the rows the last press would drag) and `wait:<seconds>`.
@@ -128,7 +128,7 @@ Debug builds talk to it too. Give the run an accounts file with a client and an 
 echo '{"clientID": "test.apps.googleusercontent.com", "accounts": [{"id": "6B1C1E8A-3E0B-4C3D-9C1A-111111111111", "email": "test@example.com", "name": "Test User"}]}' > /tmp/drive.json
 open -g -n --env EXPLORER_DRIVE_ENDPOINT=http://127.0.0.1:5056 --env EXPLORER_DRIVE_FILE=/tmp/drive.json \
     --env EXPLORER_DRIVE_TOKEN=refresh-test --env EXPLORER_SNAPSHOT_DIR=/tmp/shots --env EXPLORER_SNAPSHOT_QUIT=1 \
-    --env "EXPLORER_SCENES=drive:;dblclick:Projects;key:cmd+k;type:milk;wait:1" build/debug/TheExplorer.app
+    --env "EXPLORER_SCENES=drive:;dblclick:Projects;key:cmd+k;type:milk;wait:1" build.noindex/debug/TheExplorer.app
 ```
 
 The mock keeps what you change until it's restarted. `EXPLORER_DRIVE_TOKEN=revoked` shows what a signed-out account looks like.

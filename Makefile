@@ -9,11 +9,11 @@ run: install
 
 install: app
 	rm -rf /Applications/TheExplorer.app
-	cp -R build/TheExplorer.app /Applications/
+	cp -R build.noindex/TheExplorer.app /Applications/
 	@echo "Installed /Applications/TheExplorer.app"
 
 test:
 	swift test
 
 clean:
-	rm -rf .build build
+	rm -rf .build build.noindex

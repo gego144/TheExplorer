@@ -1,5 +1,6 @@
 #!/bin/zsh
-# Builds TheExplorer.app: release into build/, debug (CONFIG=debug) into build/debug/
+# Builds TheExplorer.app: release into build.noindex/, debug (CONFIG=debug) into build.noindex/debug/.
+# The .noindex suffix keeps Spotlight from listing these copies next to the installed app.
 # with a separate bundle identifier (com.gego.TheExplorer.debug).
 #
 # Signing: macOS keys privacy permissions (Full Disk Access, Desktop, Documents…) and
@@ -17,9 +18,9 @@ CONFIG="${CONFIG:-release}"
 LOCAL_IDENTITY="TheExplorer Local Signing"
 
 if [[ "$CONFIG" == "release" ]]; then
-    APP="build/TheExplorer.app"
+    APP="build.noindex/TheExplorer.app"
 else
-    APP="build/$CONFIG/TheExplorer.app"
+    APP="build.noindex/$CONFIG/TheExplorer.app"
 fi
 
 if [[ -z "${SIGN_IDENTITY:-}" ]]; then
