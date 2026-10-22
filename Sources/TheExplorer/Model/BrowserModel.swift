@@ -104,7 +104,11 @@ final class BrowserModel: Identifiable {
     private(set) var currentURL: URL
     private(set) var items: [FileItem] = [] { didSet { rebuildRows() } }
     /// Folders shown expanded inline, and the contents loaded for them.
-    private(set) var expanded: Set<URL> = []
+    private(set) var expanded: Set<URL> = [] {
+        didSet { if expanded != oldValue { watchExpanded() } }
+    }
+    /// Expanded folders' own watchers, so what's inside them stays current too.
+    @ObservationIgnored private var expandedWatchers: [URL: DirectoryWatcher] = [:]
     @ObservationIgnored private var children: [URL: [FileItem]] = [:]
     /// The folder as shown: hidden files and the kind filter applied, sorted. Rebuilt only when
     /// the listing, sort or filters change, never while rendering.
@@ -307,6 +311,21 @@ final class BrowserModel: Identifiable {
             }
             self.rebuildRows()
             if !measure.isEmpty { self.showSizes() }
+        }
+    }
+
+    private func watchExpanded() {
+        for (folder, watcher) in expandedWatchers where !expanded.contains(folder) {
+            watcher.stop()
+            expandedWatchers[folder] = nil
+        }
+        for folder in expanded where expandedWatchers[folder] == nil {
+            let watcher = DirectoryWatcher { [weak self] in
+                guard let self else { return }
+                if self.isShown { self.loadChildren(of: [folder]) } else { self.missedChange = true }
+            }
+            watcher.watch(folder)
+            expandedWatchers[folder] = watcher
         }
     }
 

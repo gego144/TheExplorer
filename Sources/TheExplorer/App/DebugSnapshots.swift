@@ -85,16 +85,16 @@ enum DebugSnapshots {
                     }
                 }
             case "rowcounts":
-                // rowcounts:<seconds> logs every change in how many rows Recents or New shows,
-                // opening Recents first if neither is showing.
-                if model.destination != .recents && model.destination != .newFiles { model.show(.recents) }
+                // rowcounts:<seconds> logs every change in how many rows the list shows.
+                if model.destination == .storage { model.show(.recents) }
                 let start = Date()
                 var last = -1
                 var changes: [String] = []
                 while Date().timeIntervalSince(start) < (Double(argument) ?? 2) {
                     let list = model.destination == .newFiles ? model.newFiles : model.recents
-                    if list.rows.count != last {
-                        last = list.rows.count
+                    let count = model.destination == .folder ? model.rows.count : list.rows.count
+                    if count != last {
+                        last = count
                         changes.append(String(format: "%.2fs=%d", Date().timeIntervalSince(start), last))
                     }
                     try? await Task.sleep(for: .milliseconds(10))
