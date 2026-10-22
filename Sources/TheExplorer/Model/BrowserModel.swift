@@ -18,6 +18,13 @@ enum Destination: Hashable {
     var isRemote: Bool { self == .s3 || self == .drive }
 }
 
+/// How a file list is shown.
+enum FileLayout: Hashable {
+    case list
+    /// Thumbnails in a grid, for scrolling through photos and videos.
+    case gallery
+}
+
 enum NewItemKind {
     case folder
     case file
@@ -374,6 +381,28 @@ final class BrowserModel: Identifiable {
             guard let id = storage.selection, let node = storage.focus?.children.first(where: { $0.id == id }),
                   node.kind != .otherFiles else { return [] }
             return [node.url]
+        }
+    }
+
+    /// What the layout choice is remembered by: the place on screen. Nil where there's no
+    /// file list to lay out (Storage).
+    var layoutPlace: String? {
+        if isSearching { return "search" }
+        switch destination {
+        case .folder: return currentURL.standardizedFileURL.path
+        case .recents: return "recents"
+        case .newFiles: return "new"
+        case .storage: return nil
+        case .s3: return s3.location?.url.absoluteString ?? "s3"
+        case .drive: return drive.location?.url.absoluteString ?? "drive"
+        }
+    }
+
+    var layout: FileLayout {
+        get { layoutPlace.map { Prefs.shared.galleryPlaces.contains($0) } == true ? .gallery : .list }
+        set {
+            guard let place = layoutPlace else { return }
+            Prefs.shared.setGallery(newValue == .gallery, for: place)
         }
     }
 

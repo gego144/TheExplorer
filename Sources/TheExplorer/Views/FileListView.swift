@@ -100,8 +100,20 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
     private static var listSpace: String { "fileList" }
     @State private var typeBuffer = ""
     @State private var lastTypeTime = Date.distantPast
+    @Environment(\.fileLayout) private var layout
 
     var body: some View {
+        if layout == .gallery {
+            GalleryView(rows: rows, selection: $selection, empty: empty, focusRequest: focusRequest, onOpen: onOpen,
+                        onQuickLook: onQuickLook, onDropBackground: onDropBackground, onReachEnd: onReachEnd,
+                        footer: footer, rowMenu: rowMenu, backgroundMenu: backgroundMenu)
+        } else {
+            list
+        }
+    }
+
+    @ViewBuilder
+    private var list: some View {
         let maxSize = self.maxSize ?? rows.lazy.compactMap(\.size).max() ?? 0
         let _ = multiDrag.update(rows: rows, selection: selection)
         GeometryReader { proxy in
@@ -665,7 +677,7 @@ private struct ListDropDelegate: DropDelegate {
     }
 }
 
-private struct GroupHeader: View {
+struct GroupHeader: View {
     let title: String
 
     var body: some View {

@@ -31,6 +31,8 @@ struct DriveFile: Sendable, Hashable {
     var targetType: String?
     /// Drive's own preview image (images, videos, PDFs, Google Docs…); a short-lived link.
     var thumbnailLink: String?
+    /// A video's length, in seconds.
+    var duration: Double?
     var canAddChildren = true
     var canRename = true
     var canTrash = true
@@ -86,6 +88,10 @@ struct DriveFile: Sendable, Hashable {
         webLink = json["webViewLink"] as? String
         owner = ((json["owners"] as? [[String: Any]])?.first?["displayName"] as? String)
         thumbnailLink = json["thumbnailLink"] as? String
+        if let video = json["videoMediaMetadata"] as? [String: Any],
+           let millis = (video["durationMillis"] as? String).flatMap(Double.init) ?? (video["durationMillis"] as? Double) {
+            duration = millis / 1000
+        }
         if let shortcut = json["shortcutDetails"] as? [String: Any] {
             targetID = shortcut["targetId"] as? String
             targetType = shortcut["targetMimeType"] as? String
@@ -244,7 +250,7 @@ final class DriveClient: Sendable {
     static var api: String { (GoogleOAuth.testEndpoint ?? "https://www.googleapis.com") + "/drive/v3" }
     static var uploadAPI: String { (GoogleOAuth.testEndpoint ?? "https://www.googleapis.com") + "/upload/drive/v3" }
 
-    static let fileFields = "id,name,mimeType,size,modifiedTime,createdTime,parents,driveId,webViewLink,owners(displayName),shortcutDetails(targetId,targetMimeType),thumbnailLink,capabilities(canAddChildren,canRename,canTrash,canShare)"
+    static let fileFields = "id,name,mimeType,size,modifiedTime,createdTime,parents,driveId,webViewLink,owners(displayName),shortcutDetails(targetId,targetMimeType),thumbnailLink,videoMediaMetadata(durationMillis),capabilities(canAddChildren,canRename,canTrash,canShare)"
     static let permissionFields = "id,type,role,emailAddress,displayName,domain,deleted,permissionDetails(inherited)"
 
     init(auth: GoogleAuth) {

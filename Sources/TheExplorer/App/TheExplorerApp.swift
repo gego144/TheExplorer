@@ -274,6 +274,15 @@ struct ExplorerCommands: Commands {
                 .keyboardShortcut(".", modifiers: [.command, .shift])
             Button("Folders First") { model?.foldersFirst.toggle() }
             Divider()
+            Button("as List") { model?.layout = .list }
+                .keyboardShortcut("1", modifiers: [.command, .option])
+            Button("as Gallery") { model?.layout = .gallery }
+                .keyboardShortcut("2", modifiers: [.command, .option])
+            Button("Bigger Thumbnails") { Self.resizeTiles(by: 1.2) }
+                .keyboardShortcut("=")
+            Button("Smaller Thumbnails") { Self.resizeTiles(by: 1 / 1.2) }
+                .keyboardShortcut("-")
+            Divider()
             Button(workspace?.isSplit == true ? "Close Split" : "Split Pane") { workspace?.toggleSplit() }
                 .keyboardShortcut("/")
             Button("Switch Pane") { paneAction { $0.switchPane() } }
@@ -370,6 +379,12 @@ struct ExplorerCommands: Commands {
             NSSound.beep()
             return
         }
+    }
+
+    /// The gallery's tile size, within its range.
+    static func resizeTiles(by factor: Double) {
+        let range = Prefs.galleryTileSizes
+        Prefs.shared.galleryTileSize = min(range.upperBound, max(range.lowerBound, (Prefs.shared.galleryTileSize * factor).rounded()))
     }
 
     static func functionKey(_ key: Int) -> KeyEquivalent {

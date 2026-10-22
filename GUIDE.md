@@ -2,7 +2,7 @@
 
 Everything TheExplorer does and how to use it. For building and working on the code, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
-**Contents:** [Folder sizes](#real-folder-sizes) · [Paths and search](#one-bar-for-paths-and-search) · [Previews](#previews-and-zip-archives) · [Storage](#storage-map) · [S3](#s3-like-a-folder) · [Google Drive](#google-drive) · [Actions](#actions) · [Recents and New](#recents-and-new) · [Settings](#settings) · [Everything else](#and-the-rest) · [Permissions](#permissions) · [Keyboard shortcuts](#keyboard-shortcuts)
+**Contents:** [Folder sizes](#real-folder-sizes) · [Paths and search](#one-bar-for-paths-and-search) · [Gallery](#gallery) · [Previews](#previews-and-zip-archives) · [Storage](#storage-map) · [S3](#s3-like-a-folder) · [Google Drive](#google-drive) · [Actions](#actions) · [Recents and New](#recents-and-new) · [Settings](#settings) · [Everything else](#and-the-rest) · [Permissions](#permissions) · [Keyboard shortcuts](#keyboard-shortcuts)
 
 ## Real folder sizes
 
@@ -33,6 +33,12 @@ Search works like a launcher's rather than Spotlight's. TheExplorer keeps its ow
 </table>
 
 <img src="docs/screenshots/recent-folders.png" alt="Recent folders listed when the command bar opens" width="100%">
+
+## Gallery
+
+Any list can be a grid of thumbnails instead, for scrolling through photos and videos: local folders, Google Drive, S3, Recents, New and search results. Switch with the list and grid buttons in the bar, or ⌥⌘1 and ⌥⌘2. Each folder remembers which you chose, so a camera roll stays a gallery and a code folder stays a list.
+
+Photos fill their tiles. Videos show how long they are, and folders and other files show their icon. Local thumbnails come from Quick Look and Drive's come from Google. S3 has none, so photos small enough are read whole, bigger ones show the preview the camera stored in them, and videos show a frame. Only the tiles on screen load, so a folder of thousands scrolls smoothly. Change the tile size with the slider, ⌘+ and ⌘−, or by pinching. Selection, Space for Quick Look, opening, dragging and right-click menus work as in the list.
 
 ## Previews and zip archives
 
@@ -190,6 +196,7 @@ For the storage scan to include protected folders like Mail and Messages, grant 
 | Back / Forward / Enclosing folder | ⌘[ / ⌘] / ⌘↑ |
 | Open selection | ⌘↓, Return, or double-click |
 | Expand / collapse a folder in place | → / ← |
+| As list / as gallery, bigger / smaller thumbnails | ⌥⌘1 / ⌥⌘2, ⌘+ / ⌘− |
 | Quick Look, or the large preview for Markdown, CSV, JSON and fonts (then ↑/↓ to step through the list) | Space or ⌘Y |
 | Recents / New / Storage | ⇧⌘F / ⇧⌘E / ⇧⌘B |
 | Home / Desktop / Documents / Downloads / Applications | ⇧⌘H / ⇧⌘D / ⇧⌘O / ⌥⌘L / ⇧⌘A |

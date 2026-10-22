@@ -95,6 +95,10 @@ def seed():
     add("plan", "Launch plan", GOOGLE + "document", ["projects"])
     add("survey", "Survey", GOOGLE + "form", ["projects"])
     add("beach", "beach.png", "image/png", ["photos"], png(64, 48, 7))
+    # A camera roll for the gallery, with a video that knows its length.
+    for i in range(1, 13):
+        add(f"img{i}", f"IMG_{340 + i:04}.HEIC", "image/heic", ["photos"], png(16, 12, i), modified=f"2026-09-{i:02}T10:00:00.000Z")
+    add("clip", "IMG_0353.MOV", "video/quicktime", ["photos"], b"\0" * 4096, videoMediaMetadata={"durationMillis": "83000"})
     add("long", "server.log", "text/plain", ["root-id"], b"".join(b"line %d: all good\n" % i for i in range(5000)))
     add("shortcut", "Projects shortcut", "application/vnd.google-apps.shortcut", ["root-id"],
         shortcutDetails={"targetId": "projects", "targetMimeType": FOLDER})

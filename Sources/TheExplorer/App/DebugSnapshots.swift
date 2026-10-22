@@ -100,6 +100,12 @@ enum DebugSnapshots {
                 }
                 log("\(scene): \(changes.joined(separator: " "))")
                 wait = 0
+            case "layout":
+                // layout:gallery|list shows the current place that way (remembered for the run's
+                // own settings only: debug builds have their own).
+                model.layout = argument == "gallery" ? .gallery : .list
+            case "tilesize":
+                Prefs.shared.galleryTileSize = Double(argument) ?? 180
             case "scanstart":
                 // scanstart:<path> starts a Storage scan without waiting for it, to see it run.
                 model.show(.storage)

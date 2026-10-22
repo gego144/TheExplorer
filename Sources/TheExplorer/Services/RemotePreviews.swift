@@ -84,12 +84,40 @@ enum RemotePreviews {
     static func load(_ url: URL, size: Int64?, version: String) async -> RemotePreview? {
         if let hit = cached(url, version: version) { return hit }
         guard let plan = plan(for: url, size: size) else { return nil }
-        let preview = try? await make(plan, url: url, size: size)
+        let preview = try? await make(plan, url: url, size: size, side: side)
         if !Task.isCancelled { cache.setObject(Entry(preview), forKey: key(url, version)) }
         return preview
     }
 
-    private static func make(_ plan: Plan, url: URL, size: Int64?) async throws -> RemotePreview? {
+    /// A small image of an S3 or Drive file for the gallery, `side` pixels on its long side, or
+    /// nil when there's nothing better than its icon. Only images, videos and PDFs on S3, and
+    /// only what's cheap: a photo too big to read whole shows the thumbnail it carries.
+    static func thumbnail(_ url: URL, size: Int64?, side: Int) async -> CGImage? {
+        let plan: Plan
+        if DriveLocation(url: url) != nil {
+            guard let location = DriveLocation(url: url), !location.isFolder,
+                  DriveStore.shared.file(location)?.thumbnailLink != nil else { return nil }
+            plan = .driveThumbnail
+        } else {
+            guard let type = UTType(filenameExtension: url.pathExtension), (size ?? 1) > 0 else { return nil }
+            if type.conforms(to: .image) {
+                plan = (size ?? 0) <= galleryImageLimit ? .image : .imageHead
+            } else if type.conforms(to: .movie) || type.conforms(to: .video) {
+                plan = .video
+            } else if type.conforms(to: .pdf), (size ?? 0) <= pdfLimit {
+                plan = .pdf
+            } else {
+                return nil
+            }
+        }
+        guard case .image(let image)? = try? await make(plan, url: url, size: size, side: side) else { return nil }
+        return image
+    }
+
+    /// S3 photos up to this size are read whole for the gallery.
+    nonisolated static let galleryImageLimit: Int64 = 8_000_000
+
+    private static func make(_ plan: Plan, url: URL, size: Int64?, side: Int) async throws -> RemotePreview? {
         if let location = DriveLocation(url: url) {
             guard let client = DriveStore.shared.client(for: location.accountID) else { return nil }
             var file = try await DriveStore.shared.details(location)
@@ -101,6 +129,8 @@ enum RemotePreviews {
             let data: Data
             do {
                 data = try await client.thumbnail(link, size: side)
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
                 // Thumbnail links only last a few hours; a fresh listing has a new one.
                 file = try await client.file(location.id)
@@ -108,7 +138,7 @@ enum RemotePreviews {
                 guard let fresh = file.thumbnailLink else { return nil }
                 data = try await client.thumbnail(fresh, size: side)
             }
-            return await decoded(data)
+            return await decoded(data, side: side)
         }
 
         guard let location = S3Location(url: url), let bucket = location.bucket,
@@ -120,13 +150,13 @@ enum RemotePreviews {
             return text(from: data, truncated: Int64(data.count) >= textBytes || (size ?? 0) > textBytes)
         case .image, .pdf:
             let data = try await client.data(bucket: bucket, key: key)
-            return plan == .pdf ? await pdfPage(data) : await decoded(data)
+            return plan == .pdf ? await pdfPage(data, side: side) : await decoded(data, side: side)
         case .imageHead:
             let data = try await client.data(bucket: bucket, key: key, range: 0...(headBytes - 1))
-            return await decoded(data, embeddedOnly: true)
+            return await decoded(data, side: side, embeddedOnly: true)
         case .video:
             let link = try await client.shareURL(bucket: bucket, key: key, expires: 900)
-            return try await videoFrame(link)
+            return try await videoFrame(link, side: side)
         case .driveThumbnail:
             return nil
         }
@@ -160,7 +190,7 @@ enum RemotePreviews {
 
     /// A shrunk image, made off the main thread. With `embeddedOnly`, only a thumbnail the
     /// file carries (the data is just its start, so the full image isn't there).
-    private static func decoded(_ data: Data, embeddedOnly: Bool = false) async -> RemotePreview? {
+    private static func decoded(_ data: Data, side: Int, embeddedOnly: Bool = false) async -> RemotePreview? {
         await Task.detached(priority: .userInitiated) { () -> RemotePreview? in
             guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
             var options: [CFString: Any] = [
@@ -176,7 +206,7 @@ enum RemotePreviews {
         }.value
     }
 
-    private static func pdfPage(_ data: Data) async -> RemotePreview? {
+    private static func pdfPage(_ data: Data, side: Int) async -> RemotePreview? {
         await Task.detached(priority: .userInitiated) { () -> RemotePreview? in
             guard let page = PDFDocument(data: data)?.page(at: 0) else { return nil }
             let image = page.thumbnail(of: CGSize(width: side, height: side), for: .mediaBox)
@@ -187,7 +217,7 @@ enum RemotePreviews {
     /// A frame from about a second in (past any fade from black), read over the network. It
     /// takes the nearest keyframe rather than decoding up to an exact time, so only the start
     /// of the video is fetched.
-    private static func videoFrame(_ link: URL) async throws -> RemotePreview? {
+    private static func videoFrame(_ link: URL, side: Int) async throws -> RemotePreview? {
         let asset = AVURLAsset(url: link)
         let duration = (try? await asset.load(.duration).seconds) ?? 0
         let generator = AVAssetImageGenerator(asset: asset)

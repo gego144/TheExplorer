@@ -16,6 +16,8 @@ extension EnvironmentValues {
     /// The items of the list a context menu was opened in, so the menu needn't read each
     /// selected file from disk.
     @Entry var listedItems: ListedItems?
+    /// List or gallery, for the file lists in a pane.
+    @Entry var fileLayout = FileLayout.list
 }
 
 /// The inspector, or nothing when there's nothing to show. Its own view, so selecting files
@@ -147,18 +149,21 @@ private struct PaneContent: View {
     let model: BrowserModel
 
     var body: some View {
-        if model.isSearching {
-            SearchResultsView(model: model)
-        } else {
-            switch model.destination {
-            case .folder: FolderView(model: model)
-            case .recents: RecentsView(model: model, recents: model.recents)
-            case .newFiles: RecentsView(model: model, recents: model.newFiles)
-            case .storage: StorageView(model: model)
-            case .s3: S3View(model: model)
-            case .drive: DriveView(model: model)
+        Group {
+            if model.isSearching {
+                SearchResultsView(model: model)
+            } else {
+                switch model.destination {
+                case .folder: FolderView(model: model)
+                case .recents: RecentsView(model: model, recents: model.recents)
+                case .newFiles: RecentsView(model: model, recents: model.newFiles)
+                case .storage: StorageView(model: model)
+                case .s3: S3View(model: model)
+                case .drive: DriveView(model: model)
+                }
             }
         }
+        .environment(\.fileLayout, model.layout)
     }
 }
 
@@ -542,6 +547,9 @@ struct CommandBar: View {
                 Segmented(selection: $model.kindFilter, options: [(.all, "All"), (.folders, "Dirs"), (.files, "Files")])
                     .fixedSize()
             }
+            if model.layoutPlace != nil {
+                LayoutPicker(model: model)
+            }
             ChromeMenu(style: .icon) {
                 Toggle("Folders First", isOn: $model.foldersFirst)
                 Toggle("Show Hidden Files", isOn: $model.showHidden)
@@ -570,6 +578,32 @@ struct CommandBar: View {
         .padding(.vertical, 8)
         .background(Theme.surface)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
+    }
+}
+
+/// List or gallery, remembered for each place, plus the tile size while it's a gallery.
+private struct LayoutPicker: View {
+    @Bindable var model: BrowserModel
+    private var prefs: Prefs { .shared }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if model.layout == .gallery {
+                Slider(value: Binding(get: { prefs.galleryTileSize }, set: { prefs.galleryTileSize = $0.rounded() }),
+                       in: Prefs.galleryTileSizes)
+                    .controlSize(.mini)
+                    .frame(width: 80)
+                    .help("Tile size (⌘+ and ⌘−, or pinch)")
+            }
+            HStack(spacing: 2) {
+                IconButton(systemImage: "list.bullet", help: "As List (⌥⌘1)", isOn: model.layout == .list) {
+                    model.layout = .list
+                }
+                IconButton(systemImage: "square.grid.2x2", help: "As Gallery (⌥⌘2)", isOn: model.layout == .gallery) {
+                    model.layout = .gallery
+                }
+            }
+        }
     }
 }
 

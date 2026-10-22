@@ -53,6 +53,23 @@ final class Prefs {
     var newHidesClutter: Bool { didSet { defaults.set(newHidesClutter, forKey: "newHidesClutter") } }
     var newRange: RecentsRange { didSet { defaults.set(newRange.rawValue, forKey: "newRangeDays") } }
 
+    /// Places shown as a gallery rather than a list: folders (local, S3 or Drive), Recents, New.
+    /// Each place keeps the layout you last chose for it, like Finder's per-folder views.
+    private(set) var galleryPlaces: Set<String> { didSet { defaults.set(Array(galleryPlaces), forKey: "galleryPlaces") } }
+    /// The gallery's tile width, in points.
+    var galleryTileSize: Double { didSet { defaults.set(galleryTileSize, forKey: "galleryTileSize") } }
+    static let galleryTileSizes: ClosedRange<Double> = 110...360
+
+    func setGallery(_ on: Bool, for place: String) {
+        if on {
+            // Plenty for anyone's photo folders, without growing forever.
+            if galleryPlaces.count >= 2000 { galleryPlaces.removeAll() }
+            galleryPlaces.insert(place)
+        } else {
+            galleryPlaces.remove(place)
+        }
+    }
+
     /// The tab Settings shows; "Edit Actions…" opens it on Actions.
     var settingsTab = SettingsTab.general
 
@@ -105,6 +122,8 @@ final class Prefs {
         foldersFirst = defaults.object(forKey: "foldersFirst") as? Bool ?? true
         newHidesClutter = defaults.object(forKey: "newHidesClutter") as? Bool ?? true
         newRange = (defaults.object(forKey: "newRangeDays") as? Int).flatMap(RecentsRange.init) ?? .week
+        galleryPlaces = Set(defaults.stringArray(forKey: "galleryPlaces") ?? [])
+        galleryTileSize = defaults.object(forKey: "galleryTileSize") as? Double ?? 180
         refreshFileBrowser()
         Theme.apply(theme.palette(systemIsDark: Self.systemIsDark))
         // The System theme follows macOS switching between light and dark (by hand, or at
