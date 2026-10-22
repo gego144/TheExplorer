@@ -580,6 +580,7 @@ final class DriveClient: Sendable {
         case "invalidSharingRequest":
             // Google's own message says what was wrong ("…not a Google account…").
             friendly = message.replacingOccurrences(of: "Bad Request. User message: ", with: "")
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\"“”"))
         default:
             friendly = status == 404 ? "Not found in Drive. It may have been moved, deleted or unshared." : message
         }

@@ -131,6 +131,8 @@ struct DriveModelTests {
     @Test func sharingErrorsSayWhatToDo() {
         let invite = Data(#"{"error": {"code": 400, "message": "Bad Request. User message: You must check the Notify people box.", "errors": [{"reason": "invalidSharingRequest"}]}}"#.utf8)
         #expect(DriveClient.error(400, invite).message == "You must check the Notify people box.")
+        let quoted = Data(##"{"error": {"message": "Bad Request. User message: \"There's a problem with this email or domain.\"", "errors": [{"reason": "invalidSharingRequest"}]}}"##.utf8)
+        #expect(DriveClient.error(400, quoted).message == "There's a problem with this email or domain.")
         let inherited = Data(#"{"error": {"errors": [{"reason": "cannotModifyInheritedTeamDrivePermission"}]}}"#.utf8)
         #expect(DriveClient.error(403, inherited).message.contains("comes from the shared drive"))
         let policy = Data(#"{"error": {"errors": [{"reason": "publishOutNotPermitted"}]}}"#.utf8)
