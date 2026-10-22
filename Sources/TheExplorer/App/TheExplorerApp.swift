@@ -60,6 +60,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Search's own index: built in the background, then kept current.
         FileIndex.shared.start()
+        // Recents' list, ready before it's first opened (a tenth of a second of Spotlight).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { RecentsModel.prewarm() }
         // Safety net: if macOS thought it restored windows but none came back (e.g. state saved by
         // an older build), open a fresh one instead of sitting there with no window.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {

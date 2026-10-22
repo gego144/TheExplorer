@@ -174,25 +174,77 @@ private struct ScanProgressView: View {
     let storage: StorageModel
 
     var body: some View {
-        VStack(spacing: 12) {
-            ProgressView().controlSize(.regular).tint(Theme.accent)
-            Text("Scanning \(storage.target.label)…").font(.system(size: 15, weight: .semibold))
-            Text("\(storage.progressFiles.formatted()) files · \(Format.bytes(storage.progressBytes))")
-                .font(Theme.mono)
-                .foregroundStyle(Theme.accent)
-            Text(Format.path(storage.progressPath))
-                .font(Theme.monoSmall)
-                .foregroundStyle(Theme.textTertiary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: 520)
-            if let start = storage.scanStarted {
-                Text(timerInterval: start...Date.distantFuture, countsDown: false)
-                    .font(Theme.monoSmall)
-                    .foregroundStyle(Theme.textTertiary)
+        if storage.progressFolders.isEmpty {
+            VStack(spacing: 12) {
+                ProgressView().controlSize(.regular).tint(Theme.accent)
+                Text("Scanning \(storage.target.label)…").font(.system(size: 15, weight: .semibold))
+                counts
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            // The folders fill in as they're counted, so the big ones show up long before the end.
+            VStack(spacing: 0) {
+                HStack(spacing: 10) {
+                    ProgressView().controlSize(.small).tint(Theme.accent)
+                    Text("Scanning \(storage.target.label)…").font(.system(size: 12.5, weight: .semibold))
+                    Text("\(storage.progressFiles.formatted()) files · \(Format.bytes(storage.progressBytes))")
+                        .font(Theme.mono)
+                        .foregroundStyle(Theme.accent)
+                    Text(Format.path(storage.progressPath))
+                        .font(Theme.monoSmall)
+                        .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 8)
+                    elapsed
+                }
+                .padding(.horizontal, 12)
+                .frame(height: 38)
+                ScrollView {
+                    let largest = max(1, storage.progressFolders.first?.bytes ?? 1)
+                    LazyVStack(spacing: 1) {
+                        ForEach(storage.progressFolders) { folder in
+                            HStack(spacing: 10) {
+                                Text(folder.name)
+                                    .font(.system(size: 12.5, weight: .semibold))
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Spacer(minLength: 12)
+                                HeatBar(fraction: Double(folder.bytes) / Double(largest), height: 4, width: 130)
+                                Text(Format.bytes(folder.bytes))
+                                    .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
+                                    .frame(width: 78, alignment: .trailing)
+                            }
+                            .padding(.horizontal, 8)
+                            .frame(height: 30)
+                        }
+                    }
+                    .padding(8)
+                }
+                .scrollContentBackground(.hidden)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder private var counts: some View {
+        Text("\(storage.progressFiles.formatted()) files · \(Format.bytes(storage.progressBytes))")
+            .font(Theme.mono)
+            .foregroundStyle(Theme.accent)
+        Text(Format.path(storage.progressPath))
+            .font(Theme.monoSmall)
+            .foregroundStyle(Theme.textTertiary)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .frame(maxWidth: 520)
+        elapsed
+    }
+
+    @ViewBuilder private var elapsed: some View {
+        if let start = storage.scanStarted {
+            Text(timerInterval: start...Date.distantFuture, countsDown: false)
+                .font(Theme.monoSmall)
+                .foregroundStyle(Theme.textTertiary)
+        }
     }
 }
 

@@ -79,7 +79,39 @@ enum DebugSnapshots {
                     StorageModel.shared.target = .custom(URL(fileURLWithPath: argument).standardizedFileURL)
                     StorageModel.shared.scan()
                     while StorageModel.shared.isScanning { try? await Task.sleep(for: .milliseconds(200)) }
+                    if let result = StorageModel.shared.result {
+                        log("\(scene): \(String(format: "%.2fs", result.duration)), \(Format.bytes(result.root.size)), \(result.root.fileCount) files, \(result.unreadableFolders) unreadable")
+                    }
                 }
+            case "rowcounts":
+                // rowcounts:<seconds> logs every change in how many rows Recents or New shows,
+                // opening Recents first if neither is showing.
+                if model.destination != .recents && model.destination != .newFiles { model.show(.recents) }
+                let start = Date()
+                var last = -1
+                var changes: [String] = []
+                while Date().timeIntervalSince(start) < (Double(argument) ?? 2) {
+                    let list = model.destination == .newFiles ? model.newFiles : model.recents
+                    if list.rows.count != last {
+                        last = list.rows.count
+                        changes.append(String(format: "%.2fs=%d", Date().timeIntervalSince(start), last))
+                    }
+                    try? await Task.sleep(for: .milliseconds(10))
+                }
+                log("\(scene): \(changes.joined(separator: " "))")
+                wait = 0
+            case "scanstart":
+                // scanstart:<path> starts a Storage scan without waiting for it, to see it run.
+                model.show(.storage)
+                StorageModel.shared.target = .custom(URL(fileURLWithPath: argument).standardizedFileURL)
+                StorageModel.shared.scan()
+            case "scanstop":
+                // scanstop logs whether the app is still busy a moment after Stop.
+                StorageModel.shared.cancel()
+                let before = InputDriver.processCPU()
+                try? await Task.sleep(for: .seconds(1))
+                log("scanstop: \(String(format: "%.2f", InputDriver.processCPU() - before))s of CPU in the second after stopping")
+                wait = 0
             case "drill":
                 // drill:<name> opens a folder in Storage, as double-clicking it does, and logs
                 // what's inside once its files are listed.

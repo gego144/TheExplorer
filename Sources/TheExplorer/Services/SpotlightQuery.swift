@@ -50,8 +50,8 @@ final class SpotlightQuery: @unchecked Sendable {
     func start(_ handler: @escaping Handler) {
         let names: [Notification.Name] = [.NSMetadataQueryGatheringProgress, .NSMetadataQueryDidFinishGathering, .NSMetadataQueryDidUpdate]
         for name in names {
-            observers.append(NotificationCenter.default.addObserver(forName: name, object: query, queue: queue) { [weak self] _ in
-                self?.resultsChanged()
+            observers.append(NotificationCenter.default.addObserver(forName: name, object: query, queue: queue) { [weak self] note in
+                self?.resultsChanged(finished: note.name == .NSMetadataQueryDidFinishGathering)
             })
         }
         queue.addOperation { [self] in
@@ -99,11 +99,12 @@ final class SpotlightQuery: @unchecked Sendable {
         }
     }
 
-    private func resultsChanged() {
+    private func resultsChanged(finished: Bool) {
         // Once the first results are in, keeping them current is background work.
         if !query.isGathering && queue.qualityOfService != .utility { queue.qualityOfService = .utility }
         let elapsed = CACurrentMediaTime() - lastDelivery
-        if query.isGathering || elapsed >= Self.liveUpdateInterval {
+        // The finished results go out straight away: they're what the list is waiting for.
+        if query.isGathering || finished || elapsed >= Self.liveUpdateInterval {
             deliver()
             return
         }

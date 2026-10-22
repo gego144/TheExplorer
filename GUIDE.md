@@ -80,7 +80,7 @@ For everything else, Space opens Quick Look, and ↑/↓ then step through every
 
 ## Storage map
 
-Scan your home folder, the whole Mac, or any folder. Drill into a treemap and a ranked list with percentages, see the largest files, and compare against total disk usage. Moving something to the Trash updates the totals without a rescan.
+Scan your home folder, the whole Mac, or any folder. The scan reads folders on every core at once, and each folder's size fills in while it runs, so the big ones show up within a second or two. Drill into a treemap and a ranked list with percentages, see the largest files, and compare against total disk usage. Moving something to the Trash updates the totals without a rescan.
 
 <img src="docs/screenshots/storage.png" alt="The storage treemap and ranked folder list" width="100%">
 

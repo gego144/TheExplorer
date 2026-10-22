@@ -19,6 +19,13 @@ extension VolumeUsage {
     }
 }
 
+/// One of the scanned folder's folders while the scan runs.
+struct ScanningFolder: Identifiable, Equatable {
+    let name: String
+    let bytes: Int64
+    var id: String { name }
+}
+
 enum ScanTarget: Hashable {
     case home
     case mac
@@ -53,6 +60,8 @@ final class StorageModel {
     private(set) var progressFiles = 0
     private(set) var progressBytes: Int64 = 0
     private(set) var progressPath = ""
+    /// The scanned folder's folders and how much of each is counted so far, largest first.
+    private(set) var progressFolders: [ScanningFolder] = []
     private(set) var scanStarted: Date?
     private(set) var volume: VolumeUsage?
     private(set) var hasFullDiskAccess = StorageModel.checkFullDiskAccess()
@@ -122,6 +131,7 @@ final class StorageModel {
         progressFiles = 0
         progressBytes = 0
         progressPath = root.path
+        progressFolders = []
         hasFullDiskAccess = Self.checkFullDiskAccess()
         refreshVolume()
 
@@ -132,13 +142,17 @@ final class StorageModel {
                     self?.progressFiles = snapshot.files
                     self?.progressBytes = snapshot.bytes
                     self?.progressPath = snapshot.path
+                    let folders = progress.folders.map { ScanningFolder(name: $0.name, bytes: $0.bytes) }
+                    if folders != self?.progressFolders { self?.progressFolders = folders }
                     try? await Task.sleep(for: .milliseconds(150))
                 }
             }
             defer { poller.cancel() }
-            let outcome = await Task.detached(priority: .userInitiated) {
+            let work = Task.detached(priority: .userInitiated) {
                 try? await DiskScanner.scan(root: root, progress: progress)
-            }.value
+            }
+            // Stop stops the scan itself, not just the wait for it.
+            let outcome = await withTaskCancellationHandler { await work.value } onCancel: { work.cancel() }
             guard let self, !Task.isCancelled else { return }
             self.isScanning = false
             if let outcome {

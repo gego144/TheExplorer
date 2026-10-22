@@ -93,13 +93,29 @@ final class ScanProgress: @unchecked Sendable {
     private var _files = 0
     private var _bytes: Int64 = 0
     private var _currentPath = ""
+    /// The root's folders and how much of each has been read, shown while the scan runs.
+    private var folderNames: [String] = []
+    private var folderBytes: [Int64] = []
 
-    func add(files: Int, bytes: Int64, path: String) {
+    func begin(folders: [String]) {
+        lock.withLock {
+            folderNames = folders
+            folderBytes = Array(repeating: 0, count: folders.count)
+        }
+    }
+
+    func add(files: Int, bytes: Int64, path: String, top: Int = -1) {
         lock.lock()
         _files += files
         _bytes += bytes
         _currentPath = path
+        if folderBytes.indices.contains(top) { folderBytes[top] += bytes }
         lock.unlock()
+    }
+
+    /// The root's folders, largest so far first.
+    var folders: [(name: String, bytes: Int64)] {
+        lock.withLock { zip(folderNames, folderBytes).map { ($0, $1) } }.sorted { $0.bytes > $1.bytes }
     }
 
     var snapshot: (files: Int, bytes: Int64, path: String) {
@@ -127,66 +143,174 @@ enum DiskScanner {
         return [library + "/Containers", library + "/Group Containers"]
     }
 
-    /// Scans `root`, fanning out across its top-level folders in parallel.
+    /// Scans `root` on every core at once. Folders go into one shared queue, so a big folder
+    /// is shared out across threads rather than walked by one while the rest sit idle, and
+    /// each folder is read with getattrlistbulk, which returns many entries per call where a
+    /// walk asks about each file on its own.
     static func scan(root: URL, progress: ScanProgress) async throws -> ScanResult {
         let start = Date()
         let rootPath = root.standardizedFileURL.path
+        let queue = ScanQueue()
+        let result = await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    continuation.resume(returning: scanAll(rootPath: rootPath, queue: queue, progress: progress))
+                }
+            }
+        } onCancel: {
+            queue.cancel()
+        }
+        try Task.checkCancellation()
+        return ScanResult(root: result.root, largestFiles: result.largest, unreadableFolders: result.unreadable,
+                          duration: Date().timeIntervalSince(start))
+    }
+
+    private static func scanAll(rootPath: String, queue: ScanQueue, progress: ScanProgress)
+        -> (root: SizeNode, largest: [LargeFile], unreadable: Int) {
         let rootNode = SizeNode(name: displayName(for: rootPath), path: rootPath, kind: .folder)
         rootNode.filesListed = true
         let skipped = protectedPaths()
-
-        let entries = (try? FileManager.default.contentsOfDirectory(atPath: rootPath)) ?? []
-        var folderPaths: [String] = []
+        let hardLinks = HardLinks()
         var rootFiles = FileCollector(limit: filesPerFolder)
         var largest = FileCollector(limit: largestFileCount)
+        var unreadable = 0
+        let buffer = UnsafeMutableRawBufferPointer.allocate(byteCount: bulkBufferSize, alignment: 16)
+        defer { buffer.deallocate() }
 
-        for name in entries {
-            let path = rootPath == "/" ? "/" + name : rootPath + "/" + name
-            if excludedPaths.contains(path) || skipped.contains(path) { continue }
-            var st = stat()
-            guard lstat(path, &st) == 0 else { continue }
-            if (st.st_mode & S_IFMT) == S_IFDIR {
-                folderPaths.append(path)
+        // The root first, on its own: its files are listed one by one, and its folders are
+        // the ones whose totals show while the scan runs.
+        var folders: [ScanQueue.Job] = []
+        let readable = readFolder(rootPath, buffer: buffer) { entry in
+            if entry.isFolder {
+                guard let job = subfolder(entry, of: rootNode, at: rootPath, top: folders.count, skipped: skipped,
+                                          unreadable: &unreadable) else { return }
+                folders.append(job)
             } else {
-                let size = Int64(st.st_blocks) * 512
+                guard entry.links <= 1 || hardLinks.isFirst(entry.fileID) else { return }
+                let size = entry.size
                 rootNode.size += size
                 rootNode.fileCount += 1
-                rootFiles.add(size: size) { path }
-                largest.add(size: size) { path }
+                let path = { (rootPath == "/" ? "/" : rootPath + "/") + String(cString: entry.name) }
+                rootFiles.add(size: size, path: path)
+                largest.add(size: size, path: path)
+            }
+        }
+        if !readable {
+            rootNode.isReadable = false
+            unreadable += 1
+        }
+        progress.begin(folders: folders.map(\.node.name))
+        queue.push(folders)
+
+        let lock = NSLock()
+        DispatchQueue.concurrentPerform(iterations: max(4, ProcessInfo.processInfo.activeProcessorCount)) { _ in
+            var found = FileCollector(limit: largestFileCount)
+            var cantRead = 0
+            let buffer = UnsafeMutableRawBufferPointer.allocate(byteCount: bulkBufferSize, alignment: 16)
+            defer { buffer.deallocate() }
+            while let job = queue.next() {
+                let subfolders = read(job, queue: queue, buffer: buffer, skipped: skipped, hardLinks: hardLinks,
+                                      largest: &found, unreadable: &cantRead, progress: progress)
+                queue.finished(subfolders)
+            }
+            lock.withLock {
+                for file in found.items { largest.add(size: file.size) { file.path } }
+                unreadable += cantRead
             }
         }
 
-        var unreadable = 0
-        try await withThrowingTaskGroup(of: SubtreeResult.self) { group in
-            var pending = folderPaths[...]
-            let width = max(4, ProcessInfo.processInfo.activeProcessorCount)
-            func launchNext() {
-                guard let path = pending.popFirst() else { return }
-                group.addTask { try scanSubtree(path: path, skipping: skipped, progress: progress) }
-            }
-            for _ in 0..<width { launchNext() }
-            while let result = try await group.next() {
-                if let node = result.node {
-                    node.parent = rootNode
-                    rootNode.children.append(node)
-                    rootNode.size += node.size
-                    rootNode.fileCount += node.fileCount
-                }
-                unreadable += result.unreadable
-                for file in result.largest { largest.add(size: file.size) { file.path } }
-                launchNext()
-            }
-        }
-
+        addUp(rootNode)
         attachFiles(rootFiles, to: rootNode)
         rootNode.children.sort { $0.size > $1.size }
+        return (rootNode, largest.finalized().items.map { LargeFile(path: $0.path, size: $0.size) }, unreadable)
+    }
 
-        return ScanResult(
-            root: rootNode,
-            largestFiles: largest.finalized().items.map { LargeFile(path: $0.path, size: $0.size) },
-            unreadableFolders: unreadable,
-            duration: Date().timeIntervalSince(start)
-        )
+    /// Reads one folder: its files count toward it, its folders join the tree and are returned
+    /// to be read in turn.
+    private static func read(_ job: ScanQueue.Job, queue: ScanQueue, buffer: UnsafeMutableRawBufferPointer, skipped: Set<String>,
+                             hardLinks: HardLinks, largest: inout FileCollector, unreadable: inout Int,
+                             progress: ScanProgress) -> [ScanQueue.Job] {
+        let node = job.node
+        let path = job.path
+        let top = job.top
+        var subfolders: [ScanQueue.Job] = []
+        var files = 0
+        var bytes: Int64 = 0
+        var cantRead = 0
+        let readable = readFolder(path, buffer: buffer, stop: { queue.isCancelled }) { entry in
+            if entry.isFolder {
+                if let next = subfolder(entry, of: node, at: path, top: top, skipped: skipped, unreadable: &cantRead) {
+                    subfolders.append(next)
+                }
+            } else {
+                guard entry.links <= 1 || hardLinks.isFirst(entry.fileID) else { return }
+                files += 1
+                bytes += entry.size
+                largest.add(size: entry.size) { path + "/" + String(cString: entry.name) }
+            }
+        }
+        if !readable {
+            node.isReadable = false
+            node.filesListed = true
+            cantRead += 1
+        }
+        unreadable += cantRead
+        // Its own files for now; its subfolders are added once they're all read.
+        node.size = bytes
+        node.fileCount = files
+        progress.add(files: files, bytes: bytes, path: path, top: top)
+        return subfolders
+    }
+
+    /// A folder found in `parent`, added to the tree. Returns the job to read it, or nil when it
+    /// isn't read: another volume, a virtual filesystem, or protected (then it's marked unreadable).
+    private static func subfolder(_ entry: BulkEntry, of parent: SizeNode, at parentPath: String, top: Int,
+                                  skipped: Set<String>, unreadable: inout Int) -> ScanQueue.Job? {
+        guard !entry.isMountPoint else { return nil }
+        let name = String(cString: entry.name)
+        let path = parentPath == "/" ? "/" + name : parentPath + "/" + name
+        guard !excludedPaths.contains(path) else { return nil }
+        let node = SizeNode(name: name, kind: .folder)
+        node.parent = parent
+        parent.children.append(node)
+        if skipped.contains(path) {
+            node.isReadable = false
+            node.filesListed = true
+            unreadable += 1
+            return nil
+        }
+        return ScanQueue.Job(node: node, path: path, top: top)
+    }
+
+    /// Once every folder is read: each folder's own files become one "N files" node, and its
+    /// size and count take in its subfolders'. Children come before their parents in reverse
+    /// pre-order, so one pass adds everything up.
+    private static func addUp(_ root: SizeNode) {
+        var order: [SizeNode] = []
+        var stack = root.children.filter(\.isFolder)
+        while let node = stack.popLast() {
+            order.append(node)
+            for child in node.children where child.kind == .folder { stack.append(child) }
+        }
+        for node in order.reversed() {
+            // Its subfolders have added themselves in by now; what's left is its own files.
+            var ownFiles = node.fileCount
+            var ownBytes = node.size
+            for child in node.children where child.kind == .folder {
+                ownFiles -= child.fileCount
+                ownBytes -= child.size
+            }
+            if ownFiles > 0 {
+                let summary = SizeNode(name: filesTitle(ownFiles), kind: .otherFiles, size: ownBytes, fileCount: ownFiles)
+                summary.parent = node
+                node.children.append(summary)
+            }
+            node.children.sort { $0.size > $1.size }
+            if let parent = node.parent {
+                parent.size += node.size
+                parent.fileCount += node.fileCount
+            }
+        }
     }
 
     /// A folder's own files, and its subfolders (to add up from their sizes).
@@ -250,94 +374,6 @@ enum DiskScanner {
             return !Task.isCancelled
         }
         return ok ? (bytes, files, complete) : nil
-    }
-
-    // MARK: - Subtree scanning
-
-    private struct SubtreeResult: @unchecked Sendable {
-        let node: SizeNode?
-        let largest: [(path: String, size: Int64)]
-        let unreadable: Int
-    }
-
-    private struct Frame {
-        let node: SizeNode
-        /// The folder's own files, which become one node until it's opened.
-        var files = 0
-        var bytes: Int64 = 0
-    }
-
-    private static func scanSubtree(path: String, skipping skipped: Set<String>, progress: ScanProgress) throws -> SubtreeResult {
-        var stack: [Frame] = []
-        var top: SizeNode?
-        var largest = FileCollector(limit: largestFileCount)
-        var unreadable = 0
-        var seenInodes = Set<HardLinkKey>()
-        var pendingFiles = 0
-        var pendingBytes: Int64 = 0
-
-        let finished = walk(path: path, skipping: skipped) { event in
-            switch event {
-            case .enterFolder(let folderPath):
-                let node: SizeNode
-                if let parent = stack.last?.node {
-                    node = SizeNode(name: name(of: folderPath), kind: .folder)
-                    node.parent = parent
-                    parent.children.append(node)
-                } else {
-                    node = SizeNode(name: name(of: folderPath), path: folderPath, kind: .folder)
-                    top = node
-                }
-                stack.append(Frame(node: node))
-
-            case .exitFolder:
-                guard let frame = stack.popLast() else { break }
-                let node = frame.node
-                if frame.files > 0 {
-                    let summary = SizeNode(name: filesTitle(frame.files), kind: .otherFiles, size: frame.bytes, fileCount: frame.files)
-                    summary.parent = node
-                    node.children.append(summary)
-                }
-                node.children.sort { $0.size > $1.size }
-                if let parent = stack.last?.node {
-                    parent.size += node.size
-                    parent.fileCount += node.fileCount
-                }
-                progress.add(files: pendingFiles, bytes: pendingBytes, path: node.path)
-                pendingFiles = 0
-                pendingBytes = 0
-
-            case .file(let st, let pathProvider):
-                if st.st_nlink > 1, !seenInodes.insert(HardLinkKey(st)).inserted { break }
-                let size = Int64(st.st_blocks) * 512
-                guard !stack.isEmpty else { break }
-                stack[stack.count - 1].node.size += size
-                stack[stack.count - 1].node.fileCount += 1
-                stack[stack.count - 1].files += 1
-                stack[stack.count - 1].bytes += size
-                largest.add(size: size, path: pathProvider)
-                pendingFiles += 1
-                pendingBytes += size
-
-            case .unreadable(let folderPath):
-                unreadable += 1
-                let node: SizeNode
-                if let parent = stack.last?.node {
-                    node = SizeNode(name: name(of: folderPath), kind: .folder)
-                    node.parent = parent
-                    parent.children.append(node)
-                } else {
-                    node = SizeNode(name: name(of: folderPath), path: folderPath, kind: .folder)
-                    top = node
-                }
-                node.isReadable = false
-                node.filesListed = true
-            }
-            return !Task.isCancelled
-        }
-        if !finished { try Task.checkCancellation() }
-        progress.add(files: pendingFiles, bytes: pendingBytes, path: path)
-        return SubtreeResult(node: top, largest: largest.items, unreadable: unreadable)
     }
 
     private static func attachFiles(_ collector: FileCollector, to node: SizeNode) {
@@ -484,6 +520,141 @@ enum DiskScanner {
             return FileManager.default.displayName(atPath: "/")
         }
         return (path as NSString).lastPathComponent
+    }
+}
+
+/// Folders waiting to be read, shared by the scanning threads. Taken newest first, so the scan
+/// goes deep before wide and the queue stays short.
+private final class ScanQueue: @unchecked Sendable {
+    struct Job {
+        let node: SizeNode
+        let path: String
+        /// Which of the root's folders it's in, for the totals shown while scanning.
+        let top: Int
+    }
+
+    private let condition = NSCondition()
+    private var jobs: [Job] = []
+    private var reading = 0
+    private var cancelled = false
+
+    func push(_ new: [Job]) {
+        condition.withLock { jobs.append(contentsOf: new) }
+        condition.broadcast()
+    }
+
+    /// The next folder to read, waiting while others are being read (they may find more).
+    /// Nil once everything's read, or the scan is cancelled.
+    func next() -> Job? {
+        condition.lock()
+        defer { condition.unlock() }
+        while jobs.isEmpty && reading > 0 && !cancelled { condition.wait() }
+        guard !cancelled, let job = jobs.popLast() else { return nil }
+        reading += 1
+        return job
+    }
+
+    func finished(_ subfolders: [Job]) {
+        condition.lock()
+        jobs.append(contentsOf: subfolders)
+        reading -= 1
+        let done = reading == 0 && jobs.isEmpty
+        condition.unlock()
+        if done || subfolders.count > 1 { condition.broadcast() } else if subfolders.count == 1 { condition.signal() }
+    }
+
+    func cancel() {
+        condition.withLock { cancelled = true }
+        condition.broadcast()
+    }
+
+    var isCancelled: Bool { condition.withLock { cancelled } }
+}
+
+/// Files with more than one hard link, so each is counted once. Rare, so one lock is plenty.
+private final class HardLinks: @unchecked Sendable {
+    private let lock = NSLock()
+    private var seen = Set<UInt64>()
+
+    func isFirst(_ fileID: UInt64) -> Bool {
+        lock.withLock { seen.insert(fileID).inserted }
+    }
+}
+
+/// One item in a folder, as getattrlistbulk returns it. `name` is only valid during the visit.
+private struct BulkEntry {
+    let name: UnsafePointer<CChar>
+    let isFolder: Bool
+    let isMountPoint: Bool
+    let fileID: UInt64
+    let links: UInt32
+    /// Allocated bytes on disk; 0 for folders.
+    let size: Int64
+}
+
+extension DiskScanner {
+    fileprivate static let bulkBufferSize = 128 * 1024
+
+    /// Reads a folder's entries in batches. Returns false if it can't be read.
+    /// `stop` is asked between batches, so a folder of a hundred thousand files doesn't hold up Stop.
+    fileprivate static func readFolder(_ path: String, buffer: UnsafeMutableRawBufferPointer, stop: () -> Bool = { false },
+                                       _ visit: (BulkEntry) -> Void) -> Bool {
+        let fd = open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+        var request = attrlist()
+        request.bitmapcount = u_short(ATTR_BIT_MAP_COUNT)
+        request.commonattr = attrgroup_t(ATTR_CMN_RETURNED_ATTRS) | attrgroup_t(ATTR_CMN_NAME)
+            | attrgroup_t(ATTR_CMN_OBJTYPE) | attrgroup_t(ATTR_CMN_FILEID) | attrgroup_t(ATTR_CMN_ERROR)
+        request.dirattr = attrgroup_t(ATTR_DIR_MOUNTSTATUS)
+        request.fileattr = attrgroup_t(ATTR_FILE_LINKCOUNT) | attrgroup_t(ATTR_FILE_ALLOCSIZE)
+        var first = true
+        while true {
+            let count = getattrlistbulk(fd, &request, buffer.baseAddress, buffer.count, 0)
+            if count < 0 && first { return false }
+            guard count > 0, let base = buffer.baseAddress, first || !stop() else { return true }
+            first = false
+            var entry = base
+            for _ in 0..<count {
+                let length = Int(entry.load(as: UInt32.self))
+                defer { entry += length }
+                // Attributes follow in a fixed order, each only if returned.
+                var field = entry + 4
+                let returned = field.loadUnaligned(as: attribute_set_t.self)
+                field += MemoryLayout<attribute_set_t>.size
+                guard returned.commonattr & attrgroup_t(ATTR_CMN_NAME) != 0 else { continue }
+                let reference = field.loadUnaligned(as: attrreference_t.self)
+                let name = UnsafePointer((field + Int(reference.attr_dataoffset)).assumingMemoryBound(to: CChar.self))
+                field += MemoryLayout<attrreference_t>.size
+                var type = VNON.rawValue
+                if returned.commonattr & attrgroup_t(ATTR_CMN_OBJTYPE) != 0 {
+                    type = field.loadUnaligned(as: fsobj_type_t.self)
+                    field += MemoryLayout<fsobj_type_t>.size
+                }
+                var fileID: UInt64 = 0
+                if returned.commonattr & attrgroup_t(ATTR_CMN_FILEID) != 0 {
+                    fileID = field.loadUnaligned(as: UInt64.self)
+                    field += 8
+                }
+                if returned.commonattr & attrgroup_t(ATTR_CMN_ERROR) != 0 { field += 4 }
+                var isMountPoint = false
+                if returned.dirattr & attrgroup_t(ATTR_DIR_MOUNTSTATUS) != 0 {
+                    isMountPoint = field.loadUnaligned(as: UInt32.self) & UInt32(DIR_MNTSTATUS_MNTPOINT) != 0
+                    field += 4
+                }
+                var links: UInt32 = 1
+                if returned.fileattr & attrgroup_t(ATTR_FILE_LINKCOUNT) != 0 {
+                    links = field.loadUnaligned(as: UInt32.self)
+                    field += 4
+                }
+                var size: Int64 = 0
+                if returned.fileattr & attrgroup_t(ATTR_FILE_ALLOCSIZE) != 0 {
+                    size = field.loadUnaligned(as: Int64.self)
+                }
+                visit(BulkEntry(name: name, isFolder: type == VDIR.rawValue, isMountPoint: isMountPoint,
+                                fileID: fileID, links: links, size: size))
+            }
+        }
     }
 }
 

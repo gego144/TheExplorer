@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import QuartzCore
 import UniformTypeIdentifiers
 
 /// The two time-based views. Both are the same live Spotlight query with different settings.
@@ -81,6 +82,8 @@ enum RecentsRange: Int, CaseIterable, Identifiable {
 @Observable
 final class RecentsModel {
     nonisolated static let pageSize = 1500
+    /// How long a new query's partial results are held back while Spotlight gathers.
+    nonisolated static let gatherHold: CFTimeInterval = 0.6
     static let lastUsedDateAttribute = "kMDItemLastUsedDate"
 
     let mode: RecentsMode
@@ -103,6 +106,21 @@ final class RecentsModel {
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var limit = RecentsModel.pageSize
     @ObservationIgnored private var loadingMore = false
+    /// When the current query started, to hold back its first few results (see makeHandler).
+    @ObservationIgnored private var queryStarted: CFTimeInterval = 0
+
+    /// Recents' last full list, shared by every tab, so opening Recents shows it at once while
+    /// Spotlight checks it (about a tenth of a second), rather than starting from nothing.
+    private static var lastOpened: RecentsFilter.Snapshot?
+    /// Gathers Recents once soon after launch, so even the first visit has a list to show.
+    private static var warmer: RecentsModel?
+
+    static func prewarm() {
+        guard warmer == nil, lastOpened == nil else { return }
+        let model = RecentsModel(mode: .opened)
+        warmer = model
+        model.start()
+    }
 
     init(mode: RecentsMode) {
         self.mode = mode
@@ -117,6 +135,11 @@ final class RecentsModel {
 
     func start() {
         guard !isActive else { return }
+        if mode == .opened, range == .all, rows.isEmpty, let last = Self.lastOpened {
+            rows = last.rows
+            totalCount = last.total
+            hasMore = last.hasMore
+        }
         restart()
     }
 
@@ -190,6 +213,7 @@ final class RecentsModel {
         }
         let attribute = attribute
         let cutoff = cutoff
+        queryStarted = CACurrentMediaTime()
         let query = SpotlightQuery(
             predicate: NSPredicate(format: "%K >= %@", attribute, cutoff as NSDate),
             scopes: [NSMetadataQueryUserHomeScope],
@@ -253,7 +277,13 @@ final class RecentsModel {
             groups: mode == .opened ? .finder : .days
         )
         let last = LastSnapshot()
+        let started = queryStarted
+        let remembers = mode == .opened && range == .all
         return { [weak self] results, gathering in
+            // Spotlight's first batch is a handful of items, the rest follow a moment later.
+            // Showing that handful would flash a near-empty list (or replace a full one), so
+            // results wait for the end of gathering, unless gathering is slow.
+            if gathering && CACurrentMediaTime() - started < Self.gatherHold { return }
             let snapshot = filter.collect(results)
             // Live updates often change nothing visible (e.g. churn in hidden folders).
             let unchanged = last.matches(snapshot)
@@ -261,6 +291,13 @@ final class RecentsModel {
                 guard let self, self.generation == generation else { return }
                 if self.isGathering != gathering { self.isGathering = gathering }
                 self.loadingMore = false
+                if remembers && !gathering {
+                    Self.lastOpened = snapshot
+                    if Self.warmer === self {
+                        self.stop()
+                        Self.warmer = nil
+                    }
+                }
                 guard !unchanged else { return }
                 self.rows = snapshot.rows
                 self.totalCount = snapshot.total
