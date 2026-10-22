@@ -42,10 +42,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.coerce(toDescriptorType: typeFileURL).flatMap { URL(dataRepresentation: $0.data, relativeTo: nil) }
         }
         guard !urls.isEmpty else { return }
-        show(urls, revealing: true)
+        Self.show(urls, revealing: true)
     }
 
-    private func show(_ urls: [URL], revealing: Bool) {
+    /// Shows folders or files from elsewhere (other apps, Finder's windows) in a tab.
+    static func show(_ urls: [URL], revealing: Bool) {
         MainActor.assumeIsolated {
             guard !Session.open(urls, revealing: revealing) else { return }
             // No window yet: the next one to appear picks them up. At launch that's the first
@@ -60,6 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Search's own index: built in the background, then kept current.
         FileIndex.shared.start()
+        FinderTakeover.shared.update()
         // Recents' list, ready before it's first opened (a tenth of a second of Spotlight).
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { RecentsModel.prewarm() }
         // Safety net: if macOS thought it restored windows but none came back (e.g. state saved by
@@ -83,7 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Folders from Finder's Open With, `open -a`, or anywhere once TheExplorer is the default
     /// file browser.
     func application(_ application: NSApplication, open urls: [URL]) {
-        show(urls, revealing: false)
+        Self.show(urls, revealing: false)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -94,7 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Triggers File › New Window, the only way to open a SwiftUI window from outside a view.
-    private static func openNewWindow() {
+    static func openNewWindow() {
         let items = NSApp.mainMenu?.items.compactMap(\.submenu).flatMap(\.items) ?? []
         guard let item = items.first(where: { $0.keyEquivalent == "n" && $0.keyEquivalentModifierMask == .command }),
               let action = item.action else { return }

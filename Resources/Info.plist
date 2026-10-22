@@ -50,6 +50,8 @@
     <string>TheExplorer shows and measures the files in your Downloads folder.</string>
     <key>NSRemovableVolumesUsageDescription</key>
     <string>TheExplorer shows and measures files on removable drives.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>TheExplorer asks Finder which folders its windows show, so it can open them here instead.</string>
     <key>NSNetworkVolumesUsageDescription</key>
     <string>TheExplorer shows and measures files on network drives.</string>
 </dict>

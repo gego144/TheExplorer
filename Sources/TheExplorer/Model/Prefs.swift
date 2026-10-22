@@ -56,6 +56,13 @@ final class Prefs {
     /// Places shown as a gallery rather than a list: folders (local, S3 or Drive), Recents, New.
     /// Each place keeps the layout you last chose for it, like Finder's per-folder views.
     private(set) var galleryPlaces: Set<String> { didSet { defaults.set(Array(galleryPlaces), forKey: "galleryPlaces") } }
+    /// Whether Finder's folder windows are closed and shown here instead (see FinderTakeover).
+    var takeOverFinder: Bool {
+        didSet {
+            defaults.set(takeOverFinder, forKey: "takeOverFinder")
+            FinderTakeover.shared.update()
+        }
+    }
     /// The gallery's tile width, in points.
     var galleryTileSize: Double { didSet { defaults.set(galleryTileSize, forKey: "galleryTileSize") } }
     static let galleryTileSizes: ClosedRange<Double> = 110...360
@@ -122,6 +129,7 @@ final class Prefs {
         foldersFirst = defaults.object(forKey: "foldersFirst") as? Bool ?? true
         newHidesClutter = defaults.object(forKey: "newHidesClutter") as? Bool ?? true
         newRange = (defaults.object(forKey: "newRangeDays") as? Int).flatMap(RecentsRange.init) ?? .week
+        takeOverFinder = defaults.bool(forKey: "takeOverFinder")
         galleryPlaces = Set(defaults.stringArray(forKey: "galleryPlaces") ?? [])
         galleryTileSize = defaults.object(forKey: "galleryTileSize") as? Double ?? 180
         refreshFileBrowser()

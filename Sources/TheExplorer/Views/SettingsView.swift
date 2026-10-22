@@ -41,6 +41,14 @@ struct SettingsView: View {
                 SettingRow("Folders open in", hint: folderOpenerHint) {
                     AppName(bundleID: prefs.folderOpenerID)
                 }
+                RowDivider()
+                SettingRow("Catch Finder windows", hint: takeoverHint) {
+                    Toggle("", isOn: Binding(get: { prefs.takeOverFinder }, set: { on in
+                        prefs.takeOverFinder = on
+                        if on { FinderTakeover.shared.requestPermission() }
+                    }))
+                    .labelsHidden()
+                }
             }
 
             section("Terminal") {
@@ -110,6 +118,13 @@ struct SettingsView: View {
             return "Folders opened from other apps, the Dock and Spotlight open here."
         }
         return "macOS keeps Finder for folders opened from other apps, the Dock and Spotlight, and doesn’t let other apps take that over. To open a folder here from Finder, right-click it and choose Open With › TheExplorer."
+    }
+
+    private var takeoverHint: String {
+        if prefs.takeOverFinder && FinderTakeover.shared.isDenied {
+            return "macOS hasn’t let TheExplorer control Finder. Turn it on in System Settings › Privacy & Security › Automation › TheExplorer › Finder."
+        }
+        return "For folders macOS still opens in Finder (the Dock, Spotlight, downloads and attachments): their Finder windows close and the folder opens here, with the same files selected. Windows like AirDrop stay in Finder. macOS asks once to let TheExplorer control Finder."
     }
 
     private var startHint: String {
