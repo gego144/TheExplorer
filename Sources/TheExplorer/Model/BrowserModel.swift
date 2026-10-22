@@ -685,23 +685,46 @@ final class BrowserModel: Identifiable {
         let ordered = rows.map(\.id).filter(target.contains)
         let items = ordered.count == target.count ? ordered : target.sorted { $0.path < $1.path }
         guard let first = items.first else { return }
+        let list: [URL]
         if target.count == 1 {
             let files = rows.filter { !$0.item.isFolder || $0.id == first }.map(\.id)
-            previewItems = files.contains(first) ? files : [first]
-            previewMovesSelection = true
+            list = files.contains(first) ? files : [first]
         } else {
-            previewItems = items
-            previewMovesSelection = false
+            list = items
         }
         if target.count == 1 && RenderedKind(file: first) != nil {
+            previewItems = list
+            previewMovesSelection = true
             expandedPreview = first
         } else {
-            previewURL = first
+            present(list, at: first, movesSelection: target.count == 1)
         }
+    }
+
+    /// Opens Quick Look on `url`, stepping through `items`. If it's already open on another
+    /// list, it closes first and opens a moment later: an open panel handed a shorter list
+    /// can ask SwiftUI for an item past its end, which crashes.
+    private func present(_ items: [URL], at url: URL, movesSelection: Bool) {
+        if previewURL != nil && previewItems != items {
+            previewURL = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                guard let self, self.previewURL == nil else { return }
+                self.present(items, at: url, movesSelection: movesSelection)
+            }
+            return
+        }
+        previewItems = items
+        previewMovesSelection = movesSelection
+        previewURL = url
+    }
+
+    func closePreview() {
+        previewURL = nil
     }
 
     /// Opens one file in the large preview on its own, such as one a link points to.
     func showExpandedPreview(_ url: URL) {
+        closePreview()
         previewItems = [url]
         previewMovesSelection = false
         expandedPreview = url
@@ -724,9 +747,7 @@ final class BrowserModel: Identifiable {
 
     /// Quick Looks a file that isn't in the list, such as one unpacked from an archive.
     func preview(_ url: URL) {
-        previewItems = [url]
-        previewMovesSelection = false
-        previewURL = url
+        present([url], at: url, movesSelection: false)
     }
 
     /// The list's selection moved while Quick Look is open: show the new item, like Finder.

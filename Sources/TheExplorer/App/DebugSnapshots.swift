@@ -1,5 +1,6 @@
 #if DEBUG
 import AppKit
+import QuickLookUI
 import SwiftUI
 
 /// Debug-only scripted scenes with screenshots of the app's own window. Launch through
@@ -99,6 +100,14 @@ enum DebugSnapshots {
                     try? await Task.sleep(for: .milliseconds(10))
                 }
                 log("\(scene): \(changes.joined(separator: " "))")
+                wait = 0
+            case "qlstate":
+                // qlstate logs whether the Quick Look panel is up, and where in its list.
+                if QLPreviewPanel.sharedPreviewPanelExists(), let panel = QLPreviewPanel.shared() {
+                    log("qlstate: visible=\(panel.isVisible) index=\(panel.currentPreviewItemIndex) of \(panel.dataSource?.numberOfPreviewItems(in: panel) ?? -1)")
+                } else {
+                    log("qlstate: no panel")
+                }
                 wait = 0
             case "layout":
                 // layout:gallery|list shows the current place that way (remembered for the run's

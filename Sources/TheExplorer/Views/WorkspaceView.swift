@@ -1,4 +1,5 @@
 import QuickLook
+import QuickLookUI
 import SwiftUI
 
 extension EnvironmentValues {
@@ -46,6 +47,25 @@ private struct SelectionFollower: View {
     }
 }
 
+/// Quick Look for one pane's files.
+private struct QuickLookCarrier: View {
+    let model: BrowserModel
+
+    var body: some View {
+        Color.clear
+            .quickLookPreview(Binding(get: { model.previewURL }, set: { model.previewMoved(to: $0) }), in: model.previewItems)
+            // A pane leaving the screen closes its preview, panel and all: left open, the
+            // panel would keep showing a list nothing answers for any more.
+            .onDisappear {
+                guard model.previewURL != nil else { return }
+                model.closePreview()
+                if QLPreviewPanel.sharedPreviewPanelExists(), let panel = QLPreviewPanel.shared(), panel.isVisible {
+                    panel.close()
+                }
+            }
+    }
+}
+
 /// A whole window: tab strip, command bar, sidebar, content, inspector and status bar.
 struct WorkspaceView: View {
     @Bindable var workspace: Workspace
@@ -80,7 +100,10 @@ struct WorkspaceView: View {
         .tint(Theme.accent)
         .environment(\.openTab) { url in workspace.newTab(url) }
         .navigationTitle(model.title)
-        .quickLookPreview(Binding(get: { model.previewURL }, set: { model.previewMoved(to: $0) }), in: model.previewItems)
+        // One per pane, rebuilt when another pane or tab takes over. Quick Look's panel is
+        // shared, and handing an open panel another pane's list (shorter, or empty) made
+        // SwiftUI look past its end and crash.
+        .background { QuickLookCarrier(model: model).id(ObjectIdentifier(model)) }
         .overlay {
             if let url = model.expandedPreview {
                 ExpandedPreview(url: url, model: model)
