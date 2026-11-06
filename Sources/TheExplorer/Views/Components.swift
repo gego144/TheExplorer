@@ -44,6 +44,7 @@ struct FileContextMenu: View {
             Button("Copy") { FileClipboard.shared.copy(sortedURLs) }
             if urls.allSatisfy(\.isFileURL) {
                 Button("Duplicate") { model.duplicate(urls) }
+                Button(single.map { "Compress “\($0.lastPathComponent)”" } ?? "Compress \(urls.count) Items") { model.compress(urls) }
             }
             PasteItems(model: model, folder: single.flatMap { item($0)?.isFolder == true ? $0 : nil })
             if let split, let other = split.pane(oppositeTo: model), split.dropFolder(of: other) != nil {

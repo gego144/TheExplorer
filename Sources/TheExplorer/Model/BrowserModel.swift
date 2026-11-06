@@ -1047,6 +1047,30 @@ final class BrowserModel: Identifiable {
         }
     }
 
+    /// Zips the items beside them, like Finder's Compress (see Compressor). ⌘Z moves the
+    /// archive to the Trash.
+    func compress(_ urls: Set<URL>) {
+        let items = urls.filter(\.isFileURL).sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+        guard !items.isEmpty else { return }
+        let noun = items.count == 1 ? "“\(items[0].lastPathComponent)”" : "\(items.count) items"
+        transferStatus = "Compressing \(noun)…"
+        Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) { Result { try Compressor.zip(items) } }.value
+            guard let self else { return }
+            self.transferStatus = nil
+            switch result {
+            case .success(let archive):
+                FileHistory.shared.record("Compress of \(noun)", undo: [.trash(archive)])
+                let folder = archive.deletingLastPathComponent().standardizedFileURL
+                if self.destination == .folder && !self.isSearching && folder == self.currentURL.standardizedFileURL {
+                    self.reload(selecting: [archive])
+                }
+            case .failure(let error):
+                self.loadError = "Couldn't compress \(noun): \(error.localizedDescription)"
+            }
+        }
+    }
+
     /// Selects everything listed in the view that's showing.
     func selectAll() {
         if isSearching {

@@ -473,6 +473,12 @@ private struct ClipboardCommands: View {
             model.duplicate(urls)
             return true
         } }
+        Button("Compress") { perform(nil) { model in
+            let urls = model.activeSelection.filter(\.isFileURL)
+            guard !urls.isEmpty else { return false }
+            model.compress(urls)
+            return true
+        } }
         Button("Select All") { perform("selectAll:") { model in
             model.selectAll()
             return true
