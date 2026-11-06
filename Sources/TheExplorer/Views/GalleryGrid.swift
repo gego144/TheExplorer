@@ -19,6 +19,8 @@ struct GalleryGrid<RowMenu: View, BackgroundMenu: View>: NSViewRepresentable {
     var onDropBackground: (([URL]) -> Bool)?
     var onReachEnd: (() -> Void)?
     var footer: AnyView?
+    /// Kept but not shown while the pane shows the list (see FileListView).
+    var isHidden = false
     let rowMenu: (Set<URL>) -> RowMenu
     let backgroundMenu: () -> BackgroundMenu
 
@@ -59,6 +61,7 @@ struct GalleryGrid<RowMenu: View, BackgroundMenu: View>: NSViewRepresentable {
             NSHostingMenu(rootView: rowMenu(urls).environment(\.self, environment).environment(\.listedItems, ListedItems(rows)))
         }
         config.backgroundMenu = { NSHostingMenu(rootView: backgroundMenu().environment(\.self, environment)) }
+        grid.setHidden(isHidden)
         grid.update(rows: rows, selection: selection, focusRequest: focusRequest, tileSize: CGFloat(Prefs.shared.galleryTileSize), config: config)
     }
 }
@@ -168,8 +171,13 @@ final class GalleryGridView: NSView, NSDraggingSource {
         }
         updateFooter()
         let wanted = pendingSelection ?? newSelection
-        if wanted != selection { setSelection(wanted, tell: false) }
-        if let focusRequest, focusRequest != newFocus { window?.makeFirstResponder(self) }
+        if wanted != selection {
+            setSelection(wanted, tell: false)
+            // Selected elsewhere (the list, a menu): the keys carry on from there.
+            if let cursor, wanted.contains(cursor) {} else { cursor = wanted.count == 1 ? wanted.first : nil }
+            if let anchor, wanted.contains(anchor) {} else { anchor = cursor }
+        }
+        if let focusRequest, focusRequest != newFocus, !isShownHidden { window?.makeFirstResponder(self) }
         focusRequest = newFocus
         if rowsChanged { checkReachedEnd() }
         #if DEBUG
@@ -184,9 +192,20 @@ final class GalleryGridView: NSView, NSDraggingSource {
         return true
     }
 
+    private var isShownHidden: Bool { enclosingScrollView?.isHidden ?? false }
+
+    /// Shows or hides the gallery, which is kept while the pane shows the list; shown again,
+    /// it takes keyboard focus back from the list.
+    func setHidden(_ hidden: Bool) {
+        guard let scroll = enclosingScrollView, hidden != scroll.isHidden else { return }
+        scroll.isHidden = hidden
+        guard !hidden, let window, config.isActivePane, !(window.firstResponder is NSText) else { return }
+        window.makeFirstResponder(self)
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        guard let window else { return }
+        guard let window, !isShownHidden else { return }
         if config.isActivePane && !(window.firstResponder is NSText) { window.makeFirstResponder(self) }
     }
 

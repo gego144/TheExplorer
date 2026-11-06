@@ -32,6 +32,8 @@ struct FileTable<RowMenu: View, BackgroundMenu: View>: NSViewRepresentable {
     var gitMark: ((URL) -> GitMark?)?
     /// Items cut with ⌘X, drawn faded. Read by the caller's body, so a cut redraws the list.
     var cut: Set<URL> = []
+    /// Kept but not shown while the pane shows the gallery (see FileListView).
+    var isHidden = false
     let rowMenu: (Set<URL>) -> RowMenu
     let backgroundMenu: () -> BackgroundMenu
 
@@ -94,6 +96,7 @@ struct FileTable<RowMenu: View, BackgroundMenu: View>: NSViewRepresentable {
         config.backgroundMenu = {
             NSHostingMenu(rootView: backgroundMenu().environment(\.self, environment))
         }
+        controller.setHidden(isHidden)
         controller.update(rows: rows, selection: selection, focusRequest: focusRequest, config: config)
     }
 }
@@ -251,7 +254,7 @@ final class FileTableController: NSObject, NSTableViewDataSource, NSTableViewDel
         if rowsChanged || wanted != selection {
             select(wanted, scroll: !rowsChanged && wanted != selection)
         }
-        if let focusRequest, focusRequest != newFocus {
+        if let focusRequest, focusRequest != newFocus, !scrollView.isHidden {
             table.window?.makeFirstResponder(table)
         }
         focusRequest = newFocus
@@ -531,8 +534,17 @@ final class FileTableController: NSObject, NSTableViewDataSource, NSTableViewDel
         DispatchQueue.main.async { onReachEnd() }
     }
 
+    /// Shows or hides the list, which is kept while the pane shows the gallery; shown again,
+    /// it takes keyboard focus back from the gallery.
+    func setHidden(_ hidden: Bool) {
+        guard hidden != scrollView.isHidden else { return }
+        scrollView.isHidden = hidden
+        guard !hidden, let window = table.window, config.isActivePane, !(window.firstResponder is NSText) else { return }
+        window.makeFirstResponder(table)
+    }
+
     func viewMovedToWindow() {
-        guard let window = table.window else { return }
+        guard let window = table.window, !scrollView.isHidden else { return }
         // Never pull focus out of a text field you're typing in; in a split tab, only the
         // active pane's list takes it.
         if config.isActivePane && !(window.firstResponder is NSText) {

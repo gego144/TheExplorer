@@ -77,30 +77,31 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
 
     @Environment(\.fileLayout) private var layout
 
+    /// Whether the gallery has been shown in this list: from then on both are kept, and
+    /// switching only hides one and shows the other (building either took ~15ms).
+    @State private var galleryUsed = false
+
     var body: some View {
-        if layout == .gallery {
-            GalleryGrid(rows: rows, selection: $selection, focusRequest: focusRequest, onOpen: onOpen,
-                        onQuickLook: onQuickLook, onDropBackground: onDropBackground, onReachEnd: onReachEnd,
-                        footer: footer, rowMenu: rowMenu, backgroundMenu: backgroundMenu)
-                .overlay {
-                    if rows.isEmpty, let empty {
-                        EmptyStateView(state: empty)
-                            .allowsHitTesting(false)
-                    }
-                }
-        } else {
+        let gallery = layout == .gallery
+        ZStack {
             FileTable(rows: rows, selection: $selection, sort: sort, onSort: onSort, maxSize: maxSize, dateTitle: dateTitle,
                       dateSortKey: dateSortKey, showLocation: showLocation, focusRequest: focusRequest, onOpen: onOpen,
                       onQuickLook: onQuickLook, onDropInto: onDropInto, onDropBackground: onDropBackground,
                       onToggleExpand: onToggleExpand, onReachEnd: onReachEnd, footer: footer, gitMark: gitMark,
-                      cut: FileClipboard.shared.cutItems, rowMenu: rowMenu, backgroundMenu: backgroundMenu)
-                .overlay {
-                    if rows.isEmpty, let empty {
-                        EmptyStateView(state: empty)
-                            .allowsHitTesting(false)
-                    }
-                }
+                      cut: FileClipboard.shared.cutItems, isHidden: gallery, rowMenu: rowMenu, backgroundMenu: backgroundMenu)
+            if gallery || galleryUsed {
+                GalleryGrid(rows: rows, selection: $selection, focusRequest: focusRequest, onOpen: onOpen,
+                            onQuickLook: onQuickLook, onDropBackground: onDropBackground, onReachEnd: onReachEnd,
+                            footer: footer, isHidden: !gallery, rowMenu: rowMenu, backgroundMenu: backgroundMenu)
+            }
         }
+        .overlay {
+            if rows.isEmpty, let empty {
+                EmptyStateView(state: empty)
+                    .allowsHitTesting(false)
+            }
+        }
+        .onChange(of: gallery, initial: true) { if gallery { galleryUsed = true } }
     }
 }
 
