@@ -20,6 +20,7 @@ final class SidebarPanel: NSView {
         // A shade darker than the window, so the list reads as the main surface.
         layer?.backgroundColor = (NSColor(Theme.background).blended(withFraction: 0.12, of: .black) ?? NSColor(Theme.background)).cgColor
         scroll.drawsBackground = false
+        scroll.verticalScroller = ThinScroller()
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
         scroll.scrollerStyle = .overlay

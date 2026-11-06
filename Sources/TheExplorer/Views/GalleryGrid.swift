@@ -72,6 +72,7 @@ final class GalleryScrollView: NSScrollView {
     init() {
         super.init(frame: .zero)
         drawsBackground = false
+        verticalScroller = ThinScroller()
         hasVerticalScroller = true
         autohidesScrollers = true
         documentView = grid

@@ -419,3 +419,52 @@ final class QuietButton: NSView {
         if bounds.contains(convert(event.locationInWindow, from: nil)) { action() }
     }
 }
+
+/// A thin scroll bar: a slim rounded knob and no track, in both scroll bar styles (the wide
+/// "always show" bar took 15pt and drew a track down every list).
+final class ThinScroller: NSScroller {
+    static let width: CGFloat = 9
+    private static let knobWidth: CGFloat = 5
+    private var hovering = false
+    private var tracking: NSTrackingArea?
+
+    override class var isCompatibleWithOverlayScrollers: Bool { true }
+
+    override class func scrollerWidth(for controlSize: NSControl.ControlSize, scrollerStyle: NSScroller.Style) -> CGFloat {
+        width
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        drawKnob()
+    }
+
+    override func drawKnobSlot(in slotRect: NSRect, highlight flag: Bool) {}
+
+    override func drawKnob() {
+        let knob = rect(for: .knob)
+        guard knob.height > 0 else { return }
+        let thin = NSRect(x: bounds.maxX - Self.knobWidth - 2, y: knob.minY + 2, width: Self.knobWidth, height: max(0, knob.height - 4))
+        NSColor(Theme.textSecondary).withAlphaComponent(hovering ? 0.75 : 0.45).setFill()
+        NSBezierPath(roundedRect: thin, xRadius: Self.knobWidth / 2, yRadius: Self.knobWidth / 2).fill()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self, userInfo: nil)
+        addTrackingArea(area)
+        tracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        hovering = true
+        needsDisplay = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        hovering = false
+        needsDisplay = true
+    }
+}

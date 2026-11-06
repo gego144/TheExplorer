@@ -181,14 +181,30 @@ struct FileTableTests {
     }
 
     @Test func columnsNeverOverlap() {
-        for showLocation in [false, true] {
-            for depth in [0, 3] {
-                let layout = FileTableLayout(width: 900, showLocation: showLocation, depth: depth)
-                #expect(layout.name.upperBound <= (layout.location?.lowerBound ?? layout.type.lowerBound))
-                #expect(layout.type.upperBound <= layout.size.lowerBound)
-                #expect(layout.size.upperBound <= layout.date.lowerBound)
-                #expect(layout.date.upperBound <= 900 - FileTableLayout.gutter)
+        for width in [200, 300, 450, 600, 900, 1400] as [CGFloat] {
+            for showLocation in [false, true] {
+                for depth in [0, 3] {
+                    let layout = FileTableLayout(width: width, showLocation: showLocation, depth: depth)
+                    let columns = [layout.name, layout.location, layout.type, layout.size, layout.date].compactMap { $0 }
+                    for (left, right) in zip(columns, columns.dropFirst()) {
+                        #expect(left.upperBound <= right.lowerBound, "width \(width)")
+                    }
+                    #expect(columns.last!.upperBound <= width - FileTableLayout.gutter)
+                }
             }
         }
+    }
+
+    /// A narrow pane (a split) leaves columns out rather than squeezing the name to nothing.
+    @Test func narrowListsLeaveColumnsOut() {
+        let wide = FileTableLayout(width: 900, showLocation: false, depth: 0)
+        #expect(wide.type != nil && wide.size != nil && wide.date != nil)
+        let split = FileTableLayout(width: 300, showLocation: false, depth: 0)
+        #expect(split.type == nil && split.size == nil && split.date != nil)
+        #expect(split.name.upperBound - split.name.lowerBound >= FileTableLayout.minNameWithDate)
+        let tiny = FileTableLayout(width: 200, showLocation: false, depth: 0)
+        #expect(tiny.date == nil)
+        let narrowRecents = FileTableLayout(width: 600, showLocation: true, depth: 0)
+        #expect(narrowRecents.location == nil && narrowRecents.type != nil)
     }
 }

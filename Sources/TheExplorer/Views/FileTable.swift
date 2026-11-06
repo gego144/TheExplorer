@@ -200,6 +200,7 @@ final class FileTableController: NSObject, NSTableViewDataSource, NSTableViewDel
         table.verticalMotionCanBeginDrag = true
 
         scrollView.documentView = table
+        scrollView.verticalScroller = ThinScroller()
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
@@ -894,10 +895,15 @@ struct FileTableLayout {
     static let indent: CGFloat = 16
 
     let name: ClosedRange<CGFloat>
+    /// Left out, in this order, when the list is too narrow for them: location, kind, size,
+    /// and in a very narrow pane the date too.
     let location: ClosedRange<CGFloat>?
-    let type: ClosedRange<CGFloat>
-    let size: ClosedRange<CGFloat>
-    let date: ClosedRange<CGFloat>
+    let type: ClosedRange<CGFloat>?
+    let size: ClosedRange<CGFloat>?
+    let date: ClosedRange<CGFloat>?
+    /// The least room a name gets before a column is left out (the date goes only below `minNameWithDate`).
+    static let minName: CGFloat = 160
+    static let minNameWithDate: CGFloat = 80
     let marker: CGFloat
     /// Where a click on the folder arrow lands, generously.
     let disclosureHitRect: ClosedRange<CGFloat>
@@ -905,12 +911,21 @@ struct FileTableLayout {
     init(width: CGFloat, showLocation: Bool, depth: Int) {
         let left = Self.gutter + Self.inset
         let right = width - Self.gutter - Self.inset
-        date = (right - Self.dateWidth)...right
-        size = (date.lowerBound - Self.spacing - Self.sizeWidth)...(date.lowerBound - Self.spacing)
-        type = (size.lowerBound - Self.spacing - Self.typeWidth)...(size.lowerBound - Self.spacing)
+        // Which columns fit is decided at the top level, so every row (and the header) agrees.
+        let topNameStart = left + Self.marker + 6 + Self.icon + 8
+        let showDate = right - topNameStart >= Self.minNameWithDate + Self.dateWidth + Self.spacing
+        date = showDate ? (right - Self.dateWidth)...right : nil
+        let afterDate = showDate ? right - Self.dateWidth - Self.spacing : right
+        let showSize = afterDate - topNameStart >= Self.minName + Self.sizeWidth + Self.spacing
+        let afterSize = showSize ? afterDate - Self.sizeWidth - Self.spacing : afterDate
+        let showType = showSize && afterSize - topNameStart >= Self.minName + Self.typeWidth + Self.spacing
+        let afterType = showType ? afterSize - Self.typeWidth - Self.spacing : afterSize
+        let showLocation = showLocation && afterType - topNameStart >= Self.minName * 2 + Self.spacing
+        size = showSize ? (afterDate - Self.sizeWidth)...afterDate : nil
+        type = showType ? (afterSize - Self.typeWidth)...afterSize : nil
         marker = left + CGFloat(depth) * Self.indent
         let nameStart = marker + Self.marker + 6 + Self.icon + 8
-        let flexibleEnd = type.lowerBound - Self.spacing
+        let flexibleEnd = afterType
         if showLocation {
             let available = max(0, flexibleEnd - nameStart - Self.spacing)
             let nameEnd = max(nameStart, nameStart + available / 2)
@@ -924,8 +939,8 @@ struct FileTableLayout {
     }
 
     func toolTip(at x: CGFloat, row: ListRow, git: GitMark?) -> String {
-        if date.contains(x) { return Format.date(row.date) }
-        if type.contains(x) { return row.item.kindDescription }
+        if let date, date.contains(x) { return Format.date(row.date) }
+        if let type, type.contains(x) { return row.item.kindDescription }
         if let location, location.contains(x) { return row.location ?? "" }
         if name.contains(x) {
             if let git {
@@ -1038,8 +1053,10 @@ final class FileCellView: NSView {
         // Kind, in words.
         let kind = self.kind ?? (item.isFolder ? "Folder" : item.kindDescription)
         self.kind = kind
-        Self.drawText(kind, font: theme.meta, color: theme.textSecondary, x: layout.type.lowerBound, midY: midY,
-                      width: layout.type.upperBound - layout.type.lowerBound)
+        if let type = layout.type {
+            Self.drawText(kind, font: theme.meta, color: theme.textSecondary, x: type.lowerBound, midY: midY,
+                          width: type.upperBound - type.lowerBound)
+        }
 
         // Size.
         let measured = row.liveFolderSize && row.size == nil ? FolderSizeStore.shared.size(for: item.path) : nil
@@ -1055,12 +1072,16 @@ final class FileCellView: NSView {
             sizeText = "—"
             sizeColor = theme.textTertiary
         }
-        Self.drawText(sizeText, font: theme.meta, color: sizeColor, x: layout.size.lowerBound, midY: midY,
-                      width: layout.size.upperBound - layout.size.lowerBound, alignment: .right)
+        if let sizeRange = layout.size {
+            Self.drawText(sizeText, font: theme.meta, color: sizeColor, x: sizeRange.lowerBound, midY: midY,
+                          width: sizeRange.upperBound - sizeRange.lowerBound, alignment: .right)
+        }
 
         // When.
-        Self.drawText(Format.listDate(row.date), font: theme.meta, color: theme.textSecondary,
-                      x: layout.date.lowerBound, midY: midY, width: FileTableLayout.dateWidth, alignment: .right)
+        if let date = layout.date {
+            Self.drawText(Format.listDate(row.date), font: theme.meta, color: theme.textSecondary,
+                          x: date.lowerBound, midY: midY, width: FileTableLayout.dateWidth, alignment: .right)
+        }
     }
 
     /// Draws one line of text vertically centered at `midY`; returns the width it took.
@@ -1135,9 +1156,11 @@ final class FileTableHeaderView: NSTableHeaderView {
         if let location = layout.location {
             titles.append(Title(text: "Location", key: nil, range: location.lowerBound...(location.lowerBound + 70), trailing: false))
         }
-        titles.append(Title(text: "Kind", key: .kind, range: layout.type, trailing: false))
-        titles.append(Title(text: "Size", key: .size, range: layout.size, trailing: true))
-        titles.append(Title(text: config.dateTitle, key: config.dateSortKey, range: (layout.date.lowerBound - 20)...layout.date.upperBound, trailing: true))
+        if let type = layout.type { titles.append(Title(text: "Kind", key: .kind, range: type, trailing: false)) }
+        if let size = layout.size { titles.append(Title(text: "Size", key: .size, range: size, trailing: true)) }
+        if let date = layout.date {
+            titles.append(Title(text: config.dateTitle, key: config.dateSortKey, range: (date.lowerBound - 20)...date.upperBound, trailing: true))
+        }
         return titles
     }
 
