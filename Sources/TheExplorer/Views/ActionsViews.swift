@@ -350,9 +350,7 @@ struct ActionEditor: View {
                     CommandEditor(text: $action.command)
                         .padding(6)
                         .frame(height: 130)
-                        .background(Theme.field, in: .rect(cornerRadius: Theme.controlRadius + 1))
-                        .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius + 1)
-                            .strokeBorder(hovering ? Theme.borderHover : Theme.fieldBorder))
+                        .background(hovering ? Theme.control : Theme.track, in: .rect(cornerRadius: Theme.controlRadius + 1))
                 }
             }
 

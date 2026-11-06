@@ -43,6 +43,9 @@ final class BarButton: NSView {
 
     override var isFlipped: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    /// A press here is a click, never the start of a window drag (in the title bar, a see-through
+    /// view would otherwise count as a drag handle and the window server could keep the release).
+    override var mouseDownCanMoveWindow: Bool { false }
 
     override func draw(_ dirtyRect: NSRect) {
         let active = isEnabled && hovering
@@ -127,8 +130,8 @@ final class BarButton: NSView {
     }
 }
 
-/// A compact segmented control drawn by AppKit, as Segmented looks: a recessed track with the
-/// chosen option raised.
+/// A compact segmented control drawn by AppKit, as Segmented looks: a raised track with the
+/// chosen option a step lighter.
 final class BarSegmented: NSView {
     var options: [String] { didSet { if options != oldValue { invalidateIntrinsicContentSize(); needsDisplay = true } } }
     var selected = 0 { didSet { if selected != oldValue { needsDisplay = true } } }
@@ -136,9 +139,9 @@ final class BarSegmented: NSView {
 
     private let theme: TableTheme
     private let font = NSFont.systemFont(ofSize: 11, weight: .medium)
-    private let field = NSColor(Theme.field)
-    private let fieldBorder = NSColor(Theme.fieldBorder)
-    private let raised = NSColor(Theme.raised)
+    private let track = NSColor(Theme.track)
+    private let trackSelected = NSColor(Theme.trackSelected)
+    private let control = NSColor(Theme.control)
     private var hovered: Int?
     private var tracking: NSTrackingArea?
 
@@ -152,6 +155,9 @@ final class BarSegmented: NSView {
 
     override var isFlipped: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    /// A press here is a click, never the start of a window drag (in the title bar, a see-through
+    /// view would otherwise count as a drag handle and the window server could keep the release).
+    override var mouseDownCanMoveWindow: Bool { false }
 
     private var segmentWidths: [CGFloat] {
         options.map { ceil(TextLines.shared.line($0, font: font, color: theme.text).width) + 16 }
@@ -171,16 +177,13 @@ final class BarSegmented: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         let radius = Theme.controlRadius + 1
-        field.setFill()
+        track.setFill()
         NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius).fill()
-        let ring = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: radius - 0.5, yRadius: radius - 0.5)
-        fieldBorder.setStroke()
-        ring.stroke()
         for (index, rect) in segmentRects().enumerated() {
             let isSelected = index == selected
             let isHovered = hovered == index || HoverPreview.on
             if isSelected || isHovered {
-                (isSelected ? theme.raisedHover : raised).setFill()
+                (isSelected ? trackSelected : control).setFill()
                 NSBezierPath(roundedRect: rect, xRadius: Theme.controlRadius - 1, yRadius: Theme.controlRadius - 1).fill()
             }
             FileCellView.drawText(options[index], font: font, color: isSelected || isHovered ? theme.text : theme.textSecondary,
@@ -224,7 +227,7 @@ final class BarSegmented: NSView {
 }
 
 /// A quiet raised button drawn by AppKit, as SubtleButtonStyle looks: a title, maybe with a
-/// symbol before it, on a raised chip with a border.
+/// symbol before it, on a raised chip (a fill, no border).
 final class SubtleButton: NSView {
     var title: String { didSet { if title != oldValue { needsDisplay = true } } }
     var symbol: String? { didSet { if symbol != oldValue { needsDisplay = true } } }
@@ -234,8 +237,9 @@ final class SubtleButton: NSView {
 
     private let theme: TableTheme
     private let font = NSFont.systemFont(ofSize: 12, weight: .medium)
-    private let raised = NSColor(Theme.raised)
-    private let pressedFill = NSColor(Theme.pressedFill)
+    private let control = NSColor(Theme.control)
+    private let controlHover = NSColor(Theme.controlHover)
+    private let controlPressed = NSColor(Theme.controlPressed)
     private var hovering = HoverPreview.on
     private var pressed = false
     private var tracking: NSTrackingArea?
@@ -252,6 +256,9 @@ final class SubtleButton: NSView {
 
     override var isFlipped: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    /// A press here is a click, never the start of a window drag (in the title bar, a see-through
+    /// view would otherwise count as a drag handle and the window server could keep the release).
+    override var mouseDownCanMoveWindow: Bool { false }
 
     private var image: NSImage? { symbol.map { theme.symbol($0, size: 11, weight: .medium, color: titleColor) } }
     private var titleColor: NSColor { prominent ? theme.background : theme.body }
@@ -267,7 +274,7 @@ final class SubtleButton: NSView {
         if prominent {
             (pressed ? theme.text.withAlphaComponent(0.8) : (hovering ? theme.text.withAlphaComponent(0.9) : theme.text)).setFill()
         } else {
-            (pressed ? pressedFill : (hovering ? theme.raisedHover : raised)).setFill()
+            (pressed ? controlPressed : (hovering ? controlHover : control)).setFill()
         }
         shape.fill()
         var x: CGFloat = title.isEmpty ? 8 : 12
@@ -322,8 +329,8 @@ final class SubtleButton: NSView {
     }
 }
 
-/// A word in a bar that acts as a button ("List", "Details", "Modified ↓"): quiet text, the
-/// text color while on, a fill on hover. With `popUpMenu` it opens a menu instead.
+/// A word in a bar that acts as a button ("List", "Details", "Modified ↓"): quiet text; while on,
+/// the text color on a raised fill, as the selected tab has. With `popUpMenu` it opens a menu instead.
 final class QuietButton: NSView {
     var title: String { didSet { if title != oldValue { invalidateIntrinsicContentSize(); needsDisplay = true } } }
     var isOn = false { didSet { if isOn != oldValue { needsDisplay = true } } }
@@ -333,6 +340,7 @@ final class QuietButton: NSView {
     private let theme: TableTheme
     private let font = NSFont.systemFont(ofSize: 12)
     private let pressedFill = NSColor(Theme.pressedFill)
+    private let raised = NSColor(Theme.raised)
     private var hovering = HoverPreview.on
     private var pressed = false
     private var tracking: NSTrackingArea?
@@ -348,12 +356,15 @@ final class QuietButton: NSView {
 
     override var isFlipped: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    /// A press here is a click, never the start of a window drag (in the title bar, a see-through
+    /// view would otherwise count as a drag handle and the window server could keep the release).
+    override var mouseDownCanMoveWindow: Bool { false }
 
     var width: CGFloat { ceil(TextLines.shared.line(title, font: font, color: theme.text).width) + 20 }
 
     override func draw(_ dirtyRect: NSRect) {
-        if pressed || hovering {
-            (pressed ? pressedFill : theme.hoverFill).setFill()
+        if pressed || hovering || isOn {
+            (pressed ? pressedFill : (hovering ? theme.raisedHover : raised)).setFill()
             NSBezierPath(roundedRect: bounds, xRadius: Theme.controlRadius, yRadius: Theme.controlRadius).fill()
         }
         FileCellView.drawText(title, font: font, color: isOn || hovering ? theme.text : theme.textSecondary,

@@ -32,6 +32,15 @@ enum Theme {
     /// Running text in previews, a little softer than headings.
     static var body: Color { colors.body }
 
+    // Controls stand on a lighter fill than what's under them, never on the same dark with an
+    // outline: a button or picker is a step up, a switch's track a step up with the chosen
+    // option a further step up (as the website's section-active sits on section).
+    static var control: Color { colors.raisedHover }
+    static var controlHover: Color { colors.pressedFill }
+    static var controlPressed: Color { colors.borderHover }
+    static var track: Color { colors.raised }
+    static var trackSelected: Color { colors.borderHover }
+
     static var accent: Color { colors.accent }
     static var accentSoft: Color { colors.accentSoft }
     static var accentStrong: Color { colors.accentStrong }
@@ -268,7 +277,7 @@ struct IconButton: View {
     }
 }
 
-/// Compact segmented control: a recessed track with the chosen option raised.
+/// Compact segmented control: a raised track with the chosen option a step lighter.
 struct Segmented<Value: Hashable>: View {
     @Binding var selection: Value
     let options: [(Value, String)]
@@ -285,8 +294,7 @@ struct Segmented<Value: Hashable>: View {
             }
         }
         .padding(2)
-        .background(Theme.field, in: .rect(cornerRadius: Theme.controlRadius + 1))
-        .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius + 1).strokeBorder(Theme.fieldBorder))
+        .background(Theme.track, in: .rect(cornerRadius: Theme.controlRadius + 1))
     }
 
     private struct SegmentStyle: ButtonStyle {
@@ -299,7 +307,7 @@ struct Segmented<Value: Hashable>: View {
                     .padding(.horizontal, 8)
                     .frame(height: Theme.smallControlHeight - 4)
                     .foregroundStyle(isSelected || hovering ? Theme.text : Theme.textSecondary)
-                    .background(isSelected ? Theme.raisedHover : (hovering ? Theme.raised : .clear),
+                    .background(isSelected ? Theme.trackSelected : (hovering ? Theme.control : .clear),
                                 in: .rect(cornerRadius: Theme.controlRadius - 1))
                     .clickable(!isSelected)
             }

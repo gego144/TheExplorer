@@ -65,7 +65,7 @@ struct Hovering<Content: View>: View {
 // MARK: - Fields
 
 extension View {
-    /// The look of a text field in forms: recessed, with a brighter border on hover and focus.
+    /// The look of a text field in forms: a raised fill, lighter on hover, with a ring while focused.
     func formField() -> some View {
         modifier(FormField())
     }
@@ -81,9 +81,9 @@ private struct FormField: ViewModifier {
             .font(.system(size: 12))
             .padding(.horizontal, 8)
             .frame(height: Theme.controlHeight)
-            .background(Theme.field, in: .rect(cornerRadius: Theme.controlRadius + 1))
+            .background(hovering && !focused ? Theme.control : Theme.track, in: .rect(cornerRadius: Theme.controlRadius + 1))
             .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius + 1)
-                .strokeBorder(focused ? Theme.accent.opacity(0.6) : (hovering ? Theme.borderHover : Theme.fieldBorder)))
+                .strokeBorder(focused ? Theme.accent.opacity(0.6) : .clear))
             .hoverTracking { hovering = $0 }
             .animation(Theme.hoverAnimation, value: hovering)
             .animation(Theme.hoverAnimation, value: focused)
@@ -149,10 +149,8 @@ struct SubtleButtonStyle: ButtonStyle {
                 .foregroundStyle(isEnabled ? Theme.text : Theme.textTertiary)
                 .padding(.horizontal, 10)
                 .frame(minHeight: Theme.smallControlHeight)
-                .background(configuration.isPressed ? Theme.pressedFill : (active ? Theme.raisedHover : Theme.raised),
+                .background(configuration.isPressed ? Theme.controlPressed : (active ? Theme.controlHover : Theme.control),
                             in: .rect(cornerRadius: Theme.controlRadius))
-                .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius)
-                    .strokeBorder(active ? Theme.borderHover : Theme.fieldBorder))
                 .opacity(isEnabled ? 1 : 0.55)
                 .hoverTracking { hovering = $0 }
                 .clickable(isEnabled)
@@ -354,11 +352,6 @@ struct ChromeMenu<Items: View, Label: View>: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .background(background, in: .rect(cornerRadius: Theme.controlRadius))
-        .overlay {
-            if style == .field || style == .button {
-                RoundedRectangle(cornerRadius: Theme.controlRadius).strokeBorder(hovering ? Theme.borderHover : Theme.fieldBorder)
-            }
-        }
         .hoverTracking { hovering = $0 }
         .clickable()
         .animation(Theme.hoverAnimation, value: hovering)
@@ -401,8 +394,7 @@ struct ChromeMenu<Items: View, Label: View>: View {
 
     private var background: Color {
         switch style {
-        case .field: hovering ? Theme.raised : Theme.field
-        case .button: hovering ? Theme.raisedHover : Theme.raised
+        case .field, .button: hovering ? Theme.controlHover : Theme.control
         case .icon, .chip: hovering ? Theme.raisedHover : .clear
         }
     }
