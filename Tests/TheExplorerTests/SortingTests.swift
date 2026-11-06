@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import TheExplorer
@@ -52,19 +53,142 @@ struct SearchRankTests {
 }
 
 @MainActor
-struct DragAndDropTests {
-    @Test func multiDragCarriesTheSelectionInListOrder() {
-        let rows = ["video8.ts", "video7.ts", "video5.ts", "video.m3u8", "video6.ts"].map { row($0) }
-        let selection: Set<URL> = [rows[4].id, rows[0].id, rows[2].id]
-        #expect(MultiDragSource.dragged(rows: rows, selection: selection).map(\.lastPathComponent) == ["video8.ts", "video5.ts", "video6.ts"])
+struct FileTableTests {
+    private func controller(_ rows: [ListRow], selection: Set<URL> = [], onSelect: @escaping (Set<URL>) -> Void = { _ in }) -> FileTableController {
+        let controller = FileTableController()
+        var config = FileTableController.Config()
+        config.setSelection = onSelect
+        controller.update(rows: rows, selection: selection, focusRequest: 0, config: config)
+        return controller
     }
 
-    @Test func dropsFindTheRowUnderTheCursor() {
-        let frames = RowFrames()
-        frames.frames[URL(fileURLWithPath: "/x/dest")] = CGRect(x: 0, y: 30, width: 400, height: 28)
-        frames.frames[URL(fileURLWithPath: "/x/a.txt")] = CGRect(x: 0, y: 59, width: 400, height: 28)
-        #expect(frames.row(at: CGPoint(x: 100, y: 40))?.lastPathComponent == "dest")
-        #expect(frames.row(at: CGPoint(x: 100, y: 70))?.lastPathComponent == "a.txt")
-        #expect(frames.row(at: CGPoint(x: 100, y: 300)) == nil)
+    @Test func groupHeadersSitAboveTheirRowsAndCantBeSelected() {
+        var rows = ["a.txt", "b.txt", "c.txt"].map { row($0) }
+        rows[0].group = "Today"
+        rows[2].group = "Yesterday"
+        let table = controller(rows)
+        #expect(table.numberOfRows(in: table.table) == 5)
+        #expect(table.row(atLine: 0) == nil)
+        #expect(table.row(atLine: 1)?.item.name == "a.txt")
+        #expect(table.row(atLine: 3) == nil)
+        #expect(table.row(atLine: 4)?.item.name == "c.txt")
+        #expect(table.tableView(table.table, shouldSelectRow: 1))
+        #expect(!table.tableView(table.table, shouldSelectRow: 3))
+        #expect(table.tableView(table.table, selectionIndexesForProposedSelection: [0, 1, 2, 3, 4]) == [1, 2, 4])
+    }
+
+    @Test func dragsCarryEachFileInListOrder() {
+        let rows = ["video8.ts", "video7.ts", "video5.ts"].map { row($0) }
+        var withGroup = rows
+        withGroup[0].group = "Today"
+        let table = controller(withGroup)
+        let written = (1...3).compactMap { table.tableView(table.table, pasteboardWriterForRow: $0) as? NSURL }
+        #expect(written.map { ($0 as URL).lastPathComponent } == ["video8.ts", "video7.ts", "video5.ts"])
+        #expect(table.tableView(table.table, pasteboardWriterForRow: 0) == nil)
+    }
+
+    @Test func selectionGoesBothWays() async {
+        let rows = ["a.txt", "b.txt", "c.txt"].map { row($0) }
+        var told: Set<URL>?
+        let table = controller(rows, selection: [rows[1].id]) { told = $0 }
+        #expect(table.table.selectedRowIndexes == [1])
+        // Picking rows in the table tells SwiftUI on the next turn of the run loop.
+        table.table.selectRowIndexes([0, 2], byExtendingSelection: false)
+        #expect(told == nil)
+        await Task.yield()
+        try? await Task.sleep(for: .milliseconds(20))
+        #expect(told == [rows[0].id, rows[2].id])
+    }
+
+    @Test func dropsReadFilesAndRemoteItems() {
+        let pasteboard = NSPasteboard(name: .init("FileTableTests-\(UUID().uuidString)"))
+        let file = URL(fileURLWithPath: "/x/a.txt")
+        let remote = URL(string: "s3://connection/bucket/key.txt")!
+        pasteboard.clearContents()
+        pasteboard.writeObjects([file as NSURL, remote as NSURL])
+        #expect(FileTableController.urls(from: pasteboard) == [file, remote])
+        pasteboard.releaseGlobally()
+    }
+
+    /// A drag over the list, at a point in the window.
+    private final class FakeDrag: NSObject, NSDraggingInfo {
+        let draggingPasteboard: NSPasteboard
+        let draggingLocation: NSPoint
+        init(urls: [URL], at point: NSPoint) {
+            draggingPasteboard = NSPasteboard(name: .init("FileTableDrag-\(UUID().uuidString)"))
+            draggingPasteboard.clearContents()
+            draggingPasteboard.writeObjects(urls.map { $0 as NSURL })
+            draggingLocation = point
+        }
+        var draggingDestinationWindow: NSWindow? { nil }
+        var draggingSourceOperationMask: NSDragOperation { [.copy, .move, .generic] }
+        var draggedImageLocation: NSPoint { draggingLocation }
+        var draggedImage: NSImage? { nil }
+        var draggingSource: Any? { nil }
+        var draggingSequenceNumber: Int { 1 }
+        func slideDraggedImage(to screenPoint: NSPoint) {}
+        var draggingFormation: NSDraggingFormation = .default
+        var animatesToDestination = false
+        var numberOfValidItemsForDrop = 1
+        func enumerateDraggingItems(options enumOpts: NSDraggingItemEnumerationOptions = [], for view: NSView?,
+                                    classes classArray: [AnyClass], searchOptions: [NSPasteboard.ReadingOptionKey: Any] = [:],
+                                    using block: (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void) {}
+        var springLoadingHighlight: NSSpringLoadingHighlight { .none }
+        func resetSpringLoading() {}
+    }
+
+    @Test func dropsGoIntoTheFolderUnderTheCursorOrTheFolderShown() {
+        let rows = [row("dest", folder: true), row("a.txt"), row("b.txt")]
+        var into: (urls: [URL], folder: URL)?
+        var background: [URL]?
+        let table = FileTableController()
+        var config = FileTableController.Config()
+        config.onDropInto = { urls, folder in into = (urls, folder); return true }
+        config.onDropBackground = { urls in background = urls; return true }
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 400), styleMask: [.titled], backing: .buffered, defer: true)
+        window.contentView = table.scrollView
+        table.scrollView.frame = window.contentView!.bounds
+        table.update(rows: rows, selection: [], focusRequest: 0, config: config)
+        table.scrollView.layoutSubtreeIfNeeded()
+        func point(onLine line: Int) -> NSPoint {
+            let rect = table.table.rect(ofRow: line)
+            return table.table.convert(NSPoint(x: rect.midX, y: rect.midY), to: nil)
+        }
+        let dragged = [URL(fileURLWithPath: "/elsewhere/photo.jpg")]
+
+        // Over the folder row: into that folder.
+        let overFolder = FakeDrag(urls: dragged, at: point(onLine: 0))
+        #expect(table.tableView(table.table, validateDrop: overFolder, proposedRow: 0, proposedDropOperation: .on) == .move)
+        #expect(table.dropLine == 0)
+        #expect(table.tableView(table.table, acceptDrop: overFolder, row: 0, dropOperation: .on))
+        #expect(into?.folder.lastPathComponent == "dest")
+        #expect(into?.urls == dragged)
+
+        // Over a file row: into the folder shown.
+        let overFile = FakeDrag(urls: dragged, at: point(onLine: 1))
+        #expect(table.tableView(table.table, validateDrop: overFile, proposedRow: 1, proposedDropOperation: .on) == .move)
+        #expect(table.dropLine == nil && table.dropOnBackground)
+        #expect(table.tableView(table.table, acceptDrop: overFile, row: 1, dropOperation: .on))
+        #expect(background == dragged)
+        #expect(!table.dropOnBackground)
+
+        // A folder dragged over itself goes to the folder shown instead, never into itself.
+        let ownFolder = FakeDrag(urls: [rows[0].id], at: point(onLine: 0))
+        _ = table.tableView(table.table, validateDrop: ownFolder, proposedRow: 0, proposedDropOperation: .on)
+        #expect(table.dropLine == nil && table.dropOnBackground)
+        table.draggingEnded()
+        #expect(!table.dropOnBackground)
+    }
+
+    @Test func columnsNeverOverlap() {
+        for showLocation in [false, true] {
+            for depth in [0, 3] {
+                let layout = FileTableLayout(width: 900, showLocation: showLocation, depth: depth)
+                #expect(layout.name.upperBound <= (layout.location?.lowerBound ?? layout.type.lowerBound))
+                #expect(layout.type.upperBound <= layout.size.lowerBound)
+                #expect(layout.size.upperBound <= layout.date.lowerBound)
+                #expect(layout.date.upperBound <= 900 - FileTableLayout.gutter)
+            }
+        }
     }
 }

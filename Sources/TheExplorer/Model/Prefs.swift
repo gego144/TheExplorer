@@ -63,6 +63,21 @@ final class Prefs {
             FinderTakeover.shared.update()
         }
     }
+    /// The folder last shown, for "Open new windows in: last folder"; saved by saveLastPath.
+    @ObservationIgnored var lastPath: String?
+
+    func saveLastPath() {
+        if let lastPath, defaults.string(forKey: "lastPath") != lastPath { defaults.set(lastPath, forKey: "lastPath") }
+    }
+
+    /// Clears preferences that AppKit saved for window layouts the app no longer has (one per
+    /// window, from an earlier design). There were hundreds, and every preference read after a
+    /// write had to merge them all.
+    func pruneStaleWindowFrames() {
+        let stale = defaults.dictionaryRepresentation().keys.filter { $0.hasPrefix("NSSplitView Subview Frames SwiftUI.PresentedWindowContent") }
+        stale.forEach(defaults.removeObject(forKey:))
+    }
+
     /// Where photos sent from an iPhone land (see PhoneLink).
     var importFolder: URL {
         didSet {
@@ -162,7 +177,7 @@ final class Prefs {
         case .home: return .home
         case .custom: return URL(fileURLWithPath: startFolder)
         case .lastFolder:
-            return defaults.string(forKey: "lastPath").map(URL.init(fileURLWithPath:)) ?? .home
+            return (lastPath ?? defaults.string(forKey: "lastPath")).map(URL.init(fileURLWithPath:)) ?? .home
         }
     }
 
@@ -183,10 +198,22 @@ struct Terminal: Identifiable, Hashable {
     var appURL: URL? { NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) }
     var isInstalled: Bool { appURL != nil }
 
+    /// Looked up once per app: menus show it ("Open in cmux") and SwiftUI builds every path
+    /// chip's menu each time the chips redraw, so asking LaunchServices each time cost ~2ms a
+    /// chip on every folder change.
     var name: String {
-        guard let appURL else { return bundleID == Self.appleTerminal ? "Terminal" : bundleID }
-        return FileManager.default.displayName(atPath: appURL.path).replacingOccurrences(of: ".app", with: "")
+        if let cached = Self.names[bundleID] { return cached }
+        let name: String
+        if let appURL {
+            name = FileManager.default.displayName(atPath: appURL.path).replacingOccurrences(of: ".app", with: "")
+        } else {
+            name = bundleID == Self.appleTerminal ? "Terminal" : bundleID
+        }
+        Self.names[bundleID] = name
+        return name
     }
+
+    nonisolated(unsafe) private static var names: [String: String] = [:]
 
     var icon: NSImage? {
         appURL.map { NSWorkspace.shared.icon(forFile: $0.path) }

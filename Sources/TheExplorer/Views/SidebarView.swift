@@ -196,6 +196,9 @@ private struct SidebarRow: View {
         .animation(Theme.hoverAnimation, value: hovering)
         .onTapGesture(perform: action)
         .modifier(SidebarDrop(url: dropURL, model: model, targeted: $targeted))
+        #if DEBUG
+        .debugRowFrame(named: "sidebar-" + title)
+        #endif
     }
 
     private var background: Color {
@@ -362,7 +365,7 @@ private struct QRButton: View {
 /// with a bucket set, or Google Drive) to upload.
 private struct CloudSection: View {
     let model: BrowserModel
-    @Environment(\.openSettings) private var openSettings
+    @Environment(\.showSettings) private var openSettings
     @Environment(\.openTab) private var openTab
 
     var body: some View {

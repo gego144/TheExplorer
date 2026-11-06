@@ -32,8 +32,8 @@ struct InspectorView: View {
             if urls.count > 1 {
                 MultipleSelectionSummary(urls: urls).panel(padding: 14)
             } else if let focusURL, let item = FileItem(url: focusURL) {
+                // Updated in place as the selection moves, rather than built anew for each item.
                 ItemDetails(item: item, model: model, isCurrentFolder: urls.isEmpty)
-                    .id(focusURL)
                     .panel(padding: 14)
             }
         }
@@ -184,11 +184,12 @@ private struct ItemDetails: View {
                     .buttonStyle(SubtleButtonStyle())
             }
         }
-        .onAppear {
-            if item.isFolder { sizes.show([item.path], by: sizeWatch) }
+        .onChange(of: item.url, initial: true) {
+            sizes.show(item.isFolder ? [item.path] : [], by: sizeWatch)
         }
         .onDisappear { sizes.show([], by: sizeWatch) }
         .task(id: item.url) {
+            media = nil
             lastOpened = try? item.url.resourceValues(forKeys: [.contentAccessDateKey]).contentAccessDate
             guard !item.isFolder || item.isPackage else { return }
             media = await MediaInfoReader.read(item.url, type: item.contentType, modified: item.modified)
@@ -254,7 +255,6 @@ private struct DetailRow: View {
                 .foregroundStyle(emphasized ? Theme.accent : Theme.text)
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
-                .textSelection(.enabled)
         }
         .font(.system(size: 11.5))
     }

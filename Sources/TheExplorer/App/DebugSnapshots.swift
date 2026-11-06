@@ -34,6 +34,8 @@ enum DemoMode {
 @MainActor
 enum DebugSnapshots {
     private static var hasRun = false
+    /// Whether scripted scenes are driving the app (it then runs in the background).
+    static var isRunning: Bool { hasRun }
     private static var settingsWindow: NSWindow?
     private static var eventLogMonitor: Any?
 
@@ -188,10 +190,6 @@ enum DebugSnapshots {
                     model.drive.sharing = nil
                 }
                 log("\(scene): \(Self.sharingSummary(sharing))")
-            case "pressed":
-                // pressed logs the rows the last mouse press landed on, as a drag would carry them.
-                log("\(scene): \(MultiDragSource.debugLastPress)")
-                wait = 0
             case "foldersize":
                 // foldersize:<path> logs the folder's measured size, if there is one yet.
                 let size = FolderSizeStore.shared.size(for: argument)
@@ -216,6 +214,57 @@ enum DebugSnapshots {
                 // s3: shows the first connection; s3:bucket/prefix/ a folder in it.
                 // The raw argument: tilde expansion would drop the trailing "/" that marks a folder.
                 if let url = S3Location(url: Self.debugURL("s3:" + (parts.count > 1 ? parts[1] : ""))) { model.showS3(url) }
+            case "bench":
+                // bench[:<rounds>]: clicks and presses through everyday navigation in the folder
+                // showing (it needs folders "Alpha" and "Beta" in it; scripts/bench-fixture.sh),
+                // timing each with LatencyMeter, and logs a table of response and done times.
+                await Bench.run(rounds: Int(argument) ?? 5, workspace: workspace, log: log)
+            case "selloop":
+                // selloop:<n> moves the selection through the list n times, 60ms apart, so a
+                // profiler sees nothing but what a selection change costs.
+                let rows = model.rows
+                let count = Int(argument) ?? 100
+                let before = InputDriver.processCPU()
+                let mainBefore = LatencyMeter.mainThreadCPU()
+                for index in 0..<count where !rows.isEmpty {
+                    model.selection = [rows[index % rows.count].id]
+                    try? await Task.sleep(for: .milliseconds(60))
+                }
+                let perChange = { (seconds: Double) in String(format: "%.1f", seconds * 1000 / Double(max(count, 1))) }
+                log("\(scene): \(perChange(LatencyMeter.mainThreadCPU() - mainBefore))ms on the main thread per change, \(perChange(InputDriver.processCPU() - before))ms of CPU in all")
+            case "navloop":
+                // navloop:<n> goes into the first folder and back up, n times, 80ms apart, and
+                // logs the main thread's time per move.
+                let home = model.currentURL
+                guard let folder = model.rows.first(where: { $0.item.isFolder })?.id else { break }
+                let count = Int(argument) ?? 50
+                let mainBefore = LatencyMeter.mainThreadCPU()
+                for index in 0..<(count * 2) {
+                    model.navigate(to: index.isMultiple(of: 2) ? folder : home)
+                    try? await Task.sleep(for: .milliseconds(80))
+                }
+                log("\(scene): \(String(format: "%.1f", (LatencyMeter.mainThreadCPU() - mainBefore) * 1000 / Double(count * 2)))ms on the main thread per move")
+            case "rowmenu":
+                // rowmenu:<row name> builds the right-click menu for that row (or the list's own
+                // menu, with no name) without showing it, and logs its items.
+                if let controller = FileTableController.debugLast {
+                    let line = RowGeometry.frame(named: argument).flatMap { controller.line(of: $0.0) } ?? -1
+                    if let menu = controller.menu(forLine: line) {
+                        menu.update()
+                        func titles(_ menu: NSMenu) -> String {
+                            menu.items.map { $0.isSeparatorItem ? "|" : $0.title + ($0.submenu.map { "{" + titles($0) + "}" } ?? "") }.joined(separator: ", ")
+                        }
+                        log("\(scene) -> \(titles(menu))")
+                    }
+                }
+            case "press":
+                // press:<name>: clicks the middle of a named element (a tab is "tab-0", the new
+                // tab button "newtab-button", a sidebar place "sidebar-Downloads").
+                if let (_, frame) = RowGeometry.frame(named: argument) {
+                    await InputDriver.click(at: CGPoint(x: frame.midX, y: frame.midY))
+                } else {
+                    log("\(scene): nothing on screen with that name")
+                }
             case "phonelink":
                 // phonelink shows the "From iPhone" setup sheet (which turns receiving on) and
                 // logs the link the QR code holds.

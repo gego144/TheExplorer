@@ -4,7 +4,7 @@ import SwiftUI
 /// a way to add or edit them.
 struct ActionsMenu: View {
     let urls: Set<URL>
-    @Environment(\.openSettings) private var openSettings
+    @Environment(\.showSettings) private var openSettings
     @Environment(\.listedItems) private var listed
 
     var body: some View {

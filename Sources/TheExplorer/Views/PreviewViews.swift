@@ -41,21 +41,24 @@ struct FilePreview: View {
     }
 }
 
-/// A live Quick Look preview (text, code, PDFs, images, video, Office documents…). It mounts
-/// after a short pause, so arrowing through a folder doesn't render every file on the way.
+/// A live Quick Look preview (text, code, PDFs, images, video, Office documents…). It shows a
+/// file after a short pause, so arrowing through a folder doesn't render every file on the way.
+/// One preview view stays for the card's lifetime and is handed each new file: making and
+/// closing a Quick Look view for every selection cost ~10ms of main thread each time.
 private struct InlineQuickLook: View {
     let url: URL
     let onExpand: () -> Void
-    @State private var ready = false
+    /// The file the preview view shows; behind until it catches up with `url`.
+    @State private var shown: URL?
 
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 8).fill(Theme.field)
-            if ready {
-                QuickLookRepresentable(url: url)
+            if let shown {
+                QuickLookRepresentable(url: shown)
                     .clipShape(.rect(cornerRadius: 8))
-            } else {
-                ProgressView().controlSize(.small)
+                    // The previous file stays out of sight until the new one is handed over.
+                    .opacity(shown == url ? 1 : 0)
             }
         }
         .frame(height: 200)
@@ -72,9 +75,8 @@ private struct InlineQuickLook: View {
             .help("Quick Look (Space)")
         }
         .task(id: url) {
-            ready = false
             try? await Task.sleep(for: .milliseconds(140))
-            ready = !Task.isCancelled
+            if !Task.isCancelled { shown = url }
         }
     }
 }
@@ -94,6 +96,11 @@ struct QuickLookRepresentable: NSViewRepresentable {
         if (view.previewItem as? NSURL) as URL? != url {
             view.previewItem = url as NSURL
         }
+    }
+
+    /// It fills its frame; answering here spares SwiftUI an Auto Layout pass on every layout.
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: QLPreviewView, context: Context) -> CGSize? {
+        proposal.replacingUnspecifiedDimensions(by: CGSize(width: 240, height: 200))
     }
 
     /// `close()` aborts the app (a Quick Look assertion) when the view has already left its

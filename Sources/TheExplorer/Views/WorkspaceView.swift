@@ -23,7 +23,7 @@ extension EnvironmentValues {
 
 /// The inspector, or nothing when there's nothing to show. Its own view, so selecting files
 /// (which decides whether there's anything) redraws only this, not the whole window.
-private struct InspectorColumn: View {
+struct InspectorColumn: View {
     let model: BrowserModel
 
     var body: some View {
@@ -69,36 +69,22 @@ private struct QuickLookCarrier: View {
 /// A whole window: tab strip, command bar, sidebar, content, inspector and status bar.
 struct WorkspaceView: View {
     @Bindable var workspace: Workspace
-    /// The first pane's width when a divider drag began.
-    @State private var dragStart: CGFloat = 0
-    private var prefs: Prefs { .shared }
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         let model = workspace.selected
-        VStack(spacing: 0) {
-            TabStrip(workspace: workspace)
-            CommandBar(model: model)
-                .zIndex(1) // path suggestions drop down over the content
-            HStack(spacing: 0) {
-                if prefs.showSidebar {
-                    SidebarView(model: model)
-                        .frame(width: 192)
-                        .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 1) }
-                }
-                panes(model)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                if prefs.showInspector {
-                    InspectorColumn(model: model)
-                }
-            }
-            StatusBar(model: model)
-        }
+        // The window's parts live in hosting views of their own (see WorkspaceShell); what's
+        // here is what belongs to the window as a whole: sheets, alerts, Quick Look, the large
+        // preview and the menus' view of it.
+        WorkspaceShell(workspace: workspace)
+        .ignoresSafeArea()
         .background(Theme.background)
         .foregroundStyle(Theme.text)
         .ignoresSafeArea(.container, edges: .top)
         .preferredColorScheme(Theme.colorScheme)
         .tint(Theme.accent)
         .environment(\.openTab) { url in workspace.newTab(url) }
+        .environment(\.showSettings) { openSettings() }
         .navigationTitle(model.title)
         // One per pane, rebuilt when another pane or tab takes over. Quick Look's panel is
         // shared, and handing an open panel another pane's list (shorter, or empty) made
@@ -129,10 +115,16 @@ struct WorkspaceView: View {
         .background(SelectionFollower(model: model))
         .focusedSceneValue(\.workspace, workspace)
     }
+}
 
-    /// The tab's content, or its two panes side by side when it's split.
-    @ViewBuilder
-    private func panes(_ active: BrowserModel) -> some View {
+/// The tab's content, or its two panes side by side when it's split.
+struct PanesRegion: View {
+    @Bindable var workspace: Workspace
+    /// The first pane's width when a divider drag began.
+    @State private var dragStart: CGFloat = 0
+
+    var body: some View {
+        let active = workspace.selected
         let tab = workspace.currentTab
         if let second = workspace.secondPane(of: tab) {
             GeometryReader { proxy in
@@ -142,7 +134,7 @@ struct WorkspaceView: View {
                 let minimum = min(380, width / 2)
                 let first = min(max(width * workspace.splitFraction(of: tab), minimum), width - minimum)
                 HStack(spacing: 0) {
-                    SplitPane(model: tab, workspace: workspace, isActive: active === tab) { content(tab) }
+                    SplitPane(model: tab, workspace: workspace, isActive: active === tab) { PaneContent(model: tab) }
                         .frame(width: first)
                         .clipped()
                     SplitDivider(
@@ -152,18 +144,14 @@ struct WorkspaceView: View {
                         },
                         onReset: { workspace.setSplitFraction(nil, of: tab) }
                     )
-                    SplitPane(model: second, workspace: workspace, isActive: active === second) { content(second) }
+                    SplitPane(model: second, workspace: workspace, isActive: active === second) { PaneContent(model: second) }
                         .frame(width: max(0, width - first))
                         .clipped()
                 }
             }
         } else {
-            content(active)
+            PaneContent(model: active)
         }
-    }
-
-    private func content(_ model: BrowserModel) -> some View {
-        PaneContent(model: model)
     }
 }
 
@@ -439,6 +427,9 @@ struct TabStrip: View {
             }
             .buttonStyle(IconButtonStyle(size: Self.tabHeight, symbolSize: 10.5))
             .help("New tab (⌘T)")
+            #if DEBUG
+            .debugRowFrame(named: "newtab-button")
+            #endif
             Spacer(minLength: 0)
         }
         .frame(height: Self.titleBarHeight)
@@ -509,6 +500,9 @@ private struct TabItem: View {
         .animation(Theme.hoverAnimation, value: hovering)
         .onTapGesture { workspace.select(index) }
         .help(Format.path(tab.currentURL.path))
+        #if DEBUG
+        .debugRowFrame(named: "tab-\(index)")
+        #endif
         .dropDestination(for: URL.self) { urls, _ in
             tab.receiveDrop(urls, into: tab.currentURL)
         } isTargeted: { targeted in
@@ -651,6 +645,7 @@ struct Omnibox: View {
     @State private var listFrame = CGRect.zero
     @State private var clickMonitor: Any?
     @Environment(\.controlActiveState) private var controlActiveState
+    @Environment(\.reportDropdown) private var reportDropdown
 
     private var isKeyWindow: Bool {
         #if DEBUG
@@ -729,7 +724,11 @@ struct Omnibox: View {
             // Only in the window you're using: switching away leaves no dropdown behind.
             if focused && !listed.isEmpty && isKeyWindow {
                 SuggestionList(title: isPathMode ? nil : "Recent folders", suggestions: listed, highlighted: highlighted) { go(to: $0) }
-                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { listFrame = $0 }
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+                        listFrame = $0
+                        reportDropdown($0)
+                    }
+                    .onDisappear { reportDropdown(nil) }
                     .offset(y: 34)
             }
         }
@@ -1021,74 +1020,11 @@ private struct Breadcrumbs: View {
         } else if model.destination != .folder {
             Chip(title: model.title)
         } else {
-            let trail = trail
-            // Full path if it fits; otherwise keep the root and the last folders, folding the middle into "…".
-            ViewThatFits(in: .horizontal) {
-                crumbs(trail, keepLast: trail.count)
-                ForEach([3, 2, 1].filter { $0 < trail.count - 1 }, id: \.self) { keep in
-                    crumbs(trail, keepLast: keep)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .layoutPriority(-1)
+            // Full path if it fits; otherwise the root and the last folders, the middle folded into "…".
+            PathCrumbs(trail: trail, model: model, openTab: openTab)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(-1)
         }
-    }
-
-    private func crumbs(_ trail: [URL], keepLast: Int) -> some View {
-        let hidden = keepLast < trail.count - 1 ? Array(trail[1..<(trail.count - keepLast)]) : []
-        let visible = hidden.isEmpty ? trail : [trail[0]] + trail.suffix(keepLast)
-        return HStack(spacing: 2) {
-            ForEach(Array(visible.enumerated()), id: \.element) { index, url in
-                if index > 0 {
-                    Text("/").font(.system(size: 11)).foregroundStyle(Theme.textTertiary.opacity(0.7))
-                }
-                if index == 1 && !hidden.isEmpty {
-                    ChromeMenu(style: .chip) {
-                        ForEach(hidden, id: \.self) { folder in
-                            Button(folder.lastPathComponent) { model.navigate(to: folder) }
-                        }
-                    } label: {
-                        Text("…")
-                    }
-                    .help(hidden.map(\.lastPathComponent).joined(separator: " / "))
-                    Text("/").font(.system(size: 11)).foregroundStyle(Theme.textTertiary.opacity(0.7))
-                }
-                BreadcrumbChip(url: url, isCurrent: index == visible.count - 1, model: model, openTab: openTab)
-            }
-        }
-        .fixedSize()
-    }
-}
-
-private struct BreadcrumbChip: View {
-    let url: URL
-    let isCurrent: Bool
-    let model: BrowserModel
-    let openTab: (URL) -> Void
-    @State private var targeted = false
-
-    var body: some View {
-        Button {
-            model.navigate(to: url)
-        } label: {
-            Text(title)
-        }
-        .buttonStyle(CrumbStyle(isCurrent: isCurrent, highlighted: targeted))
-        .dropDestination(for: URL.self) { urls, _ in model.receiveDrop(urls, into: url) } isTargeted: { targeted = $0 }
-        .contextMenu {
-            Button("Open in New Tab") { openTab(url) }
-            Button(FileActions.openInTerminalTitle) { FileActions.openInTerminal(url) }
-            Button("Copy Path") { FileActions.copyPaths([url]) }
-            Button(FileActions.revealTitle) { FileActions.revealInFinder([url]) }
-            Button(FavoritesStore.shared.contains(url) ? "Unpin" : "Pin to Sidebar") { FavoritesStore.shared.toggle(url) }
-        }
-        .help(Format.path(url.path))
-    }
-
-    private var title: String {
-        if url.path == URL.home.standardizedFileURL.path { return "~" }
-        if url.isRoot { return FileManager.default.displayName(atPath: "/") }
-        return url.lastPathComponent
     }
 }
 

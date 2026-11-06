@@ -62,8 +62,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Search's own index: built in the background, then kept current.
         FileIndex.shared.start()
         FinderTakeover.shared.update()
+        Prefs.shared.pruneStaleWindowFrames()
+        // The last folder is saved when the app goes to the background rather than on every move.
+        NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { Prefs.shared.saveLastPath() }
+        }
         // Photos sent from an iPhone over Wi-Fi, once that's been set up.
         PhoneLink.shared.start()
+        // Click-to-screen times, in a corner readout, when asked for (see LatencyMeter).
+        if LatencyHUD.isRequested {
+            LatencyMeter.shared.enable()
+            LatencyHUD.shared.show()
+        }
         // Recents' list, ready before it's first opened (a tenth of a second of Spotlight).
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { RecentsModel.prewarm() }
         // Safety net: if macOS thought it restored windows but none came back (e.g. state saved by
@@ -91,7 +101,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        MainActor.assumeIsolated { Session.save() }
+        MainActor.assumeIsolated {
+            Session.save()
+            Prefs.shared.saveLastPath()
+        }
         FileIndex.shared.saveIfNeeded()
         FolderVisits.shared.saveIfNeeded()
         MainActor.assumeIsolated { FolderSizeStore.shared.save() }

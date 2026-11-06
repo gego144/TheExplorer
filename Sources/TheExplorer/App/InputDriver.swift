@@ -101,14 +101,16 @@ enum InputDriver {
         guard let window, let content = window.contentView else { return }
         let location = NSPoint(x: point.x, y: content.bounds.height - point.y)
         for click in 1...count {
+            // Into the app's event queue, as a real click is: AppKit controls that track the
+            // mouse after a press (the file list) read the release from the queue, and
+            // NSApp.currentEvent is set for SwiftUI's double-click recognition. This never
+            // activates the app.
             for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
                 guard let event = NSEvent.mouseEvent(
                     with: type, location: location, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
                     windowNumber: window.windowNumber, context: nil, eventNumber: nextEventNumber(), clickCount: click, pressure: 1
                 ) else { continue }
-                // Through the app, as a real click is, so NSApp.currentEvent is set (SwiftUI's
-                // double-click recognition depends on it). This never activates the app.
-                NSApp.sendEvent(event)
+                NSApp.postEvent(event, atStart: false)
             }
             try? await Task.sleep(for: .milliseconds(count > 1 ? 60 : 10))
         }
@@ -123,7 +125,7 @@ enum InputDriver {
                 with: type, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
                 windowNumber: window.windowNumber, context: nil, eventNumber: nextEventNumber(), clickCount: 1, pressure: 1
             ) else { continue }
-            NSApp.sendEvent(event)
+            NSApp.postEvent(event, atStart: false)
         }
     }
 
@@ -273,32 +275,48 @@ enum InputDriver {
 enum RowGeometry {
     static var frames: [URL: CGRect] = [:]
     static var depths: [URL: Int] = [:]
+    /// Lists that work out their rows' frames when asked (the AppKit file list), with each
+    /// row's nesting depth.
+    static var providers: [ObjectIdentifier: () -> [(URL, CGRect, Int)]] = [:]
 
     /// The topmost on-screen row whose path ends in `name` ("Theme.swift", or "debug-rows/Sources"
-    /// for a row inside an archive).
+    /// for a row inside an archive), in the window from its top left.
     static func frame(named name: String) -> (URL, CGRect)? {
-        frames.filter { $0.key.lastPathComponent == name || $0.key.path.hasSuffix("/" + name) }
+        for provided in providers.values.flatMap({ $0() }) {
+            frames[provided.0] = provided.1
+            depths[provided.0] = provided.2
+        }
+        return frames.filter { $0.key.lastPathComponent == name || $0.key.path.hasSuffix("/" + name) }
             .min { $0.value.minY < $1.value.minY }.map { ($0.key, $0.value) }
+    }
+}
+
+/// Records a frame in SwiftUI's `.global` space, which is the window's, from its top left,
+/// even in the window's parts that have hosting views of their own (see WorkspaceShell).
+private struct RowFrameRecorder: ViewModifier {
+    let key: URL
+    var depth: Int?
+
+    func body(content: Content) -> some View {
+        content
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                RowGeometry.frames[key] = frame
+                if let depth { RowGeometry.depths[key] = depth }
+            }
+            // Rows that scroll away or leave with a folder change must not be clicked by name later.
+            .onDisappear { RowGeometry.frames[key] = nil }
     }
 }
 
 extension View {
     /// Records a row's frame for RowGeometry.
     func debugRowFrame(_ row: ListRow) -> some View {
-        onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
-            RowGeometry.frames[row.id] = frame
-            RowGeometry.depths[row.id] = row.depth
-        }
-        // Rows that scroll away or leave with a folder change must not be clicked by name later.
-        .onDisappear { RowGeometry.frames[row.id] = nil }
+        modifier(RowFrameRecorder(key: row.id, depth: row.depth))
     }
 
     /// Records the frame of a row that isn't a file on disk (e.g. inside an archive) under `name`.
     func debugRowFrame(named path: String) -> some View {
-        onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
-            RowGeometry.frames[URL(fileURLWithPath: "/debug-rows/" + path)] = frame
-        }
-        .onDisappear { RowGeometry.frames[URL(fileURLWithPath: "/debug-rows/" + path)] = nil }
+        modifier(RowFrameRecorder(key: URL(fileURLWithPath: "/debug-rows/" + path)))
     }
 }
 #endif

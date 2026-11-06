@@ -171,6 +171,7 @@ final class BrowserModel: Identifiable {
     @ObservationIgnored private var pendingSelection: Set<String>?
     @ObservationIgnored private var listingFailed = false
     @ObservationIgnored private var loadTask: Task<Void, Never>?
+    @ObservationIgnored private var staleRowsTask: Task<Void, Never>?
     /// Counts the folder as visited once you've stayed in it (see FolderVisits).
     @ObservationIgnored private var visitTask: Task<Void, Never>?
     /// The git repository the folder is in, if any; rows show their status from it.
@@ -467,10 +468,22 @@ final class BrowserModel: Identifiable {
             currentURL = url
             expanded = []
             children = [:]
-            items = []
+            // The rows stay until the new folder's listing replaces them in one go, usually a few
+            // milliseconds later. Emptying the list here drew the window twice per move (empty,
+            // then full), ~30ms of extra work and a blank flash. A slow listing (a network
+            // volume) still empties it after a moment, so another folder's files don't linger.
+            staleRowsTask?.cancel()
+            staleRowsTask = Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(150))
+                guard let self, !Task.isCancelled, self.isLoading, self.currentURL == url else { return }
+                self.items = []
+            }
             selection = []
             pendingSelection = nil
-            UserDefaults.standard.set(url.path, forKey: "lastPath")
+            // Kept in memory and saved when the app goes to the background or quits: writing
+            // preferences on every folder change made AppKit's next read of them (a scroll view
+            // does one each time a list changes length) re-merge the whole domain.
+            Prefs.shared.lastPath = url.path
         }
         if arriving { countVisit() }
         reload(selecting: selecting.isEmpty ? nil : selecting.map(\.standardizedFileURL))
@@ -602,19 +615,26 @@ final class BrowserModel: Identifiable {
                     self.listingFailed = false
                 }
                 if let pending = self.pendingSelection {
-                    // Both sides standardized: listings can say /private/tmp where the request says /tmp.
-                    self.selection = Set(items.filter { pending.contains($0.url.standardizedFileURL.path) }.map(\.url))
+                    // Listings can say /private/tmp where the request says /tmp, so a miss is
+                    // checked again with both sides standardized (slow, so only then).
+                    var matched = Set(items.filter { pending.contains($0.url.path) }.map(\.url))
+                    if matched.count < pending.count {
+                        matched = Set(items.filter { pending.contains($0.url.standardizedFileURL.path) }.map(\.url))
+                    }
+                    self.selection = matched
                     self.pendingSelection = nil
                 } else if keepSelection {
                     self.selection = previousSelection.intersection(Set(self.listedItems.map(\.url)))
                 }
                 self.showSizes()
                 // Refresh expanded folders too; drop the ones that are gone.
-                let present = Set(items.map(\.url))
-                self.expanded = self.expanded.filter { folder in
-                    present.contains(folder) || self.expanded.contains(folder.deletingLastPathComponent())
+                if !self.expanded.isEmpty {
+                    let present = Set(items.map(\.url))
+                    self.expanded = self.expanded.filter { folder in
+                        present.contains(folder) || self.expanded.contains(folder.deletingLastPathComponent())
+                    }
+                    self.loadChildren(of: Array(self.expanded))
                 }
-                self.loadChildren(of: Array(self.expanded))
             case .failure(let error):
                 self.items = []
                 self.loadError = Self.describe(error, for: url)
