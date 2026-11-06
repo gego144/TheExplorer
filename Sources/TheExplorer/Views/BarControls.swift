@@ -321,3 +321,90 @@ final class SubtleButton: NSView {
         if bounds.contains(convert(event.locationInWindow, from: nil)) { action() }
     }
 }
+
+/// A word in a bar that acts as a button ("List", "Details", "Modified ↓"): quiet text, the
+/// text color while on, a fill on hover. With `popUpMenu` it opens a menu instead.
+final class QuietButton: NSView {
+    var title: String { didSet { if title != oldValue { invalidateIntrinsicContentSize(); needsDisplay = true } } }
+    var isOn = false { didSet { if isOn != oldValue { needsDisplay = true } } }
+    var action: () -> Void = {}
+    var popUpMenu: (() -> NSMenu)?
+
+    private let theme: TableTheme
+    private let font = NSFont.systemFont(ofSize: 12)
+    private let pressedFill = NSColor(Theme.pressedFill)
+    private var hovering = HoverPreview.on
+    private var pressed = false
+    private var tracking: NSTrackingArea?
+
+    init(_ title: String, help: String? = nil, theme: TableTheme) {
+        self.title = title
+        self.theme = theme
+        super.init(frame: .zero)
+        toolTip = help
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var isFlipped: Bool { true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    var width: CGFloat { ceil(TextLines.shared.line(title, font: font, color: theme.text).width) + 20 }
+
+    override func draw(_ dirtyRect: NSRect) {
+        if pressed || hovering {
+            (pressed ? pressedFill : theme.hoverFill).setFill()
+            NSBezierPath(roundedRect: bounds, xRadius: Theme.controlRadius, yRadius: Theme.controlRadius).fill()
+        }
+        FileCellView.drawText(title, font: font, color: isOn || hovering ? theme.text : theme.textSecondary,
+                              x: 0, midY: bounds.midY, width: bounds.width, alignment: .center)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .cursorUpdate, .activeInActiveApp, .inVisibleRect],
+                                  owner: self, userInfo: nil)
+        addTrackingArea(area)
+        tracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        hovering = true
+        needsDisplay = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hovering = HoverPreview.on
+        needsDisplay = true
+    }
+
+    override func cursorUpdate(with event: NSEvent) { NSCursor.pointingHand.set() }
+
+    override func mouseDown(with event: NSEvent) {
+        if let popUpMenu {
+            popUpMenu().popUp(positioning: nil, at: NSPoint(x: 0, y: bounds.maxY + 4), in: self)
+            hovering = false
+            needsDisplay = true
+            return
+        }
+        pressed = true
+        needsDisplay = true
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard popUpMenu == nil else { return }
+        let inside = bounds.contains(convert(event.locationInWindow, from: nil))
+        if inside != pressed {
+            pressed = inside
+            needsDisplay = true
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard pressed else { return }
+        pressed = false
+        needsDisplay = true
+        if bounds.contains(convert(event.locationInWindow, from: nil)) { action() }
+    }
+}

@@ -73,8 +73,9 @@ enum Theme {
         }
     }
 
-    static let mono = Font.system(size: 11, design: .monospaced)
-    static let monoSmall = Font.system(size: 10, design: .monospaced)
+    /// Numbers: the system font with even-width digits, so they line up without a code font.
+    static let mono = Font.system(size: 11.5).monospacedDigit()
+    static let monoSmall = Font.system(size: 10.5).monospacedDigit()
     static let label = Font.system(size: 12.5)
     static let caption = Font.system(size: 10, weight: .semibold)
 }

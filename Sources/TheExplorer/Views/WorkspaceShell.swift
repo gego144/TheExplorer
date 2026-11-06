@@ -9,8 +9,9 @@ extension EnvironmentValues {
     @Entry var showSettings: () -> Void = {}
 }
 
-/// The window's parts, laid out by AppKit: the tab strip, command bar, sidebar, inspector and
-/// status bar (drawn by AppKit too), and the panes in a hosting view of their own.
+/// The window's parts, laid out by AppKit: the tab strip and view controls, the sidebar, the
+/// path row, the inspector, the status bar and the ⌘K palette (drawn by AppKit too), and the
+/// panes in a hosting view of their own.
 ///
 /// SwiftUI lays out one hosting view at a time. With the whole window in one, a click in the
 /// list had SwiftUI re-measure the command bar, inspector and status bar too, ~60ms in all;
@@ -84,7 +85,9 @@ class RegionHostingView: NSHostingView<AnyView> {
 final class WorkspaceShellView: NSView {
     private let workspace: Workspace
     private var tabs: NSView!
-    private var command: NSView!
+    private var controls: ViewControlsView!
+    private var pathBar: NSView!
+    private var palette: CommandPaletteView!
     private var sidebar: NSView!
     private var panes: RegionHostingView!
     private var inspector: NSView!
@@ -95,9 +98,8 @@ final class WorkspaceShellView: NSView {
     private var showsInspector = true
     private var tracking = false
 
-    static let commandHeight = CommandBarView.height
-    static let statusHeight: CGFloat = 26
-    static let sidebarWidth: CGFloat = 192
+    static let statusHeight: CGFloat = 28
+    static let sidebarWidth: CGFloat = 208
     static let inspectorWidth: CGFloat = 296
 
     init(workspace: Workspace, values: RegionValues) {
@@ -120,8 +122,10 @@ final class WorkspaceShellView: NSView {
         }
         tabs = TabStripView(workspace: workspace)
         addSubview(tabs)
-        command = CommandBarView(workspace: workspace, values: values)
-        addSubview(command)
+        controls = ViewControlsView(workspace: workspace)
+        addSubview(controls)
+        pathBar = PathBarView(workspace: workspace, values: values)
+        addSubview(pathBar)
         sidebar = SidebarPanel(workspace: workspace, values: values)
         addSubview(sidebar)
         panes = host(PanesRegion(workspace: workspace), name: "list")
@@ -129,9 +133,11 @@ final class WorkspaceShellView: NSView {
         addSubview(inspector)
         status = StatusBarView(workspace: workspace, values: values)
         addSubview(status)
-        // The command bar's dropdown hangs over the content below it.
-        command.wantsLayer = true
-        command.layer?.zPosition = 1
+        // ⌘K, over everything.
+        palette = CommandPaletteView(workspace: workspace)
+        addSubview(palette)
+        palette.wantsLayer = true
+        palette.layer?.zPosition = 10
         trackLayout()
     }
 
@@ -164,7 +170,7 @@ final class WorkspaceShellView: NSView {
     override func layout() {
         super.layout()
         #if DEBUG
-        for (name, view) in [("tabs", tabs), ("command", command), ("list", panes), ("status", status)] where Self.hidden.contains(name) {
+        for (name, view) in [("tabs", tabs), ("command", pathBar), ("list", panes), ("status", status)] where Self.hidden.contains(name) {
             view?.isHidden = true
         }
         if Self.hidden.contains("sidebar") { showsSidebar = false }
@@ -172,22 +178,30 @@ final class WorkspaceShellView: NSView {
         #endif
         let width = bounds.width
         let height = bounds.height
-        var y: CGFloat = 0
-        tabs.frame = NSRect(x: 0, y: y, width: width, height: TabStripView.height)
-        y += TabStripView.height
-        let commandY = y
-        y += Self.commandHeight
-        let bodyHeight = max(0, height - y - Self.statusHeight)
+        // The top bar: tabs, and the view controls at its right.
+        let top = TabStripView.height
+        let controlsWidth = controls.width
+        tabs.frame = NSRect(x: 0, y: 0, width: max(0, width - controlsWidth), height: top)
+        controls.frame = NSRect(x: width - controlsWidth, y: 0, width: controlsWidth, height: TabStripView.titleBarHeight)
+        // Below it, the sidebar and details run down to the status bar; between them, the
+        // path row over the list.
+        let bodyHeight = max(0, height - top - Self.statusHeight)
         let left = showsSidebar ? Self.sidebarWidth : 0
         let right = showsInspector ? Self.inspectorWidth : 0
+        let middle = max(0, width - left - right)
         sidebar.isHidden = !showsSidebar
         inspector.isHidden = !showsInspector
-        sidebar.frame = NSRect(x: 0, y: y, width: left, height: bodyHeight)
-        panes.frame = NSRect(x: left, y: y, width: max(0, width - left - right), height: bodyHeight)
-        inspector.frame = NSRect(x: width - right, y: y, width: right, height: bodyHeight)
+        sidebar.frame = NSRect(x: 0, y: top, width: left, height: bodyHeight)
+        pathBar.frame = NSRect(x: left, y: top, width: middle, height: PathBarView.height)
+        panes.frame = NSRect(x: left, y: top + PathBarView.height, width: middle, height: max(0, bodyHeight - PathBarView.height))
+        inspector.frame = NSRect(x: width - right, y: top, width: right, height: bodyHeight)
         status.frame = NSRect(x: 0, y: height - Self.statusHeight, width: width, height: Self.statusHeight)
-        // The command bar's view reaches down over the content, far enough for its dropdown;
-        // below the bar it lets clicks through (see CommandBarView).
-        command.frame = NSRect(x: 0, y: commandY, width: width, height: min(CommandBarView.reach, height - commandY))
+        palette.frame = bounds
+    }
+
+    /// The line under the top bar.
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor(Theme.border).setFill()
+        NSRect(x: 0, y: TabStripView.height - 1, width: bounds.width, height: 1).fill()
     }
 }

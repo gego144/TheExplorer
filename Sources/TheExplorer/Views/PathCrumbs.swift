@@ -53,9 +53,9 @@ final class PathCrumbsView: NSView {
 
     private static let spacing: CGFloat = 2
     private static let padding: CGFloat = 6
-    private let font = NSFont.systemFont(ofSize: 12)
-    private let boldFont = NSFont.systemFont(ofSize: 12, weight: .semibold)
-    private let slashFont = NSFont.systemFont(ofSize: 11)
+    private let font = NSFont.systemFont(ofSize: 12.5)
+    private let boldFont = NSFont.systemFont(ofSize: 12.5, weight: .medium)
+    private let slashFont = NSFont.systemFont(ofSize: 12)
     private lazy var colors = Colors()
 
     private struct Colors {
@@ -63,7 +63,7 @@ final class PathCrumbsView: NSView {
         let secondary = NSColor(Theme.textSecondary)
         let slash = NSColor(Theme.textTertiary).withAlphaComponent(0.7)
         let raised = NSColor(Theme.raised)
-        let hover = NSColor(Theme.colors.raisedHover)
+        let hover = NSColor(Theme.colors.hoverFill)
         let pressed = NSColor(Theme.colors.pressedFill)
         let accent = NSColor(Theme.accent).withAlphaComponent(0.7)
     }
@@ -91,7 +91,7 @@ final class PathCrumbsView: NSView {
         ceil(TextLines.shared.line(title, font: current ? boldFont : font, color: colors.text).width) + Self.padding * 2
     }
 
-    private lazy var slashWidth: CGFloat = ceil(TextLines.shared.line("/", font: slashFont, color: colors.slash).width)
+    private lazy var slashWidth: CGFloat = ceil(TextLines.shared.line("›", font: slashFont, color: colors.slash).width)
     private var foldWidth: CGFloat { measure("…", current: false) }
 
     /// The path keeping the root and the last `keepLast` folders, the rest folded into "…".
@@ -141,7 +141,7 @@ final class PathCrumbsView: NSView {
             let rect = entry.rect
             switch entry.part {
             case .slash:
-                draw("/", font: slashFont, color: colors.slash, in: rect)
+                draw("›", font: slashFont, color: colors.slash, in: rect)
             case .fold:
                 drawChip(index: index, rect: rect, current: false)
                 draw("…", font: font, color: hovered == index ? colors.text : colors.secondary, in: rect)
@@ -156,7 +156,7 @@ final class PathCrumbsView: NSView {
 
     private func drawChip(index: Int, rect: NSRect, current: Bool) {
         let fill: NSColor? = pressed == index ? colors.pressed
-            : (hovered == index || dropTarget == index ? colors.hover : (current ? colors.raised : nil))
+            : (hovered == index || dropTarget == index ? colors.hover : nil)
         let shape = NSBezierPath(roundedRect: rect, xRadius: Theme.chipRadius, yRadius: Theme.chipRadius)
         if let fill {
             fill.setFill()
