@@ -229,13 +229,13 @@ final class SubtleButton: NSView {
     var title: String { didSet { if title != oldValue { needsDisplay = true } } }
     var symbol: String? { didSet { if symbol != oldValue { needsDisplay = true } } }
     var action: () -> Void = {}
+    /// The one main action in a view: filled with the text color, the title in the background's.
+    var prominent = false
 
     private let theme: TableTheme
-    private let font = NSFont.systemFont(ofSize: 11.5, weight: .medium)
+    private let font = NSFont.systemFont(ofSize: 12, weight: .medium)
     private let raised = NSColor(Theme.raised)
     private let pressedFill = NSColor(Theme.pressedFill)
-    private let fieldBorder = NSColor(Theme.fieldBorder)
-    private let borderHover = NSColor(Theme.borderHover)
     private var hovering = HoverPreview.on
     private var pressed = false
     private var tracking: NSTrackingArea?
@@ -253,27 +253,30 @@ final class SubtleButton: NSView {
     override var isFlipped: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    private var image: NSImage? { symbol.map { theme.symbol($0, size: 11, weight: .medium, color: theme.text) } }
+    private var image: NSImage? { symbol.map { theme.symbol($0, size: 11, weight: .medium, color: titleColor) } }
+    private var titleColor: NSColor { prominent ? theme.background : theme.body }
 
     var width: CGFloat {
         let text = title.isEmpty ? 0 : ceil(TextLines.shared.line(title, font: font, color: theme.text).width)
         let icon = image.map { $0.size.width + (title.isEmpty ? 0 : 5) } ?? 0
-        return text + icon + 20
+        return text + icon + (title.isEmpty ? 16 : 24)
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let shape = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: Theme.controlRadius, yRadius: Theme.controlRadius)
-        (pressed ? pressedFill : (hovering ? theme.raisedHover : raised)).setFill()
+        let shape = NSBezierPath(roundedRect: bounds, xRadius: Theme.controlRadius, yRadius: Theme.controlRadius)
+        if prominent {
+            (pressed ? theme.text.withAlphaComponent(0.8) : (hovering ? theme.text.withAlphaComponent(0.9) : theme.text)).setFill()
+        } else {
+            (pressed ? pressedFill : (hovering ? theme.raisedHover : raised)).setFill()
+        }
         shape.fill()
-        (hovering ? borderHover : fieldBorder).setStroke()
-        shape.stroke()
-        var x: CGFloat = 10
+        var x: CGFloat = title.isEmpty ? 8 : 12
         if let image {
             image.draw(in: NSRect(x: x, y: bounds.midY - image.size.height / 2, width: image.size.width, height: image.size.height))
             x += image.size.width + 5
         }
         if !title.isEmpty {
-            FileCellView.drawText(title, font: font, color: theme.text, x: x, midY: bounds.midY, width: bounds.width - x)
+            FileCellView.drawText(title, font: font, color: titleColor, x: x, midY: bounds.midY, width: bounds.width - x)
         }
     }
 

@@ -2,16 +2,15 @@ import AppKit
 import Observation
 import SwiftUI
 
-/// The status bar, drawn by AppKit: what's listed and selected, what's going on, and the disk's
-/// free space. Transfers, actions and Google Drive's usage, which have popovers of their own,
+/// The status bar, drawn by AppKit: the keys worth knowing, what's going on, and what's
+/// listed and selected (free space is at the foot of the sidebar). Transfers, actions and Google Drive's usage, which have popovers of their own,
 /// stay SwiftUI in a small view of their own that changes only when they do.
 ///
 /// It changes with every move and every selection; in SwiftUI that was ~2ms each.
 final class StatusBarView: NSView {
     private let workspace: Workspace
     private let theme = TableTheme()
-    private let mono = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
-    private let font = NSFont.systemFont(ofSize: 11)
+    private let font = NSFont.monospacedDigitSystemFont(ofSize: 11.5, weight: .regular)
     private let spinner = NSProgressIndicator()
     private let activities: RegionHostingView
 
@@ -20,9 +19,6 @@ final class StatusBarView: NSView {
         var summary = ""
         var status: String?
         var spinning = false
-        var volumeName: String?
-        var volumeFraction = 0.0
-        var volumeFree = ""
     }
 
     private var shown = Shown()
@@ -62,8 +58,7 @@ final class StatusBarView: NSView {
             }
         }
         guard read != shown else { return }
-        let relayout = read.status != shown.status || read.spinning != shown.spinning || read.volumeFree != shown.volumeFree
-            || read.volumeName != shown.volumeName || read.summary.count != shown.summary.count
+        let relayout = read.status != shown.status || read.spinning != shown.spinning || read.summary.count != shown.summary.count
         shown = read
         if read.spinning { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
         if relayout { needsLayout = true }
@@ -84,11 +79,6 @@ final class StatusBarView: NSView {
             shown.spinning = isSlow(model)
         } else {
             slowLoad = nil
-        }
-        if model.destination != .drive, let volume = model.volume {
-            shown.volumeName = volume.name
-            shown.volumeFraction = Double(volume.used) / Double(max(volume.total, 1))
-            shown.volumeFree = "\(Format.bytes(volume.available)) free"
         }
         return shown
     }
@@ -115,28 +105,37 @@ final class StatusBarView: NSView {
 
     // MARK: Layout and drawing
 
-    private static let barWidth: CGFloat = 110
+    /// The keys worth knowing, along the left.
+    private static let hints = [("⌘K", "Go anywhere"), ("Space", "Preview"), ("↩", "Open"), ("⌘⌫", "Move to Trash")]
 
-    /// Where the free space starts (its name, the bar, then how much is free).
-    private var volumeStart: CGFloat {
-        guard let name = shown.volumeName else { return bounds.width - 12 }
-        let nameWidth = TextLines.shared.line(name, font: font, color: theme.textSecondary).width
-        let freeWidth = TextLines.shared.line(shown.volumeFree, font: mono, color: theme.textSecondary).width
-        return bounds.width - 12 - ceil(freeWidth) - 10 - Self.barWidth - 10 - ceil(nameWidth)
+    private var hintsEnd: CGFloat {
+        var x: CGFloat = 16
+        for (key, label) in Self.hints {
+            x += ceil(TextLines.shared.line(key, font: font, color: theme.body).width) + 5
+            x += ceil(TextLines.shared.line(label, font: font, color: theme.textTertiary).width) + 18
+        }
+        return x
     }
 
-    private var summaryEnd: CGFloat {
-        12 + ceil(TextLines.shared.line(shown.summary, font: mono, color: theme.textSecondary).width)
+    /// Where the summary (and before it, what's going on) starts, from the right.
+    private var summaryStart: CGFloat {
+        bounds.width - 16 - ceil(TextLines.shared.line(shown.summary, font: font, color: theme.textSecondary).width)
+    }
+
+    private var statusStart: CGFloat {
+        guard let status = shown.status else { return summaryStart - (shown.spinning ? 22 : 0) }
+        let width = min(320, ceil(TextLines.shared.line(status, font: font, color: theme.textSecondary).width))
+        return summaryStart - 16 - width - (shown.spinning ? 18 : 0)
     }
 
     override func layout() {
         super.layout()
         let midY = bounds.midY + 0.5
-        spinner.frame = NSRect(x: summaryEnd + 10, y: midY - 6, width: 12, height: 12)
-        // The activities sit just left of the free space, right-aligned in their view; a fixed
-        // left edge keeps that view from being resized (and laid out again) as the summary changes.
-        let left = max(bounds.width * 0.4, summaryEnd + 10)
-        let frame = NSRect(x: left, y: 1, width: max(0, volumeStart - 10 - left), height: bounds.height - 1)
+        spinner.frame = NSRect(x: statusStart, y: midY - 6, width: 12, height: 12)
+        // The activities sit left of the summary, right-aligned in their view; a fixed left
+        // edge keeps that view from being resized (and laid out again) as the summary changes.
+        let left = max(bounds.width * 0.45, hintsEnd)
+        let frame = NSRect(x: left, y: 1, width: max(0, statusStart - 12 - left), height: bounds.height - 1)
         if activities.frame != frame { activities.frame = frame }
     }
 
@@ -144,23 +143,17 @@ final class StatusBarView: NSView {
         theme.border.setFill()
         NSRect(x: 0, y: 0, width: bounds.width, height: 1).fill()
         let midY = bounds.midY + 0.5
-        let summaryWidth = FileCellView.drawText(shown.summary, font: mono, color: theme.textSecondary, x: 12, midY: midY, width: bounds.width / 2)
-        if let status = shown.status {
-            let x = 12 + summaryWidth + 10 + (shown.spinning ? 16 : 0)
-            FileCellView.drawText(status, font: font, color: theme.accent, x: x, midY: midY,
-                                  width: max(0, bounds.width * 0.4 - x), truncation: .byTruncatingMiddle)
+        var x: CGFloat = 16
+        for (key, label) in Self.hints where x < bounds.width * 0.45 {
+            x += FileCellView.drawText(key, font: font, color: theme.body, x: x, midY: midY, width: 80) + 5
+            x += FileCellView.drawText(label, font: font, color: theme.textTertiary, x: x, midY: midY, width: 160) + 18
         }
-        guard let name = shown.volumeName else { return }
-        var x = volumeStart
-        x += FileCellView.drawText(name, font: font, color: theme.textSecondary, x: x, midY: midY, width: bounds.width - x) + 10
-        let track = NSRect(x: x, y: midY - 2, width: Self.barWidth, height: 4)
-        theme.border.setFill()
-        NSBezierPath(roundedRect: track, xRadius: 2, yRadius: 2).fill()
-        let fill = max(shown.volumeFraction > 0 ? 4 : 0, Self.barWidth * min(1, shown.volumeFraction))
-        theme.accent.setFill()
-        NSBezierPath(roundedRect: NSRect(x: x, y: track.minY, width: fill, height: 4), xRadius: 2, yRadius: 2).fill()
-        x += Self.barWidth + 10
-        FileCellView.drawText(shown.volumeFree, font: mono, color: theme.textSecondary, x: x, midY: midY, width: bounds.width - x)
+        if let status = shown.status {
+            let start = statusStart + (shown.spinning ? 18 : 0)
+            FileCellView.drawText(status, font: font, color: theme.textSecondary, x: start, midY: midY,
+                                  width: summaryStart - 16 - start, truncation: .byTruncatingMiddle)
+        }
+        FileCellView.drawText(shown.summary, font: font, color: theme.textSecondary, x: summaryStart, midY: midY, width: bounds.width - summaryStart)
     }
 }
 
@@ -220,7 +213,7 @@ enum StatusText {
             return text
         case .folder:
             let folders = model.folderCount, files = model.fileCount
-            var text = "\(folders.formatted()) \(folders == 1 ? "dir" : "dirs") · \(files.formatted()) \(files == 1 ? "file" : "files")"
+            var text = "\(folders.formatted()) \(folders == 1 ? "folder" : "folders"), \(files.formatted()) \(files == 1 ? "file" : "files")"
             if model.hiddenCount > 0 { text += " · \(model.hiddenCount.formatted()) hidden" }
             let selection = model.selection
             if !selection.isEmpty {

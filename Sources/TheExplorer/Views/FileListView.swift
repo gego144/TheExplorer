@@ -51,7 +51,7 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
     var onSort: ((SortKey) -> Void)?
     /// Largest size in the list, for scaling size bars. Computed from `rows` when nil.
     var maxSize: Int64?
-    var dateTitle = "Changed"
+    var dateTitle = "Modified"
     var dateSortKey: SortKey = .modified
     var showLocation = false
     var empty: EmptyState?

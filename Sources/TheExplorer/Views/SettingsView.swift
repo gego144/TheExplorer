@@ -147,7 +147,7 @@ struct SettingsView: View {
 
     private static func title(for key: SortKey) -> String {
         switch key {
-        case .modified, .date: "Changed"
+        case .modified, .date: "Modified"
         case .name: "Name"
         case .size: "Size"
         case .kind: "Type"

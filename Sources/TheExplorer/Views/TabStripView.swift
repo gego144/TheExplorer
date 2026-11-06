@@ -22,10 +22,9 @@ final class TabStripView: NSView {
     private let workspace: Workspace
     private let theme = TableTheme()
     private let raised = NSColor(Theme.raised)
-    private let fieldBorder = NSColor(Theme.fieldBorder)
     private let pressedFill = NSColor(Theme.pressedFill)
-    private let font = NSFont.systemFont(ofSize: 12)
-    private let boldFont = NSFont.systemFont(ofSize: 12, weight: .semibold)
+    private let font = NSFont.systemFont(ofSize: 12.5)
+    private let boldFont = NSFont.systemFont(ofSize: 12.5, weight: .medium)
 
     /// What a tab shows.
     private struct Tab: Equatable {
@@ -197,9 +196,8 @@ final class TabStripView: NSView {
 
     /// Each tab as wide as its name (up to a limit), narrower all round when they don't fit.
     private func relayout() {
-        let fixed = tabs.map { tab in
-            10 + symbol(tab.icon, color: theme.accent).size.width + 6 + (closable ? 6 + Self.closeSide + 4 : 10)
-        }
+        // Just the name, with the close button over its end while the pointer's on the tab.
+        let fixed = tabs.map { _ in CGFloat(12 + 12) }
         let natural = tabs.map { tab in
             let width = ceil((tab.label as NSString).size(withAttributes: [.font: tab.isSelected ? boldFont : font]).width)
             return min(width, tab.isSplit ? 220 : 150)
@@ -223,7 +221,7 @@ final class TabStripView: NSView {
     private func closeFrame(_ index: Int) -> NSRect? {
         guard closable, tabFrames.indices.contains(index) else { return nil }
         let tab = tabFrames[index]
-        return NSRect(x: tab.maxX - 4 - Self.closeSide, y: tab.midY - Self.closeSide / 2, width: Self.closeSide, height: Self.closeSide)
+        return NSRect(x: tab.maxX - 5 - Self.closeSide, y: tab.midY - Self.closeSide / 2, width: Self.closeSide, height: Self.closeSide)
     }
 
     private func spot(at point: NSPoint) -> Spot? {
@@ -265,18 +263,15 @@ final class TabStripView: NSView {
                 theme.hoverFill.setFill()
                 shape.fill()
             }
-            if isDropTarget || tab.isSelected {
+            if isDropTarget {
                 let ring = NSBezierPath(roundedRect: frame.insetBy(dx: 0.5, dy: 0.5), xRadius: radius - 0.5, yRadius: radius - 0.5)
                 ring.lineWidth = 1
-                if isDropTarget { ring.setLineDash([4, 3], count: 2, phase: 0) }
-                (isDropTarget ? theme.accent : fieldBorder).setStroke()
+                ring.setLineDash([4, 3], count: 2, phase: 0)
+                theme.accent.setStroke()
                 ring.stroke()
             }
-            // Icon, then the name, truncated in the middle when it's too long.
-            let icon = symbol(tab.icon, color: tab.isSelected || isDropTarget ? theme.accent : theme.textTertiary)
-            var x = frame.minX + 10
-            icon.draw(in: NSRect(x: x, y: frame.midY - icon.size.height / 2, width: icon.size.width, height: icon.size.height))
-            x += icon.size.width + 6
+            // The name, truncated in the middle when it's too long.
+            let x = frame.minX + 12
             let style = NSMutableParagraphStyle()
             style.lineBreakMode = .byTruncatingMiddle
             let label = NSAttributedString(string: tab.label, attributes: [
@@ -287,8 +282,11 @@ final class TabStripView: NSView {
             let height = ceil(label.size().height)
             label.draw(with: NSRect(x: x, y: frame.midY - height / 2, width: labelWidths[index], height: height),
                        options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
-            if let close = closeFrame(index), isHovered || tab.isSelected {
+            if let close = closeFrame(index), hoveredTab == index {
                 let onClose = hovered == .close(index)
+                // Over the end of the name, on the tab's own fill.
+                (tab.isSelected ? raised : theme.hoverFill).setFill()
+                NSRect(x: close.minX - 6, y: close.minY, width: close.width + 6, height: close.height).fill()
                 if onClose {
                     (pressed == .close(index) ? pressedFill : theme.raisedHover).setFill()
                     NSBezierPath(roundedRect: close, xRadius: Theme.chipRadius, yRadius: Theme.chipRadius).fill()

@@ -110,7 +110,7 @@ final class FileTableController: NSObject, NSTableViewDataSource, NSTableViewDel
         var sort: SortSpec?
         var onSort: ((SortKey) -> Void)?
         var maxSize: Int64 = 0
-        var dateTitle = "Changed"
+        var dateTitle = "Modified"
         var dateSortKey: SortKey = .modified
         var showLocation = false
         var isActivePane = true
@@ -852,12 +852,11 @@ final class FileRowView: NSTableRowView {
         guard line >= 0, controller.row(atLine: line) != nil else { return }
         let theme = controller.theme
         let rect = bounds.insetBy(dx: FileTableLayout.gutter, dy: 0)
-        let path = NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6)
+        let path = NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5)
         if isSelected {
+            // A plain fill, a shade lighter while the list has the keyboard.
             (table.isFocused ? theme.accentSoft : theme.accentSoft.withAlphaComponent(0.6)).setFill()
             path.fill()
-            theme.accent.setFill()
-            NSBezierPath(roundedRect: NSRect(x: rect.minX + 1.5, y: rect.midY - 7, width: 2.5, height: 14), xRadius: 1.25, yRadius: 1.25).fill()
         } else if table.hoveredLine == line || HoverPreview.on {
             theme.hoverFill.setFill()
             path.fill()
@@ -878,7 +877,7 @@ final class FileRowView: NSTableRowView {
 /// Where everything in a row goes, shared by drawing, the header, clicks and tooltips so they
 /// never disagree. Matches the SwiftUI list it replaced.
 struct FileTableLayout {
-    static let rowHeight: CGFloat = 28
+    static let rowHeight: CGFloat = 26
     static let rowSpacing: CGFloat = 1
     static let groupHeight: CGFloat = 38
     static let headerHeight: CGFloat = 30
@@ -887,9 +886,11 @@ struct FileTableLayout {
     static let inset: CGFloat = 10
     static let spacing: CGFloat = 10
     static let marker: CGFloat = 10
-    static let typeWidth: CGFloat = 44
-    static let sizeWidth: CGFloat = 112
-    static let dateWidth: CGFloat = 70
+    static let typeWidth: CGFloat = 140
+    static let sizeWidth: CGFloat = 76
+    static let dateWidth: CGFloat = 110
+    /// The type icon before each name.
+    static let icon: CGFloat = 14
     static let indent: CGFloat = 16
 
     let name: ClosedRange<CGFloat>
@@ -908,11 +909,11 @@ struct FileTableLayout {
         size = (date.lowerBound - Self.spacing - Self.sizeWidth)...(date.lowerBound - Self.spacing)
         type = (size.lowerBound - Self.spacing - Self.typeWidth)...(size.lowerBound - Self.spacing)
         marker = left + CGFloat(depth) * Self.indent
-        let nameStart = marker + Self.marker + Self.spacing
+        let nameStart = marker + Self.marker + 6 + Self.icon + 8
         let flexibleEnd = type.lowerBound - Self.spacing
         if showLocation {
-            let available = max(0, flexibleEnd - (left + Self.marker + Self.spacing) - Self.spacing)
-            let nameEnd = max(nameStart, left + Self.marker + Self.spacing + available / 2)
+            let available = max(0, flexibleEnd - nameStart - Self.spacing)
+            let nameEnd = max(nameStart, nameStart + available / 2)
             name = nameStart...nameEnd
             location = min(flexibleEnd, nameEnd + Self.spacing)...flexibleEnd
         } else {
@@ -945,10 +946,10 @@ final class FileCellView: NSView {
     static let identifier = NSUserInterfaceItemIdentifier("FileCell")
     weak var controller: FileTableController?
     var row: ListRow? {
-        didSet { if row?.item != oldValue?.item { chip = nil } }
+        didSet { if row?.item != oldValue?.item { kind = nil } }
     }
-    /// The type chip's label and color, worked out once per item rather than on every draw.
-    private var chip: (label: String, color: NSColor)?
+    /// The kind, worked out once per item rather than on every draw.
+    private var kind: String?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -988,8 +989,13 @@ final class FileCellView: NSView {
                 .draw(in: Self.centered(theme.chevronSize, in: NSRect(x: layout.marker, y: midY - 6, width: FileTableLayout.marker, height: 12)))
         }
 
+        // The type icon: a folder in grey, a file tinted (softly) by its kind.
+        let icon = theme.typeIcon(for: item)
+        icon.draw(in: Self.centered(icon.size, in: NSRect(x: layout.marker + FileTableLayout.marker + 6, y: midY - 7,
+                                                          width: FileTableLayout.icon, height: 14)))
+
         // Name, then the alias arrow and git mark after it.
-        let nameColor = item.isHidden || git == .ignored ? theme.textTertiary : theme.text
+        let nameColor = item.isHidden || git == .ignored ? theme.textTertiary : (item.isFolder ? theme.text : theme.body)
         let nameFont = item.isFolder ? theme.nameBold : theme.name
         var badgeWidth: CGFloat = 0
         if item.isSymlink { badgeWidth += 5 + 9 }
@@ -1021,37 +1027,17 @@ final class FileCellView: NSView {
                           truncation: .byTruncatingMiddle)
         }
 
-        // Type chip.
-        let chip = self.chip ?? {
-            let style = TypeChip.style(for: item)
-            return (style.label, theme.color(for: style.color))
-        }()
-        self.chip = chip
-        let label = TextLines.shared.line(chip.label, font: theme.chip, color: chip.color)
-        let labelHeight = TextLines.height(of: theme.chip)
-        let chipWidth = max(34, ceil(label.width) + 10)
-        let chipRect = NSRect(x: layout.type.lowerBound + (FileTableLayout.typeWidth - chipWidth) / 2, y: midY - (labelHeight + 3) / 2,
-                              width: chipWidth, height: ceil(labelHeight) + 3)
-        theme.chipFill(chip.color).setFill()
-        NSBezierPath(roundedRect: chipRect, xRadius: 4, yRadius: 4).fill()
-        TextLines.draw(label.line, font: theme.chip, at: NSPoint(x: chipRect.midX - label.width / 2, y: chipRect.minY + 1.5))
+        // Kind, in words.
+        let kind = self.kind ?? (item.isFolder ? "Folder" : item.kindDescription)
+        self.kind = kind
+        Self.drawText(kind, font: theme.meta, color: theme.textSecondary, x: layout.type.lowerBound, midY: midY,
+                      width: layout.type.upperBound - layout.type.lowerBound)
 
-        // Size: a bar for scale, then the number.
+        // Size.
         let measured = row.liveFolderSize && row.size == nil ? FolderSizeStore.shared.size(for: item.path) : nil
         let size = row.size ?? measured?.bytes
-        let barRect = NSRect(x: layout.size.lowerBound, y: midY - 1.5, width: 30, height: 3)
-        if let size, config.maxSize > 0 {
-            let fraction = Double(size) / Double(config.maxSize)
-            theme.hoverFill.setFill()
-            NSBezierPath(roundedRect: barRect, xRadius: 1.5, yRadius: 1.5).fill()
-            if fraction >= 0.04 {
-                theme.heat(fraction).setFill()
-                let width = max(fraction > 0 ? 3 : 0, 30 * min(1, fraction))
-                NSBezierPath(roundedRect: NSRect(x: barRect.minX, y: barRect.minY, width: width, height: 3), xRadius: 1.5, yRadius: 1.5).fill()
-            }
-        }
         let sizeText: String
-        var sizeColor = theme.text
+        var sizeColor = theme.textSecondary
         if let size {
             sizeText = (measured.map { !$0.complete } ?? false ? "≥ " : "") + Format.bytes(size)
         } else if row.liveFolderSize && FolderSizeStore.shared.isCalculating(item.path) {
@@ -1061,12 +1047,11 @@ final class FileCellView: NSView {
             sizeText = "—"
             sizeColor = theme.textTertiary
         }
-        let sizeStart = barRect.maxX + 8
-        Self.drawText(sizeText, font: theme.mono, color: sizeColor, x: sizeStart, midY: midY,
-                      width: layout.size.upperBound - sizeStart, alignment: .right)
+        Self.drawText(sizeText, font: theme.meta, color: sizeColor, x: layout.size.lowerBound, midY: midY,
+                      width: layout.size.upperBound - layout.size.lowerBound, alignment: .right)
 
         // When.
-        Self.drawText(RelativeTime.short(row.date), font: theme.mono, color: theme.textSecondary,
+        Self.drawText(Format.listDate(row.date), font: theme.meta, color: theme.textSecondary,
                       x: layout.date.lowerBound, midY: midY, width: FileTableLayout.dateWidth, alignment: .right)
     }
 
@@ -1106,13 +1091,9 @@ final class GroupCellView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let theme else { return }
-        let string = NSAttributedString(string: title.uppercased(), attributes: [.font: theme.caption, .foregroundColor: theme.textTertiary, .kern: 0.8])
+        let string = NSAttributedString(string: title, attributes: [.font: theme.caption, .foregroundColor: theme.textSecondary])
         let size = string.size()
-        let x = FileTableLayout.gutter + FileTableLayout.inset
-        let y = bounds.height - 4 - size.height
-        string.draw(at: NSPoint(x: x, y: y))
-        theme.border.setFill()
-        NSRect(x: x + size.width + 8, y: y + size.height / 2, width: max(0, bounds.width - x * 2 - size.width - 8), height: 1).fill()
+        string.draw(at: NSPoint(x: FileTableLayout.gutter + FileTableLayout.inset, y: bounds.height - 6 - size.height))
     }
 }
 
@@ -1146,7 +1127,7 @@ final class FileTableHeaderView: NSTableHeaderView {
         if let location = layout.location {
             titles.append(Title(text: "Location", key: nil, range: location.lowerBound...(location.lowerBound + 70), trailing: false))
         }
-        titles.append(Title(text: "Type", key: .kind, range: layout.type, trailing: false))
+        titles.append(Title(text: "Kind", key: .kind, range: layout.type, trailing: false))
         titles.append(Title(text: "Size", key: .size, range: layout.size, trailing: true))
         titles.append(Title(text: config.dateTitle, key: config.dateSortKey, range: (layout.date.lowerBound - 20)...layout.date.upperBound, trailing: true))
         return titles
@@ -1165,18 +1146,11 @@ final class FileTableHeaderView: NSTableHeaderView {
             let active = title.key != nil && sort?.key == title.key
             let isHovered = title.key != nil && hovered == title.key && controller.config.onSort != nil
             let color = isHovered ? theme.text : (active ? theme.textSecondary : theme.textTertiary)
-            let string = NSAttributedString(string: title.text.uppercased(),
-                                            attributes: [.font: theme.header, .foregroundColor: color, .kern: 0.7])
+            let string = NSAttributedString(string: title.text, attributes: [.font: theme.header, .foregroundColor: color])
             let size = string.size()
             let arrow = theme.sortArrow(ascending: sort?.ascending == true, color: color)
             let y = (bounds.height - size.height) / 2
-            let x: CGFloat
-            switch title.text {
-            case "Type":
-                x = layout.type.lowerBound + (FileTableLayout.typeWidth - size.width) / 2
-            default:
-                x = title.trailing ? title.range.upperBound - size.width : title.range.lowerBound
-            }
+            let x = title.trailing ? title.range.upperBound - size.width : title.range.lowerBound
             string.draw(at: NSPoint(x: x, y: y))
             if active {
                 let arrowX = title.trailing ? x - 3 - 9 : x + size.width + 3
@@ -1306,16 +1280,18 @@ final class TextLines {
 /// windows), plus the few symbols rows draw.
 @MainActor
 final class TableTheme {
-    let background, border, text, textSecondary, textTertiary: NSColor
+    let background, border, text, textSecondary, textTertiary, body: NSColor
     let accent, accentSoft, hoverFill, raisedHover: NSColor
     private let warning, hot: NSColor
     let name = NSFont.systemFont(ofSize: 12.5)
-    let nameBold = NSFont.systemFont(ofSize: 12.5, weight: .semibold)
+    let nameBold = NSFont.systemFont(ofSize: 12.5, weight: .medium)
+    /// Sizes, dates and kinds: the system font with even-width digits, so columns line up.
+    let meta = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
     let location = NSFont.systemFont(ofSize: 11.5)
     let mono = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
     let gitFont = NSFont.monospacedSystemFont(ofSize: 9.5, weight: .bold)
-    let header = NSFont.systemFont(ofSize: 9.5, weight: .semibold)
-    let caption = NSFont.systemFont(ofSize: 9.5, weight: .semibold)
+    let header = NSFont.systemFont(ofSize: 11, weight: .medium)
+    let caption = NSFont.systemFont(ofSize: 12, weight: .semibold)
     let chip: NSFont = {
         let base = NSFont.systemFont(ofSize: 9, weight: .bold)
         return base.fontDescriptor.withDesign(.rounded).flatMap { NSFont(descriptor: $0, size: 9) } ?? base
@@ -1331,12 +1307,29 @@ final class TableTheme {
         text = NSColor(Theme.text)
         textSecondary = NSColor(Theme.textSecondary)
         textTertiary = NSColor(Theme.textTertiary)
+        body = NSColor(Theme.body)
         accent = NSColor(Theme.accent)
         accentSoft = NSColor(Theme.accentSoft)
         hoverFill = NSColor(Theme.colors.hoverFill)
         raisedHover = NSColor(Theme.colors.raisedHover)
         warning = NSColor(Theme.warning)
         hot = NSColor(Theme.hot)
+    }
+
+    private var typeIcons: [String: NSImage] = [:]
+
+    /// A row's icon: a folder in grey, or a page tinted softly by the file's kind (images
+    /// lavender, video pink, code orange…), the type's colour mixed well toward grey so it
+    /// marks the kind without shouting.
+    func typeIcon(for item: FileItem) -> NSImage {
+        if item.isFolder { return symbol("folder", size: 11.5, weight: .regular, color: textSecondary) }
+        let base = color(for: TypeChip.style(for: item).color)
+        let key = base.description
+        if let cached = typeIcons[key] { return cached }
+        let tint = base.blended(withFraction: 0.35, of: textSecondary) ?? base
+        let icon = symbol("doc", size: 11.5, weight: .regular, color: tint)
+        typeIcons[key] = icon
+        return icon
     }
 
     func heat(_ fraction: Double) -> NSColor {

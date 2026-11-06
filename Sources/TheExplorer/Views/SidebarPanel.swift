@@ -17,7 +17,8 @@ final class SidebarPanel: NSView {
         list = SidebarList(workspace: workspace, values: values)
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = NSColor(Theme.background).cgColor
+        // A shade darker than the window, so the list reads as the main surface.
+        layer?.backgroundColor = (NSColor(Theme.background).blended(withFraction: 0.12, of: .black) ?? NSColor(Theme.background)).cgColor
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
@@ -124,9 +125,11 @@ private final class SidebarList: NSView, NSDraggingSource {
     private let theme = TableTheme()
     private let raised = NSColor(Theme.raised)
     private let pressedFill = NSColor(Theme.pressedFill)
-    private let rowFont = NSFont.systemFont(ofSize: 12.5)
-    private let rowBoldFont = NSFont.systemFont(ofSize: 12.5, weight: .semibold)
-    private let captionFont = NSFont.systemFont(ofSize: 9.5, weight: .semibold)
+    private let rowFont = NSFont.systemFont(ofSize: 13)
+    private let rowBoldFont = NSFont.systemFont(ofSize: 13, weight: .medium)
+    private let captionFont = NSFont.systemFont(ofSize: 11, weight: .medium)
+    /// Places you aren't in: a step down from the text color, so the current one stands out.
+    private lazy var rowColor = theme.text.withAlphaComponent(0.74)
     private let hintFont = NSFont.systemFont(ofSize: 11)
 
     private var items: [SidebarItem] = []
@@ -362,6 +365,9 @@ private final class SidebarList: NSView, NSDraggingSource {
             }
             items.append(row)
         }
+        if let volume = model.volume, model.destination == .folder {
+            items.append(SidebarItem(kind: .hint, title: "\(Format.bytes(volume.available)) available"))
+        }
         return items
     }
 
@@ -530,10 +536,8 @@ private final class SidebarList: NSView, NSDraggingSource {
                     theme.accentSoft.setFill()
                     NSBezierPath(roundedRect: frame, xRadius: 5, yRadius: 5).fill()
                 }
-                let text = NSAttributedString(string: item.title.uppercased(), attributes: [
-                    .font: captionFont, .foregroundColor: theme.textTertiary, .kern: 0.8,
-                ])
-                text.draw(at: NSPoint(x: frame.minX + 8, y: frame.minY + 12))
+                let text = NSAttributedString(string: item.title, attributes: [.font: captionFont, .foregroundColor: theme.textTertiary])
+                text.draw(at: NSPoint(x: frame.minX + 10, y: frame.minY + 11))
             case .hint:
                 let text = NSAttributedString(string: item.title, attributes: [.font: hintFont, .foregroundColor: theme.textTertiary])
                 text.draw(with: NSRect(x: frame.minX + 8, y: frame.minY + 4, width: frame.width - 16, height: 14),
@@ -559,23 +563,11 @@ private final class SidebarList: NSView, NSDraggingSource {
             theme.accent.setStroke()
             ring.stroke()
         }
-        var x = frame.minX + 8 + item.indent
-        switch item.icon {
-        case .none:
-            break
-        case .symbol(let name):
-            let image = theme.symbol(name, size: 11, weight: .medium, color: isSelected || isHovered ? theme.text : theme.textTertiary)
-            image.draw(in: NSRect(x: x + 7 - image.size.width / 2, y: frame.midY - image.size.height / 2,
-                                  width: image.size.width, height: image.size.height))
-            x += 14 + 8
-        case .dot(let color):
-            color.setFill()
-            NSBezierPath(roundedRect: NSRect(x: x + 3.5, y: frame.midY - 3.5, width: 7, height: 7), xRadius: 2, yRadius: 2).fill()
-            x += 14 + 8
-        }
+        // Words only: no icons or colored dots before them.
+        let x = frame.minX + 10 + item.indent
         let trailing = trailingFrame(index)
         let end = (trailing?.minX ?? frame.maxX - 8) - (trailing == nil ? 0 : 8)
-        let color = isSelected || (isHovered && !item.dimmed) ? theme.text : (item.dimmed ? theme.textTertiary : theme.textSecondary)
+        let color = isSelected || (isHovered && !item.dimmed) ? theme.text : (item.dimmed ? theme.textTertiary : rowColor)
         let style = NSMutableParagraphStyle()
         style.lineBreakMode = .byTruncatingMiddle
         let title = NSAttributedString(string: item.title, attributes: [

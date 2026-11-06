@@ -88,14 +88,14 @@ struct ThemePalette: Equatable {
     var hoverFill, raisedHover, pressedFill, borderHover: Color
     var warning, danger, hot, blue, purple, pink, green, cyan, cream: Color
 
-    /// Jestr's near-black neutrals, white as the action color.
+    /// Quiet graphite greys, white as the action color (the redesign of 2026-11-06).
     static let dark = ThemePalette(
         isDark: true,
-        background: Color(hex: 0x0E0E0E), surface: Color(hex: 0x1A1A1A), raised: Color(hex: 0x222222),
-        field: Color(hex: 0x080808), border: Color(hex: 0x2E2E2E), fieldBorder: Color(hex: 0x373737), hover: Color(hex: 0x1C1C1C),
-        text: Color(hex: 0xFFFFFF), textSecondary: Color(hex: 0x999999), textTertiary: Color(hex: 0x696969), body: Color(hex: 0xD6D6D6),
-        accent: Color(hex: 0xE7E7E7), accentSoft: Color(hex: 0x2E2E2E), accentStrong: Color(hex: 0x545454),
-        hoverFill: Color(hex: 0x1F1F1F), raisedHover: Color(hex: 0x2B2B2B), pressedFill: Color(hex: 0x333333), borderHover: Color(hex: 0x474747),
+        background: Color(hex: 0x161618), surface: Color(hex: 0x1C1C1F), raised: Color(hex: 0x232326),
+        field: Color(hex: 0x1C1C1F), border: Color(hex: 0x242427), fieldBorder: Color(hex: 0x2E2E32), hover: Color(hex: 0x1D1D20),
+        text: Color(hex: 0xEDEDEE), textSecondary: Color(hex: 0x8E8E93), textTertiary: Color(hex: 0x808086), body: Color(hex: 0xDCDCE0),
+        accent: Color(hex: 0xEDEDEE), accentSoft: Color(hex: 0x2C2C30), accentStrong: Color(hex: 0x48484C),
+        hoverFill: Color(hex: 0x1E1E21), raisedHover: Color(hex: 0x2A2A2E), pressedFill: Color(hex: 0x313135), borderHover: Color(hex: 0x3A3A3F),
         warning: Color(hex: 0xE3C37D), danger: Color(hex: 0xE27676), hot: Color(hex: 0xE08240),
         blue: Color(hex: 0x6EB8FF), purple: Color(hex: 0xC9BBFF), pink: Color(hex: 0xE35F9F),
         green: Color(hex: 0x54D3A0), cyan: Color(hex: 0x90E3FF), cream: Color(hex: 0xFFCB83)

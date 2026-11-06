@@ -64,6 +64,15 @@ enum Format {
         return monthDayYear.string(from: date)
     }
 
+    /// A list's date: "Today 1:02 AM", "Yesterday", "Nov 5", "Oct 19, 2024".
+    static func listDate(_ date: Date?) -> String {
+        guard let date else { return "—" }
+        if calendar.isDateInToday(date) { return "Today " + timeOnly.string(from: date) }
+        if calendar.isDateInYesterday(date) { return "Yesterday" }
+        if calendar.isDate(date, equalTo: Date(), toGranularity: .year) { return monthDay.string(from: date) }
+        return monthDayYear.string(from: date)
+    }
+
     static func relative(_ date: Date?) -> String {
         guard let date else { return "" }
         return date.formatted(.relative(presentation: .named))

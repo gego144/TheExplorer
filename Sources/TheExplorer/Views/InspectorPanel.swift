@@ -3,7 +3,7 @@ import Observation
 import QuickLookThumbnailing
 import SwiftUI
 
-/// The inspector column. One file or folder (what you see while browsing) is a card drawn by
+/// The inspector column. One file or folder (what you see while browsing) is drawn by
 /// AppKit; previews inside it, several selected items, and S3 and Drive stay SwiftUI.
 ///
 /// The SwiftUI card was laid out again on every selection change, ~9ms each time an arrow key
@@ -12,6 +12,7 @@ final class InspectorPanel: NSView {
     private let workspace: Workspace
     private let values: RegionValues
     private let scroll = NSScrollView()
+    private let edge = NSView()
     private let card: ItemCardView
     /// Several selected items, S3 and Drive.
     private var swiftUI: RegionHostingView?
@@ -27,6 +28,9 @@ final class InspectorPanel: NSView {
         scroll.hasHorizontalScroller = false
         scroll.documentView = card
         addSubview(scroll)
+        edge.wantsLayer = true
+        edge.layer?.backgroundColor = NSColor(Theme.border).cgColor
+        addSubview(edge)
         refresh()
     }
 
@@ -117,42 +121,34 @@ final class InspectorPanel: NSView {
 
     override func layout() {
         super.layout()
-        scroll.frame = bounds
+        let content = NSRect(x: 1, y: 0, width: max(0, bounds.width - 1), height: bounds.height)
+        edge.frame = NSRect(x: 0, y: 0, width: 1, height: bounds.height)
+        scroll.frame = content
         scroll.isHidden = swiftUI != nil
-        swiftUI?.frame = bounds
+        swiftUI?.frame = content
         card.fit(width: bounds.width, height: bounds.height)
     }
 }
 
 // MARK: - The card
 
-/// One file's or folder's details: a thumbnail, its name and type, Pin/Open/Reveal, a large
-/// preview for documents, media details, sizes and dates, and its path.
+/// One file's or folder's details, as a plain column in the window's own greys: a preview, the
+/// name, one line of kind · size · state, a short list of facts, and Open, Copy path and more.
 private final class ItemCardView: NSView {
     private let values: RegionValues
     private let theme = TableTheme()
     private let surface = NSColor(Theme.surface)
-    private let raised = NSColor(Theme.raised)
     private let warning = NSColor(Theme.warning)
-    private let labelFont = NSFont.systemFont(ofSize: 11.5)
-    private let valueFont = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .regular)
-    private let emphasizedFont = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .semibold)
-    private let sizeFont = NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold)
-    private let summaryFont = NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold)
-    private let kindFont = NSFont.systemFont(ofSize: 11)
-    private let captionFont = NSFont.systemFont(ofSize: 9.5, weight: .semibold)
-    private let warningFont = NSFont.systemFont(ofSize: 10.5)
-    private let chipFont: NSFont = {
-        let base = NSFont.systemFont(ofSize: 9, weight: .bold)
-        return base.fontDescriptor.withDesign(.rounded).flatMap { NSFont(descriptor: $0, size: 9) } ?? base
-    }()
+    private let labelFont = NSFont.systemFont(ofSize: 12)
+    private let valueFont = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+    private let subtitleFont = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+    private let warningFont = NSFont.systemFont(ofSize: 11)
 
     private let name = NSTextField(wrappingLabelWithString: "")
     private let path = NSTextField(wrappingLabelWithString: "")
-    private let pin: SubtleButton
     private let open: SubtleButton
-    private let reveal: SubtleButton
     private let copyPath: SubtleButton
+    private let more: SubtleButton
     private let recalculate: BarButton
     private let spinner = NSProgressIndicator()
     private var preview: PreviewHost?
@@ -166,30 +162,30 @@ private final class ItemCardView: NSView {
     private var loads: Task<Void, Never>?
 
     /// What's drawn, worked out in `layoutCard`.
-    private var card = NSRect.zero
-    private var header = NSRect.zero
-    private var dividers: [CGFloat] = []
-    private var rows: [(label: String, value: String, emphasized: Bool, y: CGFloat)] = []
+    private var content = NSRect.zero
+    private var previewBox: NSRect?
+    private var subtitle: [(text: String, color: NSColor)] = []
+    private var subtitleY: CGFloat = 0
+    private var summaryY: CGFloat?
+    private var rows: [(label: String, value: String, y: CGFloat)] = []
     private var folderSize: (text: String?, y: CGFloat)?
     private var warningY: CGFloat?
-    private var captionY: CGFloat = 0
-    private var chipRect = NSRect.zero
-    private var summaryY: CGFloat?
+    private var whereY: CGFloat = 0
 
-    private static let width: CGFloat = 272
-    private static let padding: CGFloat = 14
-    private var inner: CGFloat { Self.width - Self.padding * 2 }
+    private static let padding: CGFloat = 16
+    private static let labelColumn: CGFloat = 84
+    private var inner: CGFloat { max(0, bounds.width - Self.padding * 2) }
 
     init(values: RegionValues) {
         self.values = values
-        pin = SubtleButton("Pin", symbol: "pin", theme: theme)
         open = SubtleButton("Open", theme: theme)
-        reveal = SubtleButton("", symbol: "magnifyingglass", help: FileActions.revealTitle, theme: theme)
-        copyPath = SubtleButton("Copy Path", theme: theme)
+        copyPath = SubtleButton("Copy path", theme: theme)
+        more = SubtleButton("", symbol: "ellipsis", help: "More", theme: theme)
         recalculate = BarButton("arrow.clockwise", style: .ghost, size: 9, weight: .bold, help: "Recalculate", theme: theme)
         super.init(frame: .zero)
-        for (field, font, color) in [(name, NSFont.systemFont(ofSize: 13.5, weight: .semibold), theme.text),
-                                     (path, NSFont.monospacedSystemFont(ofSize: 11, weight: .regular), theme.textSecondary)] {
+        open.prominent = true
+        for (field, font, color) in [(name, NSFont.systemFont(ofSize: 14, weight: .semibold), theme.text),
+                                     (path, labelFont, theme.textSecondary)] {
             field.font = font
             field.textColor = color
             field.isSelectable = true
@@ -198,22 +194,15 @@ private final class ItemCardView: NSView {
         }
         name.maximumNumberOfLines = 3
         name.lineBreakMode = .byTruncatingTail
-        pin.action = { [weak self] in
-            guard let url = self?.item?.url else { return }
-            FavoritesStore.shared.toggle(url)
-        }
         open.action = { [weak self] in
             guard let self, let item = self.item else { return }
             self.model?.open(item)
-        }
-        reveal.action = { [weak self] in
-            guard let url = self?.item?.url else { return }
-            FileActions.revealInFinder([url])
         }
         copyPath.action = { [weak self] in
             guard let url = self?.item?.url else { return }
             FileActions.copyPaths([url])
         }
+        more.action = { [weak self] in self?.showMore() }
         recalculate.action = { [weak self] in
             guard let path = self?.item?.path else { return }
             FolderSizeStore.shared.request([path], force: true)
@@ -221,7 +210,7 @@ private final class ItemCardView: NSView {
         spinner.style = .spinning
         spinner.controlSize = .mini
         spinner.isDisplayedWhenStopped = false
-        for view in [name, path, pin, open, reveal, copyPath, recalculate, spinner] as [NSView] { addSubview(view) }
+        for view in [name, path, open, copyPath, more, recalculate, spinner] as [NSView] { addSubview(view) }
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -231,6 +220,18 @@ private final class ItemCardView: NSView {
     }
 
     override var isFlipped: Bool { true }
+
+    /// Pin, Show in Finder and Open in Terminal, under the ··· button.
+    private func showMore() {
+        guard let url = item?.url else { return }
+        let menu = NSMenu()
+        let pinned = FavoritesStore.shared.contains(url)
+        menu.addItem(ActionMenuItem(pinned ? "Unpin from Sidebar" : "Pin to Sidebar") { FavoritesStore.shared.toggle(url) })
+        menu.addItem(ActionMenuItem(FileActions.revealTitle) { FileActions.revealInFinder([url]) })
+        let folder = item?.isFolder == true ? url : url.deletingLastPathComponent()
+        menu.addItem(ActionMenuItem(FileActions.openInTerminalTitle) { FileActions.openInTerminal(folder) })
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: more.bounds.maxY + 4), in: more)
+    }
 
     // MARK: Showing an item
 
@@ -242,24 +243,22 @@ private final class ItemCardView: NSView {
         self.isCurrentFolder = isCurrentFolder
         isHidden = item == nil
         if isNew { started(item) }
-        // Read under Observation (see InspectorPanel), so pinning and sizes landing redraw it.
-        let pinned = item.map { FavoritesStore.shared.contains($0.url) } ?? false
-        pin.title = pinned ? "Pinned" : "Pin"
-        pin.symbol = pinned ? "pin.fill" : "pin"
+        // Read under Observation (see InspectorPanel), so sizes landing and git changes redraw it.
         let size = item.flatMap { $0.isFolder ? FolderSizeStore.shared.size(for: $0.path) : nil }
-        let sizeKey = size.map { "\($0.bytes)|\($0.files)|\($0.complete)" }
-        if changed || sizeKey != shownSizeKey {
-            shownSizeKey = sizeKey
+        let mark = item.flatMap { model.git?.snapshot?.mark(for: $0.url.standardizedFileURL.path) }
+        let key = "\(size.map { "\($0.bytes)|\($0.files)|\($0.complete)" } ?? "")|\(String(describing: mark))"
+        if changed || key != shownKey {
+            shownKey = key
             layoutCard()
         }
     }
 
-    private var shownSizeKey: String?
+    private var shownKey: String?
     /// The name's and path's heights, measured when they change.
-    private var nameMeasured: CGFloat?
-    private var pathMeasured: CGFloat?
+    private var nameMeasured: (text: String, width: CGFloat, height: CGFloat)?
+    private var pathMeasured: (text: String, width: CGFloat, height: CGFloat)?
 
-    /// A new item: its thumbnail, last opened date and media details are read afresh.
+    /// A new item: its picture, last opened date and media details are read afresh.
     private func started(_ item: FileItem?) {
         loads?.cancel()
         media = nil
@@ -276,12 +275,12 @@ private final class ItemCardView: NSView {
             guard let self, !Task.isCancelled else { return }
             self.lastOpened = opened
             self.layoutCard()
-            if !item.isFolder {
-                let request = QLThumbnailGenerator.Request(fileAt: url, size: CGSize(width: 52, height: 52), scale: 2, representationTypes: .thumbnail)
+            if !item.isFolder, FilePreview.kind(for: item)?.isLarge != true {
+                let request = QLThumbnailGenerator.Request(fileAt: url, size: CGSize(width: 260, height: 150), scale: 2, representationTypes: .thumbnail)
                 let image = try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request).nsImage
                 guard !Task.isCancelled else { return }
                 self.thumbnail = image
-                self.setNeedsDisplay(self.header)
+                if let previewBox = self.previewBox { self.setNeedsDisplay(previewBox) }
             }
             guard !item.isFolder || item.isPackage else { return }
             let media = await MediaInfoReader.read(url, type: item.contentType, modified: item.modified)
@@ -298,7 +297,7 @@ private final class ItemCardView: NSView {
             preview = nil
             return
         }
-        let root = AnyView(FilePreview(item: item, model: model).frame(width: inner).modifier(RegionStyle(values: values)))
+        let root = AnyView(FilePreview(item: item, model: model).frame(width: max(inner, 200)).modifier(RegionStyle(values: values)))
         if let preview {
             preview.controller.rootView = root
         } else {
@@ -311,213 +310,188 @@ private final class ItemCardView: NSView {
     // MARK: Layout
 
     func fit(width: CGFloat, height: CGFloat) {
-        let size = NSSize(width: width, height: max(height, card.maxY + 10))
-        if frame.size != size { setFrameSize(size) }
+        let size = NSSize(width: width, height: max(height, content.maxY + Self.padding))
+        if frame.size != size {
+            let widthChanged = frame.width != width
+            setFrameSize(size)
+            if widthChanged { layoutCard() }
+        }
+    }
+
+    private func measure(_ field: NSTextField, _ text: String, width: CGFloat, cache: inout (text: String, width: CGFloat, height: CGFloat)?) -> CGFloat {
+        if let cache, cache.text == text, cache.width == width { return cache.height }
+        field.stringValue = text
+        let height = ceil(field.sizeThatFits(NSSize(width: width, height: 400)).height)
+        cache = (text, width, height)
+        return height
     }
 
     private func layoutCard() {
-        guard let item else { return }
-        let x = 14 + Self.padding
-        var y = 10 + Self.padding
+        guard let item, bounds.width > 0 else { return }
+        let x = Self.padding
+        var y = Self.padding
         let kind = FilePreview.kind(for: item)
-        dividers = []
         rows = []
         folderSize = nil
         warningY = nil
         summaryY = nil
+        previewBox = nil
 
-        // A large preview first.
+        // The preview: the file itself where it can be shown, otherwise its picture or icon.
         if let preview, kind?.isLarge == true {
             let height = preview.height
             preview.view.frame = NSRect(x: x, y: y, width: inner, height: height)
-            y += height + 14
+            y += height + 16
+        } else {
+            previewBox = NSRect(x: x, y: y, width: inner, height: item.isFolder ? 120 : 150)
+            y += (previewBox?.height ?? 0) + 16
         }
-        // The thumbnail, and beside it the name, type and media summary.
-        let textX = x + 52 + 11
-        let textWidth = x + inner - textX
-        if name.stringValue != item.name || nameMeasured == nil {
-            name.stringValue = item.name
-            nameMeasured = ceil(name.sizeThatFits(NSSize(width: textWidth, height: 200)).height)
-        }
-        let nameHeight = nameMeasured ?? 0
-        name.frame = NSRect(x: textX - 2, y: y, width: textWidth + 4, height: nameHeight)
-        var textY = y + nameHeight + 6
-        let style = TypeChip.style(for: item)
-        let chipColor = theme.color(for: style.color)
-        let label = TextLines.shared.line(style.label, font: chipFont, color: chipColor)
-        let chipHeight = ceil(TextLines.height(of: chipFont)) + 3
-        chipRect = NSRect(x: textX, y: textY, width: max(34, ceil(label.width) + 10), height: chipHeight)
-        textY += chipHeight
-        if media?.summary != nil {
-            textY += 6
-            summaryY = textY
-            textY += 15
-        }
-        header = NSRect(x: x, y: y, width: inner, height: max(52, textY - y))
-        y = header.maxY + 14
 
-        // Pin, Open, Reveal.
-        var buttonX = x
-        for (button, shown) in [(pin, true), (open, !isCurrentFolder), (reveal, true)] {
-            button.isHidden = !shown
-            guard shown else { continue }
-            button.frame = NSRect(x: buttonX, y: y, width: button.width, height: Theme.smallControlHeight)
-            buttonX += button.width + 6
+        // The name, then one line: kind · size · what git says about it.
+        let nameHeight = measure(name, item.name, width: inner, cache: &nameMeasured)
+        name.frame = NSRect(x: x - 2, y: y, width: inner + 4, height: nameHeight)
+        y += nameHeight + 3
+        subtitle = [(isCurrentFolder ? "This folder" : (item.isFolder ? "Folder" : item.kindDescription), theme.textSecondary)]
+        if !item.isFolder, let bytes = item.fileSize {
+            subtitle.append((Format.bytes(bytes), theme.textSecondary))
+        } else if item.isFolder, let size = FolderSizeStore.shared.size(for: item.path) {
+            subtitle.append(((size.complete ? "" : "≥ ") + Format.bytes(size.bytes), theme.textSecondary))
         }
-        y += Theme.smallControlHeight + 14
-
-        // An archive's contents.
-        if let preview, kind == .archive {
-            dividers.append(y)
-            y += 1 + 14
-            let height = preview.height
-            preview.view.frame = NSRect(x: x, y: y, width: inner, height: height)
-            y += height + 14
-        }
-        // Media details.
-        if let media, !media.rows.isEmpty {
-            dividers.append(y)
-            y += 1 + 14
-            for row in media.rows {
-                rows.append((row.label, row.value, false, y))
-                y += 15 + 6
+        if let mark = model?.git?.snapshot?.mark(for: item.url.standardizedFileURL.path) {
+            switch mark {
+            case .changed(let change): subtitle.append((change.title, NSColor(change.color)))
+            case .contains(let change, let count): subtitle.append((count == 1 ? "1 change inside" : "\(count) changes inside", NSColor(change.color)))
+            case .ignored: subtitle.append(("Ignored by git", theme.textTertiary))
             }
-            y += 14 - 6
         }
-        // Sizes and dates.
-        dividers.append(y)
-        y += 1 + 14
+        subtitleY = y
+        y += 16
+        if media?.summary != nil {
+            summaryY = y
+            y += 16
+        }
+        y += 16
+
+        // Facts, label then value.
+        func row(_ label: String, _ value: String) {
+            rows.append((label, value, y))
+            y += 16 + 6
+        }
+        for media in media?.rows ?? [] { row(media.label.prefix(1).uppercased() + media.label.dropFirst(), media.value) }
         recalculate.isHidden = true
         spinner.stopAnimation(nil)
         if item.isFolder {
             let size = FolderSizeStore.shared.size(for: item.path)
             folderSize = (size.map { ($0.complete ? "" : "≥ ") + Format.bytes($0.bytes) }, y)
-            if size != nil {
-                recalculate.isHidden = false
-                recalculate.frame = NSRect(x: x + inner - 15, y: y, width: 15, height: 15)
-            } else {
-                spinner.frame = NSRect(x: x + inner - 12, y: y + 1.5, width: 12, height: 12)
-                spinner.startAnimation(nil)
-            }
-            y += 15 + 6
+            let valueX = x + Self.labelColumn
             if let size {
-                rows.append(("files", size.files.formatted(), false, y))
-                y += 15 + 6
+                let width = ceil(TextLines.shared.line(folderSize?.text ?? "", font: valueFont, color: theme.text).width)
+                recalculate.isHidden = false
+                recalculate.frame = NSRect(x: valueX + width + 6, y: y + 0.5, width: 15, height: 15)
+                y += 16 + 6
+                row("Items", size.files.formatted())
                 if !size.complete {
                     warningY = y
                     y += 14 + 6
                 }
+            } else {
+                spinner.frame = NSRect(x: valueX, y: y + 2, width: 12, height: 12)
+                spinner.startAnimation(nil)
+                y += 16 + 6
             }
-        } else {
-            if let bytes = item.fileSize {
-                rows.append(("size", Format.bytes(bytes), true, y))
-                y += 15 + 6
-            }
-            if let allocated = item.allocatedSize {
-                rows.append(("on disk", Format.bytes(allocated), false, y))
-                y += 15 + 6
-            }
+        } else if let allocated = item.allocatedSize, allocated != item.fileSize {
+            row("On disk", Format.bytes(allocated))
         }
-        var dates = [("created", Format.compactDate(item.created)), ("changed", Format.compactDate(item.modified))]
-        if let lastOpened { dates.append(("opened", Format.compactDate(lastOpened))) }
+        row("Modified", Format.date(item.modified))
+        row("Created", Format.date(item.created))
+        if let lastOpened { row("Opened", Format.date(lastOpened)) }
         if item.isSymlink, let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: item.path) {
-            dates.append(("points to", Format.path(destination)))
+            row("Points to", Format.path(destination))
         }
-        for (label, value) in dates {
-            rows.append((label, value, false, y))
-            y += 15 + 6
-        }
-        y += 14 - 6
+        // Where it is, selectable.
+        whereY = y
+        let folder = Format.path(item.url.deletingLastPathComponent().path)
+        let pathWidth = inner - Self.labelColumn
+        let pathHeight = measure(path, folder, width: pathWidth, cache: &pathMeasured)
+        path.frame = NSRect(x: x + Self.labelColumn - 2, y: y, width: pathWidth + 4, height: pathHeight)
+        y += pathHeight
 
-        // The path.
-        dividers.append(y)
-        y += 1 + 14
-        captionY = y
-        y += 12 + 6
-        let shownPath = Format.path(item.path)
-        if path.stringValue != shownPath || pathMeasured == nil {
-            path.stringValue = shownPath
-            pathMeasured = ceil(path.sizeThatFits(NSSize(width: inner, height: 400)).height)
+        // An archive's contents.
+        if let preview, kind == .archive {
+            y += 16
+            let height = preview.height
+            preview.view.frame = NSRect(x: x, y: y, width: inner, height: height)
+            y += height
         }
-        let pathHeight = pathMeasured ?? 0
-        path.frame = NSRect(x: x - 2, y: y, width: inner + 4, height: pathHeight)
-        y += pathHeight + 6
-        copyPath.frame = NSRect(x: x, y: y, width: copyPath.width, height: Theme.smallControlHeight)
-        y += Theme.smallControlHeight + Self.padding
 
-        // Only the card is drawn again (and what it covered, if it got shorter), not the
-        // whole column.
-        let covered = card
-        card = NSRect(x: 14, y: 10, width: Self.width, height: y - 10)
-        if let superview = superview { fit(width: superview.bounds.width, height: superview.bounds.height) }
-        setNeedsDisplay(card.union(covered).insetBy(dx: -1, dy: -1))
+        // Open, Copy path and more, at the foot of the column when there's room.
+        let buttonHeight: CGFloat = 28
+        let visible = superview?.bounds.height ?? bounds.height
+        let buttonsY = max(y + 20, visible - Self.padding - buttonHeight)
+        var buttonX = x
+        open.isHidden = isCurrentFolder
+        for button in [open, copyPath, more] where !button.isHidden {
+            let width = button == more ? buttonHeight : button.width
+            button.frame = NSRect(x: buttonX, y: buttonsY, width: width, height: buttonHeight)
+            buttonX += width + 6
+        }
+        content = NSRect(x: 0, y: 0, width: bounds.width, height: buttonsY + buttonHeight)
+        if let superview { fit(width: superview.bounds.width, height: superview.bounds.height) }
+        needsDisplay = true
     }
 
     // MARK: Drawing
 
     override func draw(_ dirtyRect: NSRect) {
         guard let item else { return }
-        surface.setFill()
-        NSBezierPath(roundedRect: card, xRadius: 10, yRadius: 10).fill()
-        let x = card.minX + Self.padding
+        let x = Self.padding
 
-        // Thumbnail.
-        let thumb = NSRect(x: header.minX, y: header.minY, width: 52, height: 52)
-        let tile = NSBezierPath(roundedRect: thumb, xRadius: 10, yRadius: 10)
-        (item.isFolder ? theme.accentSoft : raised).setFill()
-        tile.fill()
-        if item.isFolder {
-            let glyph = theme.symbol("folder.fill", size: 52 * 0.42, weight: .regular, color: theme.accent)
-            glyph.draw(in: TextLinesRect.centered(glyph.size, in: thumb))
-        } else if let thumbnail {
-            let inset = thumb.insetBy(dx: 4, dy: 4)
-            let scale = min(inset.width / max(thumbnail.size.width, 1), inset.height / max(thumbnail.size.height, 1))
-            let size = NSSize(width: thumbnail.size.width * scale, height: thumbnail.size.height * scale)
-            thumbnail.draw(in: TextLinesRect.centered(size, in: inset), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
-        } else {
-            let icon = Icons.icon(for: item)
-            icon.draw(in: TextLinesRect.centered(NSSize(width: 52 * 0.7, height: 52 * 0.7), in: thumb), from: .zero, operation: .sourceOver,
-                      fraction: 1, respectFlipped: true, hints: nil)
-        }
-        theme.border.setStroke()
-        NSBezierPath(roundedRect: thumb.insetBy(dx: 0.5, dy: 0.5), xRadius: 9.5, yRadius: 9.5).stroke()
-
-        // Type chip and kind; media summary.
-        let style = TypeChip.style(for: item)
-        let chipColor = theme.color(for: style.color)
-        theme.chipFill(chipColor).setFill()
-        NSBezierPath(roundedRect: chipRect, xRadius: 4, yRadius: 4).fill()
-        FileCellView.drawText(style.label, font: chipFont, color: chipColor, x: chipRect.minX, midY: chipRect.midY,
-                              width: chipRect.width, alignment: .center)
-        let kindX = chipRect.maxX + 6
-        FileCellView.drawText(isCurrentFolder ? "this folder" : item.kindDescription.lowercased(), font: kindFont, color: theme.textTertiary,
-                              x: kindX, midY: chipRect.midY, width: card.maxX - Self.padding - kindX)
-        if let summaryY, let summary = media?.summary {
-            FileCellView.drawText(summary, font: summaryFont, color: theme.accent, x: chipRect.minX, midY: summaryY + 7.5,
-                                  width: card.maxX - Self.padding - chipRect.minX)
-        }
-
-        theme.border.setFill()
-        for y in dividers { NSRect(x: x, y: y, width: inner, height: 1).fill() }
-
-        // Sizes and dates: label on the left, value on the right.
-        if let (text, y) = folderSize {
-            FileCellView.drawText("size", font: labelFont, color: theme.textTertiary, x: x, midY: y + 7.5, width: 80)
-            if let text {
-                FileCellView.drawText(text, font: sizeFont, color: theme.accent, x: x + 60, midY: y + 7.5, width: inner - 60 - 15 - 4, alignment: .right)
+        // The preview box: the file's picture, or its icon.
+        if let box = previewBox {
+            surface.setFill()
+            NSBezierPath(roundedRect: box, xRadius: 8, yRadius: 8).fill()
+            if item.isFolder {
+                let glyph = theme.symbol("folder", size: 34, weight: .light, color: theme.textSecondary)
+                glyph.draw(in: TextLinesRect.centered(glyph.size, in: box))
+            } else if let thumbnail {
+                let inset = box.insetBy(dx: 12, dy: 12)
+                let scale = min(inset.width / max(thumbnail.size.width, 1), inset.height / max(thumbnail.size.height, 1))
+                let size = NSSize(width: thumbnail.size.width * scale, height: thumbnail.size.height * scale)
+                thumbnail.draw(in: TextLinesRect.centered(size, in: inset), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            } else {
+                Icons.icon(for: item).draw(in: TextLinesRect.centered(NSSize(width: 64, height: 64), in: box), from: .zero,
+                                           operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
             }
         }
+
+        // Kind · size · state.
+        var cursor = x
+        for (index, part) in subtitle.enumerated() {
+            if index > 0 {
+                cursor += FileCellView.drawText(" · ", font: subtitleFont, color: theme.textTertiary, x: cursor, midY: subtitleY + 8, width: 20)
+            }
+            cursor += FileCellView.drawText(part.text, font: subtitleFont, color: part.color, x: cursor, midY: subtitleY + 8,
+                                            width: max(0, x + inner - cursor))
+        }
+        if let summaryY, let summary = media?.summary {
+            FileCellView.drawText(summary, font: subtitleFont, color: theme.textSecondary, x: x, midY: summaryY + 8, width: inner)
+        }
+
+        // Facts: the label, then the value beside it.
+        let valueX = x + Self.labelColumn
+        if let (text, y) = folderSize {
+            FileCellView.drawText("Size", font: labelFont, color: theme.textTertiary, x: x, midY: y + 8, width: Self.labelColumn)
+            if let text { FileCellView.drawText(text, font: valueFont, color: theme.text, x: valueX, midY: y + 8, width: inner - Self.labelColumn - 22) }
+        }
         for row in rows {
-            FileCellView.drawText(row.label, font: labelFont, color: theme.textTertiary, x: x, midY: row.y + 7.5, width: 80)
-            let labelWidth = ceil(TextLines.shared.line(row.label, font: labelFont, color: theme.textTertiary).width) + 10
-            FileCellView.drawText(row.value, font: row.emphasized ? emphasizedFont : valueFont, color: row.emphasized ? theme.accent : theme.text,
-                                  x: x + labelWidth, midY: row.y + 7.5, width: inner - labelWidth, alignment: .right, truncation: .byTruncatingMiddle)
+            FileCellView.drawText(row.label, font: labelFont, color: theme.textTertiary, x: x, midY: row.y + 8, width: Self.labelColumn)
+            FileCellView.drawText(row.value, font: valueFont, color: theme.text, x: valueX, midY: row.y + 8,
+                                  width: inner - Self.labelColumn, truncation: .byTruncatingMiddle)
         }
         if let warningY {
-            FileCellView.drawText("Some subfolders couldn't be read.", font: warningFont, color: warning, x: x, midY: warningY + 7, width: inner)
+            FileCellView.drawText("Some folders inside couldn't be read.", font: warningFont, color: warning, x: valueX, midY: warningY + 7, width: inner - Self.labelColumn)
         }
-        let caption = NSAttributedString(string: "PATH", attributes: [.font: captionFont, .foregroundColor: theme.textTertiary, .kern: 0.8])
-        caption.draw(at: NSPoint(x: x, y: captionY))
+        FileCellView.drawText("Where", font: labelFont, color: theme.textTertiary, x: x, midY: whereY + 8, width: Self.labelColumn)
     }
 }
 
