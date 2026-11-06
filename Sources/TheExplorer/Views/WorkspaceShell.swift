@@ -9,8 +9,8 @@ extension EnvironmentValues {
     @Entry var showSettings: () -> Void = {}
 }
 
-/// The window's parts, laid out by AppKit: the tab strip, command bar, sidebar and status bar
-/// (drawn by AppKit too), and the panes and inspector, each in a hosting view of its own.
+/// The window's parts, laid out by AppKit: the tab strip, command bar, sidebar, inspector and
+/// status bar (drawn by AppKit too), and the panes in a hosting view of their own.
 ///
 /// SwiftUI lays out one hosting view at a time. With the whole window in one, a click in the
 /// list had SwiftUI re-measure the command bar, inspector and status bar too, ~60ms in all;
@@ -87,7 +87,7 @@ final class WorkspaceShellView: NSView {
     private var command: NSView!
     private var sidebar: NSView!
     private var panes: RegionHostingView!
-    private var inspector: RegionHostingView!
+    private var inspector: NSView!
     private var status: NSView!
 
     /// What decides the layout, read under Observation tracking so a change re-lays it out.
@@ -125,7 +125,8 @@ final class WorkspaceShellView: NSView {
         sidebar = SidebarPanel(workspace: workspace, values: values)
         addSubview(sidebar)
         panes = host(PanesRegion(workspace: workspace), name: "list")
-        inspector = host(InspectorRegion(workspace: workspace), name: "inspector")
+        inspector = InspectorPanel(workspace: workspace, values: values)
+        addSubview(inspector)
         status = StatusBarView(workspace: workspace, values: values)
         addSubview(status)
         // The command bar's dropdown hangs over the content below it.
@@ -189,12 +190,4 @@ final class WorkspaceShellView: NSView {
         // below the bar it lets clicks through (see CommandBarView).
         command.frame = NSRect(x: 0, y: commandY, width: width, height: min(CommandBarView.reach, height - commandY))
     }
-}
-
-// MARK: - The parts
-
-/// Each part reads the active pane itself, so switching tabs updates just the parts that show it.
-private struct InspectorRegion: View {
-    let workspace: Workspace
-    var body: some View { InspectorColumn(model: workspace.selected) }
 }

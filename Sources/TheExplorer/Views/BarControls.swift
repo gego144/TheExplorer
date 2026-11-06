@@ -222,3 +222,99 @@ final class BarSegmented: NSView {
         onSelect(index)
     }
 }
+
+/// A quiet raised button drawn by AppKit, as SubtleButtonStyle looks: a title, maybe with a
+/// symbol before it, on a raised chip with a border.
+final class SubtleButton: NSView {
+    var title: String { didSet { if title != oldValue { needsDisplay = true } } }
+    var symbol: String? { didSet { if symbol != oldValue { needsDisplay = true } } }
+    var action: () -> Void = {}
+
+    private let theme: TableTheme
+    private let font = NSFont.systemFont(ofSize: 11.5, weight: .medium)
+    private let raised = NSColor(Theme.raised)
+    private let pressedFill = NSColor(Theme.pressedFill)
+    private let fieldBorder = NSColor(Theme.fieldBorder)
+    private let borderHover = NSColor(Theme.borderHover)
+    private var hovering = HoverPreview.on
+    private var pressed = false
+    private var tracking: NSTrackingArea?
+
+    init(_ title: String, symbol: String? = nil, help: String? = nil, theme: TableTheme) {
+        self.title = title
+        self.symbol = symbol
+        self.theme = theme
+        super.init(frame: .zero)
+        toolTip = help
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var isFlipped: Bool { true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    private var image: NSImage? { symbol.map { theme.symbol($0, size: 11, weight: .medium, color: theme.text) } }
+
+    var width: CGFloat {
+        let text = title.isEmpty ? 0 : ceil(TextLines.shared.line(title, font: font, color: theme.text).width)
+        let icon = image.map { $0.size.width + (title.isEmpty ? 0 : 5) } ?? 0
+        return text + icon + 20
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let shape = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: Theme.controlRadius, yRadius: Theme.controlRadius)
+        (pressed ? pressedFill : (hovering ? theme.raisedHover : raised)).setFill()
+        shape.fill()
+        (hovering ? borderHover : fieldBorder).setStroke()
+        shape.stroke()
+        var x: CGFloat = 10
+        if let image {
+            image.draw(in: NSRect(x: x, y: bounds.midY - image.size.height / 2, width: image.size.width, height: image.size.height))
+            x += image.size.width + 5
+        }
+        if !title.isEmpty {
+            FileCellView.drawText(title, font: font, color: theme.text, x: x, midY: bounds.midY, width: bounds.width - x)
+        }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .cursorUpdate, .activeInActiveApp, .inVisibleRect],
+                                  owner: self, userInfo: nil)
+        addTrackingArea(area)
+        tracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        hovering = true
+        needsDisplay = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hovering = HoverPreview.on
+        needsDisplay = true
+    }
+
+    override func cursorUpdate(with event: NSEvent) { NSCursor.pointingHand.set() }
+
+    override func mouseDown(with event: NSEvent) {
+        pressed = true
+        needsDisplay = true
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        let inside = bounds.contains(convert(event.locationInWindow, from: nil))
+        if inside != pressed {
+            pressed = inside
+            needsDisplay = true
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard pressed else { return }
+        pressed = false
+        needsDisplay = true
+        if bounds.contains(convert(event.locationInWindow, from: nil)) { action() }
+    }
+}
