@@ -9,8 +9,8 @@ extension EnvironmentValues {
     @Entry var showSettings: () -> Void = {}
 }
 
-/// The window's parts, laid out by AppKit: the tab strip, sidebar and status bar (drawn by
-/// AppKit too), and the command bar, panes and inspector, each in a hosting view of its own.
+/// The window's parts, laid out by AppKit: the tab strip, command bar, sidebar and status bar
+/// (drawn by AppKit too), and the panes and inspector, each in a hosting view of its own.
 ///
 /// SwiftUI lays out one hosting view at a time. With the whole window in one, a click in the
 /// list had SwiftUI re-measure the command bar, inspector and status bar too, ~60ms in all;
@@ -84,7 +84,7 @@ class RegionHostingView: NSHostingView<AnyView> {
 final class WorkspaceShellView: NSView {
     private let workspace: Workspace
     private var tabs: NSView!
-    private var command: RegionHostingView!
+    private var command: NSView!
     private var sidebar: NSView!
     private var panes: RegionHostingView!
     private var inspector: RegionHostingView!
@@ -95,9 +95,7 @@ final class WorkspaceShellView: NSView {
     private var showsInspector = true
     private var tracking = false
 
-    static let commandHeight: CGFloat = 46
-    /// How far the command bar's view reaches, with room for its dropdown.
-    static let commandReach: CGFloat = 460
+    static let commandHeight = CommandBarView.height
     static let statusHeight: CGFloat = 26
     static let sidebarWidth: CGFloat = 192
     static let inspectorWidth: CGFloat = 296
@@ -122,10 +120,8 @@ final class WorkspaceShellView: NSView {
         }
         tabs = TabStripView(workspace: workspace)
         addSubview(tabs)
-        weak var shell: WorkspaceShellView?
-        command = host(CommandBarRegion(workspace: workspace).environment(\.reportDropdown) { frame in
-            shell?.dropdown = frame
-        }, as: CommandBarHostingView.self, name: "command")
+        command = CommandBarView(workspace: workspace, values: values)
+        addSubview(command)
         sidebar = SidebarPanel(workspace: workspace, values: values)
         addSubview(sidebar)
         panes = host(PanesRegion(workspace: workspace), name: "list")
@@ -133,21 +129,12 @@ final class WorkspaceShellView: NSView {
         status = StatusBarView(workspace: workspace, values: values)
         addSubview(status)
         // The command bar's dropdown hangs over the content below it.
+        command.wantsLayer = true
         command.layer?.zPosition = 1
-        shell = self
         trackLayout()
     }
 
     required init?(coder: NSCoder) { fatalError() }
-
-    /// The command bar's open dropdown, in the window from its top left; the bar's view grows
-    /// to hold it.
-    fileprivate var dropdown: CGRect? {
-        didSet {
-            guard dropdown != oldValue else { return }
-            (command as? CommandBarHostingView)?.dropdown = dropdown
-        }
-    }
 
     override var isFlipped: Bool { true }
 
@@ -198,53 +185,16 @@ final class WorkspaceShellView: NSView {
         panes.frame = NSRect(x: left, y: y, width: max(0, width - left - right), height: bodyHeight)
         inspector.frame = NSRect(x: width - right, y: y, width: right, height: bodyHeight)
         status.frame = NSRect(x: 0, y: height - Self.statusHeight, width: width, height: Self.statusHeight)
-        // The command bar's view always reaches down over the content, far enough for its
-        // dropdown; the part below the bar passes clicks through unless the dropdown is there
-        // (see CommandBarHostingView). Growing it as the dropdown opened and shrinking it as
-        // it closed laid the whole bar out again each time, ~15ms.
-        command.frame = NSRect(x: 0, y: commandY, width: width, height: min(Self.commandReach, height - commandY))
-    }
-}
-
-/// The command bar's view: it reaches down over the content while its dropdown is open, and
-/// clicks on the part below the bar that isn't the dropdown go through to what's underneath.
-final class CommandBarHostingView: RegionHostingView {
-    /// The open dropdown, in the window from its top left.
-    var dropdown: CGRect?
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        guard let superview, let content = window?.contentView else { return super.hitTest(point) }
-        let local = convert(point, from: superview)
-        let fromTop = isFlipped ? local.y : bounds.height - local.y
-        if fromTop > WorkspaceShellView.commandHeight {
-            let inWindow = superview.convert(point, to: nil)
-            let windowPoint = CGPoint(x: inWindow.x, y: content.bounds.height - inWindow.y)
-            if !(dropdown?.contains(windowPoint) ?? false) { return nil }
-        }
-        return super.hitTest(point)
+        // The command bar's view reaches down over the content, far enough for its dropdown;
+        // below the bar it lets clicks through (see CommandBarView).
+        command.frame = NSRect(x: 0, y: commandY, width: width, height: min(CommandBarView.reach, height - commandY))
     }
 }
 
 // MARK: - The parts
 
 /// Each part reads the active pane itself, so switching tabs updates just the parts that show it.
-private struct CommandBarRegion: View {
-    let workspace: Workspace
-    var body: some View {
-        // At the top of its view, which reaches further down while the dropdown is open.
-        CommandBar(model: workspace.selected)
-            .frame(height: WorkspaceShellView.commandHeight)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    }
-}
-
 private struct InspectorRegion: View {
     let workspace: Workspace
     var body: some View { InspectorColumn(model: workspace.selected) }
-}
-
-extension EnvironmentValues {
-    /// The command bar's dropdown while it's open, in the window from its top left (SwiftUI's
-    /// `.global` space), so the bar's view can reach down to hold it.
-    @Entry var reportDropdown: (CGRect?) -> Void = { _ in }
 }
