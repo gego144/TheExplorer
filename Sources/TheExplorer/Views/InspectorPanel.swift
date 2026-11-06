@@ -445,9 +445,12 @@ private final class ItemCardView: NSView {
         copyPath.frame = NSRect(x: x, y: y, width: copyPath.width, height: Theme.smallControlHeight)
         y += Theme.smallControlHeight + Self.padding
 
+        // Only the card is drawn again (and what it covered, if it got shorter), not the
+        // whole column.
+        let covered = card
         card = NSRect(x: 14, y: 10, width: Self.width, height: y - 10)
         if let superview = superview { fit(width: superview.bounds.width, height: superview.bounds.height) }
-        needsDisplay = true
+        setNeedsDisplay(card.union(covered).insetBy(dx: -1, dy: -1))
     }
 
     // MARK: Drawing

@@ -562,7 +562,7 @@ final class BrowserModel: Identifiable {
         // By name first, which is cheap; then, for paths that might not be in this folder at
         // all, the full path.
         let names = Set(paths.map { ($0 as NSString).lastPathComponent })
-        let candidates = items.filter { names.contains($0.name) || names.contains($0.url.lastPathComponent) }
+        let candidates = items.filter { names.contains($0.name) }
         let exact = Set(candidates.filter { paths.contains($0.url.path) }.map(\.url))
         return exact.count == paths.count ? exact : Set(candidates.map(\.url))
     }
