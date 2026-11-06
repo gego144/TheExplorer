@@ -62,6 +62,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Search's own index: built in the background, then kept current.
         FileIndex.shared.start()
         FinderTakeover.shared.update()
+        // Photos sent from an iPhone over Wi-Fi, once that's been set up.
+        PhoneLink.shared.start()
         // Recents' list, ready before it's first opened (a tenth of a second of Spotlight).
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { RecentsModel.prewarm() }
         // Safety net: if macOS thought it restored windows but none came back (e.g. state saved by

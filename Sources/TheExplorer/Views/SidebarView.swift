@@ -36,6 +36,7 @@ struct SidebarView: View {
                 SidebarRow(title: "New", systemImage: "sparkles", isSelected: isShowing(.newFiles)) { model.show(.newFiles) }
                 SidebarRow(title: "Storage", systemImage: "chart.pie", isSelected: isShowing(.storage)) { model.show(.storage) }
 
+                DevicesSection(model: model)
                 CloudSection(model: model)
 
                 caption("Places")
@@ -286,6 +287,74 @@ private struct EjectButton: View {
         }
         .buttonStyle(GhostButtonStyle(padding: 3))
         .help("Eject")
+    }
+}
+
+/// "From iPhone": photos sent from an iPhone over Wi-Fi (see PhoneLink). Opens the folder they
+/// land in, or the setup with the QR code.
+private struct DevicesSection: View {
+    let model: BrowserModel
+    @Environment(\.openTab) private var openTab
+    @State private var showingSetup = false
+    private var link: PhoneLink { .shared }
+
+    var body: some View {
+        SectionCaption(title: "Devices")
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 8)
+            .padding(.top, 12)
+            .padding(.bottom, 4)
+        let folder = Prefs.shared.importFolder
+        SidebarRow(title: "From iPhone", systemImage: "iphone.radiowaves.left.and.right",
+                   isSelected: !model.isSearching && model.destination == .folder && model.currentURL == folder.standardizedFileURL,
+                   dimmed: !link.isOn, dropURL: folder, model: model,
+                   trailing: AnyView(QRButton { showingSetup = true })) {
+            if link.isOn {
+                openFolder()
+            } else {
+                showingSetup = true
+            }
+        }
+        .help(link.isOn ? "Photos sent from your iPhone land in “\(folder.lastPathComponent)”" : "Set up sending photos from your iPhone over Wi-Fi")
+        .contextMenu {
+            Button("Show QR Code…") { showingSetup = true }
+            Button("Open in New Tab") { openTab(folder) }
+            Button("Change Folder…") { PhoneLinkSheet.chooseFolder() }
+            Divider()
+            Button(link.isOn ? "Stop Receiving" : "Start Receiving") { link.setOn(!link.isOn) }
+        }
+        .onChange(of: link.setupRequest) { showingSetup = true }
+        .sheet(isPresented: $showingSetup) {
+            PhoneLinkSheet { opened in
+                showingSetup = false
+                if opened { openFolder() }
+            }
+        }
+    }
+
+    /// The folder photos arrive in, as a gallery the first time.
+    private func openFolder() {
+        let folder = Prefs.shared.importFolder
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let place = folder.standardizedFileURL.path
+        if !UserDefaults.standard.bool(forKey: "phoneLinkFolderShown") {
+            UserDefaults.standard.set(true, forKey: "phoneLinkFolderShown")
+            Prefs.shared.setGallery(true, for: place)
+        }
+        model.navigate(to: folder)
+    }
+}
+
+/// The small QR button on "From iPhone".
+private struct QRButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "qrcode").font(.system(size: 10, weight: .semibold))
+        }
+        .buttonStyle(GhostButtonStyle(padding: 3))
+        .help("Show the QR code for your iPhone")
     }
 }
 

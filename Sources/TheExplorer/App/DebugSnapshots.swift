@@ -216,6 +216,13 @@ enum DebugSnapshots {
                 // s3: shows the first connection; s3:bucket/prefix/ a folder in it.
                 // The raw argument: tilde expansion would drop the trailing "/" that marks a folder.
                 if let url = S3Location(url: Self.debugURL("s3:" + (parts.count > 1 ? parts[1] : ""))) { model.showS3(url) }
+            case "phonelink":
+                // phonelink shows the "From iPhone" setup sheet (which turns receiving on) and
+                // logs the link the QR code holds.
+                PhoneLink.shared.showSetup()
+                try? await Task.sleep(for: .seconds(1.5))
+                let link = PhoneLink.shared
+                log("\(scene) -> on=\(link.isOn) listening=\(link.isListening) error=\(link.error ?? "none") url=\(link.pageURL.absoluteString) address=\(link.addressURL?.absoluteString ?? "none") received=\(link.receivedCount)")
             case "drive":
                 // drive: shows the first account's My Drive; drive:<id>/ a folder in it, and
                 // drive:~/, drive:~shared/ and the like its lists.

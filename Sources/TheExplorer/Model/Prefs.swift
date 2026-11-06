@@ -63,6 +63,13 @@ final class Prefs {
             FinderTakeover.shared.update()
         }
     }
+    /// Where photos sent from an iPhone land (see PhoneLink).
+    var importFolder: URL {
+        didSet {
+            defaults.set(importFolder.path, forKey: "importFolder")
+            PhoneLink.shared.importFolderChanged()
+        }
+    }
     /// The gallery's tile width, in points.
     var galleryTileSize: Double { didSet { defaults.set(galleryTileSize, forKey: "galleryTileSize") } }
     static let galleryTileSizes: ClosedRange<Double> = 110...360
@@ -131,6 +138,8 @@ final class Prefs {
         newRange = (defaults.object(forKey: "newRangeDays") as? Int).flatMap(RecentsRange.init) ?? .week
         takeOverFinder = defaults.bool(forKey: "takeOverFinder")
         galleryPlaces = Set(defaults.stringArray(forKey: "galleryPlaces") ?? [])
+        importFolder = defaults.string(forKey: "importFolder").map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? URL.picturesDirectory.appendingPathComponent("iPhone", isDirectory: true)
         galleryTileSize = defaults.object(forKey: "galleryTileSize") as? Double ?? 180
         refreshFileBrowser()
         Theme.apply(theme.palette(systemIsDark: Self.systemIsDark))

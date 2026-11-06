@@ -90,6 +90,14 @@ Scan your home folder, the whole Mac, or any folder. The scan reads folders on e
 
 <img src="docs/screenshots/storage.png" alt="The storage treemap and ranked folder list" width="100%">
 
+## iPhone photos
+
+Send photos from your iPhone over Wi-Fi, with no cable, iCloud or app to install. Click **From iPhone** in the sidebar (under Devices) and scan the QR code with the iPhone's Camera. That opens a "Send to Mac" page; in Safari, tap Share › Add to Home Screen once and it's there like an app. Open it, tap Choose Photos & Videos, pick as many as you like, and they land in `~/Pictures/iPhone` on the Mac, newest at the top, with when each was taken kept as its creation date. Each one shows in the status bar as it arrives.
+
+- **Same network:** the iPhone and the Mac need to be on the same Wi-Fi, and TheExplorer needs to be open. The page says when it can't reach the Mac. If your network doesn't pass on the Mac's `.local` name, Copy Address Link in the setup gives a link by the Mac's address instead.
+- **Private:** the QR code carries a pairing key, and without it nothing on the network can see the page or send files. Reset Pairing makes a new one, and old Home Screen links stop working. Stop Receiving (right-click From iPhone) turns it off.
+- **Folder:** clicking From iPhone opens the folder photos land in, as a gallery. Change it in the setup or the right-click menu. Name clashes keep both files.
+
 ## S3, like a folder
 
 Connect S3 in Settings › Cloud and your buckets show up in the sidebar. Browse them like any folder, with the same list, breadcrumbs, back/forward, filtering and inspector.

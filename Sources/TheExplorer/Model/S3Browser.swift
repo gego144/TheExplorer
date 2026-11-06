@@ -212,6 +212,8 @@ final class Transfers {
         var doneBytes: Int64 = 0
         var totalItems = 0
         var doneItems = 0
+        /// Sent here by an iPhone over Wi-Fi, rather than fetched by the app.
+        var receiving = false
         var current: String?
         var state = State.running
         let started = Date()

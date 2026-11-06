@@ -357,10 +357,10 @@ struct TransferActivity: View {
 
     private func label(_ transfer: Transfers.Transfer, others: Int) -> String {
         let more = others > 0 ? " +\(others)" : ""
-        let verb = transfer.kind == .upload ? "Uploading" : "Downloading"
+        let verb = transfer.receiving ? "Receiving" : transfer.kind == .upload ? "Uploading" : "Downloading"
         switch transfer.state {
         case .running: return "\(verb) \(transfer.title)\(more)"
-        case .done: return (transfer.kind == .upload ? "Uploaded " : "Downloaded ") + transfer.title
+        case .done: return (transfer.receiving ? "Received " : transfer.kind == .upload ? "Uploaded " : "Downloaded ") + transfer.title
         case .cancelled: return "Stopped " + transfer.title
         case .failed: return (transfer.kind == .upload ? "Upload" : "Download") + " failed: " + transfer.title
         }
