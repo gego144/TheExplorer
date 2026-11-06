@@ -255,6 +255,9 @@ private final class ItemCardView: NSView {
     }
 
     private var shownSizeKey: String?
+    /// The name's and path's heights, measured when they change.
+    private var nameMeasured: CGFloat?
+    private var pathMeasured: CGFloat?
 
     /// A new item: its thumbnail, last opened date and media details are read afresh.
     private func started(_ item: FileItem?) {
@@ -332,8 +335,11 @@ private final class ItemCardView: NSView {
         // The thumbnail, and beside it the name, type and media summary.
         let textX = x + 52 + 11
         let textWidth = x + inner - textX
-        name.stringValue = item.name
-        let nameHeight = ceil(name.sizeThatFits(NSSize(width: textWidth, height: 200)).height)
+        if name.stringValue != item.name || nameMeasured == nil {
+            name.stringValue = item.name
+            nameMeasured = ceil(name.sizeThatFits(NSSize(width: textWidth, height: 200)).height)
+        }
+        let nameHeight = nameMeasured ?? 0
         name.frame = NSRect(x: textX - 2, y: y, width: textWidth + 4, height: nameHeight)
         var textY = y + nameHeight + 6
         let style = TypeChip.style(for: item)
@@ -428,8 +434,12 @@ private final class ItemCardView: NSView {
         y += 1 + 14
         captionY = y
         y += 12 + 6
-        path.stringValue = Format.path(item.path)
-        let pathHeight = ceil(path.sizeThatFits(NSSize(width: inner, height: 400)).height)
+        let shownPath = Format.path(item.path)
+        if path.stringValue != shownPath || pathMeasured == nil {
+            path.stringValue = shownPath
+            pathMeasured = ceil(path.sizeThatFits(NSSize(width: inner, height: 400)).height)
+        }
+        let pathHeight = pathMeasured ?? 0
         path.frame = NSRect(x: x - 2, y: y, width: inner + 4, height: pathHeight)
         y += pathHeight + 6
         copyPath.frame = NSRect(x: x, y: y, width: copyPath.width, height: Theme.smallControlHeight)

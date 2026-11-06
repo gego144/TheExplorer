@@ -88,10 +88,10 @@ final class PathCrumbsView: NSView {
     }
 
     private func measure(_ title: String, current: Bool) -> CGFloat {
-        ceil((title as NSString).size(withAttributes: [.font: current ? boldFont : font]).width) + Self.padding * 2
+        ceil(TextLines.shared.line(title, font: current ? boldFont : font, color: colors.text).width) + Self.padding * 2
     }
 
-    private var slashWidth: CGFloat { ceil(("/" as NSString).size(withAttributes: [.font: slashFont]).width) }
+    private lazy var slashWidth: CGFloat = ceil(TextLines.shared.line("/", font: slashFont, color: colors.slash).width)
     private var foldWidth: CGFloat { measure("…", current: false) }
 
     /// The path keeping the root and the last `keepLast` folders, the rest folded into "…".
@@ -172,9 +172,7 @@ final class PathCrumbsView: NSView {
     }
 
     private func draw(_ text: String, font: NSFont, color: NSColor, in rect: NSRect) {
-        let string = NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: color])
-        let size = string.size()
-        string.draw(at: NSPoint(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2))
+        FileCellView.drawText(text, font: font, color: color, x: rect.minX, midY: rect.midY, width: rect.width, alignment: .center)
     }
 
     // MARK: Mouse

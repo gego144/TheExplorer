@@ -567,6 +567,20 @@ final class BrowserModel: Identifiable {
         return exact.count == paths.count ? exact : Set(candidates.map(\.url))
     }
 
+    /// Whether a folder listed again is as it was. Compares what changes when a file does (its
+    /// name, size, dates and kind of item) rather than whole items: comparing every URL and
+    /// type took over a millisecond for a thousand files. Both are listings of one folder, so
+    /// the same name means the same URL.
+    static func sameListing(_ a: [FileItem], _ b: [FileItem]) -> Bool {
+        guard a.count == b.count else { return false }
+        for (x, y) in zip(a, b) {
+            guard x.name == y.name, x.modified == y.modified, x.fileSize == y.fileSize, x.isDirectory == y.isDirectory,
+                  x.isHidden == y.isHidden, x.isSymlink == y.isSymlink, x.isPackage == y.isPackage,
+                  x.allocatedSize == y.allocatedSize, x.created == y.created else { return false }
+        }
+        return true
+    }
+
     /// Free space changes a little all the time; the status bar only hears of it when what it
     /// shows would change.
     private func updateVolume(_ usage: VolumeUsage) {
@@ -710,7 +724,7 @@ final class BrowserModel: Identifiable {
                 // The folder listed again as it was (a new tab, the watcher after a change
                 // elsewhere, a folder shown from ListingCache) leaves the rows alone, rather than
                 // sorting and redrawing them all.
-                if items != self.items { self.items = items }
+                if !Self.sameListing(items, self.items) { self.items = items }
                 if folderItem != self.folderItem { self.folderItem = folderItem }
                 self.listedURL = url
                 ListingCache.shared.store(items, folder: folderItem, for: url)
