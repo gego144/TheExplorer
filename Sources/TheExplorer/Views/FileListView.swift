@@ -43,7 +43,7 @@ struct EmptyState {
 
 /// The Workbench file list: dense rows, type chips, size bars, full keyboard and mouse
 /// selection, drag and drop, and context menus. Sorting is owned by the caller. The list is
-/// drawn by AppKit (see FileTable); the gallery is SwiftUI (see GalleryView).
+/// drawn by AppKit (see FileTable), and so is the gallery (see GalleryGrid).
 struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
     let rows: [ListRow]
     @Binding var selection: Set<URL>
@@ -79,9 +79,15 @@ struct FileListView<RowMenu: View, BackgroundMenu: View>: View {
 
     var body: some View {
         if layout == .gallery {
-            GalleryView(rows: rows, selection: $selection, empty: empty, focusRequest: focusRequest, onOpen: onOpen,
+            GalleryGrid(rows: rows, selection: $selection, focusRequest: focusRequest, onOpen: onOpen,
                         onQuickLook: onQuickLook, onDropBackground: onDropBackground, onReachEnd: onReachEnd,
                         footer: footer, rowMenu: rowMenu, backgroundMenu: backgroundMenu)
+                .overlay {
+                    if rows.isEmpty, let empty {
+                        EmptyStateView(state: empty)
+                            .allowsHitTesting(false)
+                    }
+                }
         } else {
             FileTable(rows: rows, selection: $selection, sort: sort, onSort: onSort, maxSize: maxSize, dateTitle: dateTitle,
                       dateSortKey: dateSortKey, showLocation: showLocation, focusRequest: focusRequest, onOpen: onOpen,

@@ -74,7 +74,11 @@ final class Prefs {
     /// window, from an earlier design). There were hundreds, and every preference read after a
     /// write had to merge them all.
     func pruneStaleWindowFrames() {
-        let stale = defaults.dictionaryRepresentation().keys.filter { $0.hasPrefix("NSSplitView Subview Frames SwiftUI.PresentedWindowContent") }
+        // Each window is opened with a value of its own (a new ID every time), so the frame
+        // SwiftUI saves for it is never read again; older builds left split views' frames.
+        let prefixes = ["NSSplitView Subview Frames SwiftUI.PresentedWindowContent", "NSWindow Frame SwiftUI.PresentedWindowContent",
+                        "NSWindow Frame TheExplorer.", "NSSplitView Subview Frames TheExplorer."]
+        let stale = defaults.dictionaryRepresentation().keys.filter { key in prefixes.contains { key.hasPrefix($0) } }
         stale.forEach(defaults.removeObject(forKey:))
     }
 

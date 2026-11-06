@@ -315,6 +315,16 @@ enum DebugSnapshots {
                 }
                 log("\(scene): \(String(format: "%.1f", opening * 1000 / Double(count)))ms per open, \(String(format: "%.1f", closing * 1000 / Double(count)))ms per close, on the main thread")
                 log("\(scene) layout per open+close: " + RegionHostingView.layoutTime.map { "\($0.key.isEmpty ? "?" : $0.key) \(String(format: "%.1f", $0.value * 1000 / Double(count)))ms" }.sorted().joined(separator: ", "))
+            case "galloop":
+                // galloop:<n> switches between list and gallery n times, 150ms apart, and logs the
+                // main thread's time per switch.
+                let count = Int(argument) ?? 20
+                let before = LatencyMeter.mainThreadCPU()
+                for index in 0..<count {
+                    model.layout = index.isMultiple(of: 2) ? .gallery : .list
+                    try? await Task.sleep(for: .milliseconds(150))
+                }
+                log("\(scene): \(String(format: "%.1f", (LatencyMeter.mainThreadCPU() - before) * 1000 / Double(count)))ms per switch on the main thread")
             case "switchloop":
                 // switchloop:<n> opens a second tab and switches between the two, n times, 120ms
                 // apart, and logs the main thread's time per switch.
