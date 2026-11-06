@@ -400,149 +400,6 @@ struct NamePrompt: View {
     }
 }
 
-// MARK: - Tab strip
-
-/// Browser-style tabs in the title bar. Drop files on a tab to move them into its folder;
-/// hover a drag over a tab to switch to it.
-struct TabStrip: View {
-    let workspace: Workspace
-
-    /// Tabs live in the top 32pt (the title bar), centred on the traffic lights' line. The strip must
-    /// reach below the title bar: SwiftUI hides views that sit entirely inside it.
-    static let titleBarHeight: CGFloat = 32
-    static let height: CGFloat = 36
-    static let tabHeight: CGFloat = 24
-
-    var body: some View {
-        HStack(spacing: 3) {
-            // Room for the window's traffic lights.
-            Color.clear.frame(width: 72, height: 1)
-            ForEach(Array(workspace.tabs.enumerated()), id: \.element.id) { index, tab in
-                TabItem(tab: tab, index: index, workspace: workspace)
-            }
-            Button {
-                workspace.newTab()
-            } label: {
-                Image(systemName: "plus")
-            }
-            .buttonStyle(IconButtonStyle(size: Self.tabHeight, symbolSize: 10.5))
-            .help("New tab (⌘T)")
-            #if DEBUG
-            .debugRowFrame(named: "newtab-button")
-            #endif
-            Spacer(minLength: 0)
-        }
-        .frame(height: Self.titleBarHeight)
-        .frame(height: Self.height, alignment: .top)
-        .background {
-            // Empty space in the strip drags the window and double-click zooms it, like a title bar.
-            Color.clear
-                .contentShape(.rect)
-                .onTapGesture(count: 2) { NSApp.keyWindow?.zoom(nil) }
-                .gesture(WindowDragGesture())
-        }
-    }
-}
-
-private struct TabItem: View {
-    let tab: BrowserModel
-    let index: Int
-    let workspace: Workspace
-    @State private var hovering = HoverPreview.on
-    @State private var dropTargeted = false
-    @State private var springLoad: Task<Void, Never>?
-
-    private var isSelected: Bool { workspace.currentTab === tab }
-
-    /// A split tab is named after both its panes.
-    private var label: String {
-        let name = { (pane: BrowserModel) in pane.isSearching ? "“\(pane.searchText)”" : pane.title }
-        guard let second = workspace.secondPane(of: tab) else { return name(tab) }
-        return name(tab) + " | " + name(second)
-    }
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 9.5, weight: .bold))
-                .foregroundStyle(isSelected || dropTargeted ? Theme.accent : Theme.textTertiary)
-            Text(label)
-                .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
-                .foregroundStyle(isSelected ? Theme.text : Theme.textSecondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: workspace.secondPane(of: tab) == nil ? 150 : 220, alignment: .leading)
-            if workspace.tabs.count > 1 {
-                Button {
-                    workspace.close(tab)
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .bold))
-                        .frame(width: 12, height: 12)
-                }
-                .buttonStyle(GhostButtonStyle(padding: 2))
-                .opacity(hovering || isSelected ? 1 : 0)
-                .help("Close tab (⌘W)")
-            }
-        }
-        .padding(.leading, 10)
-        .padding(.trailing, workspace.tabs.count > 1 ? 4 : 10)
-        .frame(height: TabStrip.tabHeight)
-        .fixedSize(horizontal: true, vertical: false)
-        .background(isSelected ? Theme.raised : (hovering ? Theme.hoverFill : .clear), in: .rect(cornerRadius: Theme.controlRadius + 1))
-        .overlay {
-            RoundedRectangle(cornerRadius: Theme.controlRadius + 1)
-                .strokeBorder(dropTargeted ? Theme.accent : (isSelected ? Theme.fieldBorder : .clear),
-                              style: StrokeStyle(lineWidth: 1, dash: dropTargeted ? [4, 3] : []))
-        }
-        .hoverTracking { hovering = $0 }
-        .clickable(!isSelected)
-        .animation(Theme.hoverAnimation, value: hovering)
-        .onTapGesture { workspace.select(index) }
-        .help(Format.path(tab.currentURL.path))
-        #if DEBUG
-        .debugRowFrame(named: "tab-\(index)")
-        #endif
-        .dropDestination(for: URL.self) { urls, _ in
-            tab.receiveDrop(urls, into: tab.currentURL)
-        } isTargeted: { targeted in
-            dropTargeted = targeted
-            springLoad?.cancel()
-            if targeted && !isSelected {
-                // Hovering a drag over a tab switches to it, so you can drop into a subfolder there.
-                springLoad = Task {
-                    try? await Task.sleep(for: .milliseconds(650))
-                    if !Task.isCancelled { workspace.select(tab) }
-                }
-            }
-        }
-        .contextMenu {
-            Button("Duplicate Tab") { workspace.newTab(tab.currentURL) }
-            Divider()
-            Button("Copy Path") { FileActions.copyPaths([tab.currentURL]) }
-            Button(FileActions.openInTerminalTitle) { FileActions.openInTerminal(tab.currentURL) }
-            Divider()
-            Button("Close Tab") { workspace.close(tab) }
-                .disabled(workspace.tabs.count == 1)
-            Button("Close Other Tabs") { workspace.closeOthers(than: tab) }
-                .disabled(workspace.tabs.count == 1)
-        }
-    }
-
-    private var icon: String {
-        if workspace.secondPane(of: tab) != nil { return "rectangle.split.2x1.fill" }
-        if tab.isSearching { return "magnifyingglass" }
-        switch tab.destination {
-        case .folder: return "folder.fill"
-        case .recents: return "clock.fill"
-        case .newFiles: return "sparkles"
-        case .storage: return "chart.pie.fill"
-        case .s3: return "cloud.fill"
-        case .drive: return "externaldrive.fill.badge.icloud"
-        }
-    }
-}
-
 // MARK: - Command bar
 
 struct CommandBar: View {
@@ -1121,7 +978,8 @@ struct StatusBar: View {
             if model.hiddenCount > 0 { text += " · \(model.hiddenCount.formatted()) hidden" }
             if !model.selection.isEmpty {
                 let sizes = FolderSizeStore.shared
-                let selected = model.rows.filter { model.selection.contains($0.id) }
+                let selection = model.selection
+                let selected = model.rows.filter { selection.contains($0.id) }
                 let bytes = selected.compactMap { $0.size ?? sizes.size(for: $0.item.path)?.bytes }.reduce(0, +)
                 text += " · \(selected.count.formatted()) selected" + (bytes > 0 ? " (\(Format.bytes(bytes)))" : "")
             }

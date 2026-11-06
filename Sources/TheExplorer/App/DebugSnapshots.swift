@@ -244,6 +244,71 @@ enum DebugSnapshots {
                     try? await Task.sleep(for: .milliseconds(80))
                 }
                 log("\(scene): \(String(format: "%.1f", (LatencyMeter.mainThreadCPU() - mainBefore) * 1000 / Double(count * 2)))ms on the main thread per move")
+            case "tabloop":
+                // tabloop:<n> opens a new tab and closes it, n times, 120ms apart, and logs the
+                // main thread's time per open and per close.
+                let count = Int(argument) ?? 30
+                var opening = 0.0
+                var closing = 0.0
+                for _ in 0..<count {
+                    var before = LatencyMeter.mainThreadCPU()
+                    workspace.newTab()
+                    try? await Task.sleep(for: .milliseconds(120))
+                    opening += LatencyMeter.mainThreadCPU() - before
+                    before = LatencyMeter.mainThreadCPU()
+                    workspace.close(workspace.currentTab)
+                    try? await Task.sleep(for: .milliseconds(120))
+                    closing += LatencyMeter.mainThreadCPU() - before
+                }
+                log("\(scene): \(String(format: "%.1f", opening * 1000 / Double(count)))ms per new tab, \(String(format: "%.1f", closing * 1000 / Double(count)))ms per close, on the main thread")
+            case "navtime":
+                // navtime:<n> goes into the first folder and back up, n times, and logs how long
+                // each move took to put the new folder's rows in the list (median and worst).
+                let home = model.currentURL.standardizedFileURL
+                guard let folder = model.rows.first(where: { $0.item.isFolder })?.id.standardizedFileURL else { break }
+                var times: [Double] = []
+                for index in 0..<((Int(argument) ?? 20) * 2) {
+                    let target = index.isMultiple(of: 2) ? folder : home
+                    let start = ProcessInfo.processInfo.systemUptime
+                    model.navigate(to: target)
+                    while ProcessInfo.processInfo.systemUptime - start < 1 {
+                        if let shown = FileTableController.debugReloaded, shown.folder == target.path, shown.at >= start {
+                            times.append((shown.at - start) * 1000)
+                            break
+                        }
+                        try? await Task.sleep(for: .microseconds(300))
+                    }
+                    try? await Task.sleep(for: .milliseconds(80))
+                }
+                times.sort()
+                log("\(scene): rows on screen after \(String(format: "%.1f", times.isEmpty ? -1 : times[times.count / 2]))ms median, \(String(format: "%.1f", times.last ?? -1))ms worst, \(times.count) moves")
+            case "uploop":
+                // uploop:<n> goes into the first folder and back up (which selects it), n times,
+                // and logs the main thread's time per move up.
+                guard let folder = model.rows.first(where: { $0.item.isFolder })?.id else { break }
+                let count = Int(argument) ?? 30
+                var total = 0.0
+                for _ in 0..<count {
+                    model.navigate(to: folder)
+                    try? await Task.sleep(for: .milliseconds(120))
+                    let before = LatencyMeter.mainThreadCPU()
+                    model.goUp()
+                    try? await Task.sleep(for: .milliseconds(120))
+                    total += LatencyMeter.mainThreadCPU() - before
+                }
+                log("\(scene): \(String(format: "%.1f", total * 1000 / Double(count)))ms on the main thread per move up")
+            case "switchloop":
+                // switchloop:<n> opens a second tab and switches between the two, n times, 120ms
+                // apart, and logs the main thread's time per switch.
+                let count = Int(argument) ?? 30
+                if workspace.tabs.count < 2 { workspace.newTab() }
+                try? await Task.sleep(for: .milliseconds(500))
+                let before = LatencyMeter.mainThreadCPU()
+                for index in 0..<count {
+                    workspace.select(index % 2)
+                    try? await Task.sleep(for: .milliseconds(120))
+                }
+                log("\(scene): \(String(format: "%.1f", (LatencyMeter.mainThreadCPU() - before) * 1000 / Double(count)))ms per switch on the main thread")
             case "rowmenu":
                 // rowmenu:<row name> builds the right-click menu for that row (or the list's own
                 // menu, with no name) without showing it, and logs its items.

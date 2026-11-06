@@ -32,6 +32,9 @@ final class Workspace {
     /// Where split tabs' dividers were dragged to, as a fraction of the width (half otherwise).
     private var fractions: [ObjectIdentifier: Double] = [:]
 
+    /// Draws a tab change in the tab strip, then makes it (see `changeTabs`). Set by the strip.
+    @ObservationIgnored var performTabChange: ((TabChange, @escaping () -> Void) -> Void)?
+
     /// The tab showing, as its first pane.
     var currentTab: BrowserModel { tabs[selectedIndex] }
 
@@ -263,6 +266,46 @@ final class Workspace {
 
     // MARK: - Tabs
 
+    /// Opens, picks or closes tabs as you do by hand (clicks, ⌘T, ⌘W): the tab strip shows the
+    /// change on the next frame, and the change itself is made on the next turn of the run
+    /// loop, so the rest of the window laying itself out for it never holds the strip back.
+    func changeTabs(_ change: TabChange, _ apply: @escaping () -> Void) {
+        if let performTabChange { performTabChange(change, apply) } else { apply() }
+    }
+
+    /// A new tab, from the menu or the strip.
+    func openNewTab() {
+        changeTabs(.open) { [weak self] in self?.newTab() }
+    }
+
+    /// Picks a tab, from the menu or the strip.
+    func pickTab(_ index: Int) {
+        guard tabs.indices.contains(index), index != selectedIndex else { return }
+        changeTabs(.select(index)) { [weak self] in self?.select(index) }
+    }
+
+    func pickTab(_ tab: BrowserModel) {
+        if let index = tabs.firstIndex(where: { $0 === tab }) { pickTab(index) }
+    }
+
+    func pickNextTab() { pickTab((selectedIndex + 1) % tabs.count) }
+    func pickPreviousTab() { pickTab((selectedIndex - 1 + tabs.count) % tabs.count) }
+
+    /// Closes a tab, from the menu or the strip. False when it's the last one, so the caller
+    /// closes the window.
+    @discardableResult
+    func closeTab(_ tab: BrowserModel) -> Bool {
+        guard tabs.count > 1, let index = tabs.firstIndex(where: { $0 === tab }) else { return false }
+        changeTabs(.close(index)) { [weak self] in self?.close(tab) }
+        return true
+    }
+
+    /// ⌘W: the active pane of a split tab, otherwise the tab. False when it's the last tab.
+    func closeActivePaneByHand() -> Bool {
+        isSplit ? closeActivePane() : closeTab(currentTab)
+    }
+
+
     /// Opens `url` in a new tab right after the current one.
     func newTab(_ url: URL? = nil, select: Bool = true) {
         let s3 = url.flatMap(S3Location.init(url:))
@@ -270,9 +313,14 @@ final class Workspace {
         let tab = BrowserModel(url: s3 == nil && drive == nil ? url ?? selected.currentURL : selected.currentURL)
         if let s3 { tab.showS3(s3, recordHistory: false) }
         if let drive { tab.showDrive(drive, recordHistory: false) }
+        if s3 == nil && drive == nil { tab.seed(from: selected) }
         let index = selectedIndex + 1
         tabs.insert(tab, at: index)
-        if select { self.select(index) } else { tab.start() }
+        if select {
+            self.select(index)
+        } else {
+            tab.start()
+        }
     }
 
     func select(_ index: Int) {
@@ -310,8 +358,6 @@ final class Workspace {
         if let index = tabs.firstIndex(where: { $0 === tab }) { select(index) }
     }
 
-    func selectNext() { select((selectedIndex + 1) % tabs.count) }
-    func selectPrevious() { select((selectedIndex - 1 + tabs.count) % tabs.count) }
 
     /// Closes a tab. Returns false when it was the last one, so the caller closes the window.
     @discardableResult
@@ -425,4 +471,11 @@ enum Session {
 
     /// Called by a window that opened without saved state; later windows don't restore.
     static func markRestored() { restored = true }
+}
+
+/// A change to the tabs, as the tab strip draws it before it's made.
+enum TabChange {
+    case open
+    case select(Int)
+    case close(Int)
 }

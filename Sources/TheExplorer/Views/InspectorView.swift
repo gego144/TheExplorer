@@ -31,7 +31,7 @@ struct InspectorView: View {
             // Nothing to describe means no card at all, rather than an empty box.
             if urls.count > 1 {
                 MultipleSelectionSummary(urls: urls).panel(padding: 14)
-            } else if let focusURL, let item = FileItem(url: focusURL) {
+            } else if let focusURL, let item = details(of: focusURL, isCurrentFolder: urls.isEmpty) {
                 // Updated in place as the selection moves, rather than built anew for each item.
                 ItemDetails(item: item, model: model, isCurrentFolder: urls.isEmpty)
                     .panel(padding: 14)
@@ -39,6 +39,17 @@ struct InspectorView: View {
         }
         .scrollContentBackground(.hidden)
         .scrollIndicators(.never)
+    }
+
+    /// What the folder's listing already read, or failing that (search results, Recents), the disk.
+    private func details(of url: URL, isCurrentFolder: Bool) -> FileItem? {
+        if model.destination == .folder && !model.isSearching {
+            // While a folder you just went to is listed, the old rows stay up and so do their
+            // folder's details, for the frame or two until both change together.
+            if isCurrentFolder, let folder = model.folderItem, folder.url == url || model.isLoading { return folder }
+            if !isCurrentFolder, let item = model.listedItem(url) { return item }
+        }
+        return FileItem(url: url)
     }
 }
 

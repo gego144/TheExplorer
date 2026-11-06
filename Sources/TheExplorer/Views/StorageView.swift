@@ -24,7 +24,7 @@ struct StorageView: View {
                             Text(storage.target.label).tag(storage.target)
                         }
                         if model.currentURL != .home && !model.currentURL.isRoot {
-                            Text("Current Folder (\(FileManager.default.displayName(atPath: model.currentURL.path)))")
+                            Text("Current Folder (\(Format.displayName(model.currentURL.path)))")
                                 .tag(ScanTarget.custom(model.currentURL))
                         }
                     }

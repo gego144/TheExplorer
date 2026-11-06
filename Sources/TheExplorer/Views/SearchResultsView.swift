@@ -92,7 +92,7 @@ struct SearchResultsView: View {
     private var scopeDescription: String {
         switch model.searchScope {
         case .mac: "Searching your files"
-        case .folder: "Searching “\(FileManager.default.displayName(atPath: model.currentURL.path))” and below"
+        case .folder: "Searching “\(Format.displayName(model.currentURL.path))” and below"
         }
     }
 

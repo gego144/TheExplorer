@@ -102,7 +102,19 @@ enum RowSorter {
 final class BrowserModel: Identifiable {
     var destination: Destination = .folder
     private(set) var currentURL: URL
-    private(set) var items: [FileItem] = [] { didSet { rebuildRows() } }
+    private(set) var items: [FileItem] = [] {
+        didSet {
+            Retired.later(oldValue)
+            if !adoptingRows { rebuildRows() }
+        }
+    }
+    /// Set while a new tab takes another tab's rows as they are (see `seed(from:)`).
+    @ObservationIgnored private var adoptingRows = false
+    /// The folder `items` were listed from.
+    @ObservationIgnored private var listedURL: URL?
+    /// The folder's own details, read along with its listing; the inspector shows them while
+    /// nothing is selected (reading them as it drew took a few milliseconds per change).
+    private(set) var folderItem: FileItem?
     /// Folders shown expanded inline, and the contents loaded for them.
     private(set) var expanded: Set<URL> = [] {
         didSet { if expanded != oldValue { watchExpanded() } }
@@ -112,7 +124,7 @@ final class BrowserModel: Identifiable {
     @ObservationIgnored private var children: [URL: [FileItem]] = [:]
     /// The folder as shown: hidden files and the kind filter applied, sorted. Rebuilt only when
     /// the listing, sort or filters change, never while rendering.
-    private(set) var rows: [ListRow] = []
+    private(set) var rows: [ListRow] = [] { didSet { Retired.later(oldValue) } }
     /// Largest size among `rows`, for scaling the size bars.
     private(set) var maxSize: Int64 = 0
     /// Counts for the folder itself, not counting the contents of expanded folders.
@@ -221,6 +233,32 @@ final class BrowserModel: Identifiable {
 
     deinit {
         if let sizeObserver { NotificationCenter.default.removeObserver(sizeObserver) }
+    }
+
+    /// Starts out with what another tab showing the same folder has listed, so a new tab is
+    /// whole on its first frame instead of drawing empty and then again once it's listed. Its
+    /// own listing still follows, and only changes anything if the folder did.
+    func seed(from source: BrowserModel) {
+        guard !started, source.destination == .folder, !source.isSearching, !source.isLoading, source.loadError == nil,
+              source.currentURL == currentURL, source.expanded.isEmpty else { return }
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["EXPLORER_NO_SEED"] != nil { return }
+        #endif
+        volume = source.volume
+        folderItem = source.folderItem
+        listedURL = source.listedURL
+        if showHidden == source.showHidden && foldersFirst == source.foldersFirst && sort == source.sort && kindFilter == source.kindFilter {
+            adoptingRows = true
+            items = source.items
+            adoptingRows = false
+            rows = source.rows
+            folderCount = source.folderCount
+            fileCount = source.fileCount
+            hiddenCount = source.hiddenCount
+            maxSize = source.maxSize
+        } else {
+            items = source.items
+        }
     }
 
     /// Loads the first listing. Kept out of init because SwiftUI may construct throwaway models.
@@ -335,6 +373,15 @@ final class BrowserModel: Identifiable {
         FolderSizeStore.shared.show(isShown ? listedItems.filter(\.isFolder).map(\.path) : [], by: self)
     }
 
+    /// A listed item's details, without going to the disk for them.
+    func listedItem(_ url: URL) -> FileItem? {
+        if let item = items.first(where: { $0.url == url }) { return item }
+        for folder in expanded {
+            if let item = children[folder]?.first(where: { $0.url == url }) { return item }
+        }
+        return nil
+    }
+
     /// Everything listed: the folder's items plus the contents of expanded folders.
     var listedItems: [FileItem] {
         children.isEmpty ? items : items + expanded.compactMap { children[$0] }.joined()
@@ -383,7 +430,7 @@ final class BrowserModel: Identifiable {
         case .drive:
             if let location = drive.location, location.id != DriveLocation.homeID { location.name }
             else { drive.account.map(DriveStore.shared.title) ?? "Google Drive" }
-        case .folder: FileManager.default.displayName(atPath: currentURL.path)
+        case .folder: Format.displayName(currentURL.path)
         }
     }
 
@@ -477,6 +524,8 @@ final class BrowserModel: Identifiable {
                 try? await Task.sleep(for: .milliseconds(150))
                 guard let self, !Task.isCancelled, self.isLoading, self.currentURL == url else { return }
                 self.items = []
+                self.folderItem = nil
+                self.listedURL = nil
             }
             selection = []
             pendingSelection = nil
@@ -487,6 +536,27 @@ final class BrowserModel: Identifiable {
         }
         if arriving { countVisit() }
         reload(selecting: selecting.isEmpty ? nil : selecting.map(\.standardizedFileURL))
+    }
+
+    /// The listed items whose paths were asked for. Listings can say /private/tmp where the
+    /// request says /tmp, so a miss is matched again by name: what's asked for is always in the
+    /// folder listed. (Standardizing every item's path instead asked the disk about each one,
+    /// ~17ms for a thousand files.)
+    static func match(_ paths: Set<String>, in items: [FileItem]) -> Set<URL> {
+        // By name first, which is cheap; then, for paths that might not be in this folder at
+        // all, the full path.
+        let names = Set(paths.map { ($0 as NSString).lastPathComponent })
+        let candidates = items.filter { names.contains($0.name) || names.contains($0.url.lastPathComponent) }
+        let exact = Set(candidates.filter { paths.contains($0.url.path) }.map(\.url))
+        return exact.count == paths.count ? exact : Set(candidates.map(\.url))
+    }
+
+    /// Free space changes a little all the time; the status bar only hears of it when what it
+    /// shows would change.
+    private func updateVolume(_ usage: VolumeUsage) {
+        if let volume, volume.name == usage.name, volume.total == usage.total,
+           Format.bytes(volume.available) == Format.bytes(usage.available) { return }
+        volume = usage
     }
 
     private func countVisit() {
@@ -597,31 +667,45 @@ final class BrowserModel: Identifiable {
         let previousSelection = selection
         loadTask?.cancel()
         isLoading = true
+        // A folder listed lately shows at once, as it was then; the listing below follows a few
+        // milliseconds later and changes only what changed since.
+        if listedURL != url, let cached = ListingCache.shared.entry(for: url) {
+            staleRowsTask?.cancel()
+            items = cached.items
+            folderItem = cached.folder
+            listedURL = url
+            if let volume = cached.volume { updateVolume(volume) }
+            // The selection asked for too; it's matched again against the fresh listing.
+            if let pending = pendingSelection { selection = Self.match(pending, in: cached.items) }
+        }
         loadTask = Task { [weak self] in
             let listing = Task.detached(priority: .userInitiated) { () -> Result<[FileItem], Error> in
                 Result { try Self.listContents(of: url) }
             }
+            let folder = Task.detached(priority: .userInitiated) { FileItem(url: url) }
+            // Free space can take a while to work out; the listing doesn't wait for it.
             let volume = Task.detached(priority: .utility) { VolumeUsage(of: url) }
             let result = await listing.value
+            let folderItem = await folder.value
             guard let self, !Task.isCancelled, url == self.currentURL else { return }
-            self.volume = await volume.value
             self.isLoading = false
             switch result {
             case .success(let items):
-                self.items = items
+                // The folder listed again as it was (a new tab, the watcher after a change
+                // elsewhere, a folder shown from ListingCache) leaves the rows alone, rather than
+                // sorting and redrawing them all.
+                if items != self.items { self.items = items }
+                if folderItem != self.folderItem { self.folderItem = folderItem }
+                self.listedURL = url
+                ListingCache.shared.store(items, folder: folderItem, for: url)
+                if !url.isRoot { ListingCache.shared.readAhead(url.deletingLastPathComponent(), .nearby) }
                 // Only clear errors from listing; errors from actions (trash, drops…) stay visible.
                 if self.listingFailed {
                     self.loadError = nil
                     self.listingFailed = false
                 }
                 if let pending = self.pendingSelection {
-                    // Listings can say /private/tmp where the request says /tmp, so a miss is
-                    // checked again with both sides standardized (slow, so only then).
-                    var matched = Set(items.filter { pending.contains($0.url.path) }.map(\.url))
-                    if matched.count < pending.count {
-                        matched = Set(items.filter { pending.contains($0.url.standardizedFileURL.path) }.map(\.url))
-                    }
-                    self.selection = matched
+                    self.selection = Self.match(pending, in: items)
                     self.pendingSelection = nil
                 } else if keepSelection {
                     self.selection = previousSelection.intersection(Set(self.listedItems.map(\.url)))
@@ -637,10 +721,17 @@ final class BrowserModel: Identifiable {
                 }
             case .failure(let error):
                 self.items = []
+                self.folderItem = nil
+                self.listedURL = nil
+                ListingCache.shared.forget(url)
                 self.loadError = Self.describe(error, for: url)
                 self.listingFailed = true
             }
             self.watcher.watch(url)
+            if let usage = await volume.value, !Task.isCancelled, url == self.currentURL {
+                self.updateVolume(usage)
+                ListingCache.shared.store(usage, for: url)
+            }
         }
         findRepository()
     }
@@ -1169,4 +1260,13 @@ enum FileActions {
     /// "Open in cmux", "Open in Terminal"… for menus.
     @MainActor
     static var openInTerminalTitle: String { "Open in \(Prefs.shared.terminal.name)" }
+}
+
+/// Old listings, let go of on a background queue a moment later. A thousand rows freed on the
+/// main thread (every move frees the last folder's) took a few milliseconds; held here a
+/// while, the last reference to them is this one, so they're freed off it.
+enum Retired {
+    static func later<Value: Sendable>(_ value: Value) {
+        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 1) { withExtendedLifetime(value) {} }
+    }
 }

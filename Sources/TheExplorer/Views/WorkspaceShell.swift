@@ -9,8 +9,8 @@ extension EnvironmentValues {
     @Entry var showSettings: () -> Void = {}
 }
 
-/// The window's parts, each in a hosting view of its own, laid out by AppKit: the tab strip,
-/// the command bar, the sidebar, the panes, the inspector and the status bar.
+/// The window's parts, laid out by AppKit: the tab strip and sidebar (drawn by AppKit too),
+/// and the command bar, panes, inspector and status bar, each in a hosting view of its own.
 ///
 /// SwiftUI lays out one hosting view at a time. With the whole window in one, a click in the
 /// list had SwiftUI re-measure the command bar, inspector and status bar too, ~60ms in all;
@@ -44,7 +44,7 @@ struct RegionValues {
 }
 
 /// The look the whole window shares, applied in each part.
-private struct RegionStyle: ViewModifier {
+struct RegionStyle: ViewModifier {
     let values: RegionValues
 
     func body(content: Content) -> some View {
@@ -71,9 +71,9 @@ class RegionHostingView: NSHostingView<AnyView> {
 
 final class WorkspaceShellView: NSView {
     private let workspace: Workspace
-    private var tabs: RegionHostingView!
+    private var tabs: NSView!
     private var command: RegionHostingView!
-    private var sidebar: RegionHostingView!
+    private var sidebar: NSView!
     private var panes: RegionHostingView!
     private var inspector: RegionHostingView!
     private var status: RegionHostingView!
@@ -103,12 +103,14 @@ final class WorkspaceShellView: NSView {
             addSubview(view)
             return view
         }
-        tabs = host(TabStrip(workspace: workspace).ignoresSafeArea(), name: "tabs")
+        tabs = TabStripView(workspace: workspace)
+        addSubview(tabs)
         weak var shell: WorkspaceShellView?
         command = host(CommandBarRegion(workspace: workspace).environment(\.reportDropdown) { frame in
             shell?.dropdown = frame
         }, as: CommandBarHostingView.self, name: "command")
-        sidebar = host(SidebarRegion(workspace: workspace), name: "sidebar")
+        sidebar = SidebarPanel(workspace: workspace, values: values)
+        addSubview(sidebar)
         panes = host(PanesRegion(workspace: workspace), name: "list")
         inspector = host(InspectorRegion(workspace: workspace), name: "inspector")
         status = host(StatusBarRegion(workspace: workspace), name: "status")
@@ -172,8 +174,8 @@ final class WorkspaceShellView: NSView {
         let width = bounds.width
         let height = bounds.height
         var y: CGFloat = 0
-        tabs.frame = NSRect(x: 0, y: y, width: width, height: TabStrip.height)
-        y += TabStrip.height
+        tabs.frame = NSRect(x: 0, y: y, width: width, height: TabStripView.height)
+        y += TabStripView.height
         let commandY = y
         y += Self.commandHeight
         let bodyHeight = max(0, height - y - Self.statusHeight)
@@ -221,14 +223,6 @@ private struct CommandBarRegion: View {
         CommandBar(model: workspace.selected)
             .frame(height: WorkspaceShellView.commandHeight)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    }
-}
-
-private struct SidebarRegion: View {
-    let workspace: Workspace
-    var body: some View {
-        SidebarView(model: workspace.selected)
-            .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 1) }
     }
 }
 

@@ -214,6 +214,8 @@ final class FileTableController: NSObject, NSTableViewDataSource, NSTableViewDel
 
     #if DEBUG
     /// The list that last updated, for scripted scenes.
+    /// The folder the last list put on screen was in, and when (for the navtime scene).
+    static var debugReloaded: (folder: String, at: TimeInterval)?
     static weak var debugLast: FileTableController?
     #endif
 
@@ -225,8 +227,12 @@ final class FileTableController: NSObject, NSTableViewDataSource, NSTableViewDel
         config = newConfig
         let rowsChanged = !Self.same(rows, newRows) || (oldConfig.footer == nil) != (newConfig.footer == nil)
         if rowsChanged {
+            #if DEBUG
+            if let first = newRows.first { Self.debugReloaded = (first.id.deletingLastPathComponent().standardizedFileURL.path, ProcessInfo.processInfo.systemUptime) }
+            #endif
             // The same list with changes (a reload) shares its first rows; a look at a few is enough.
             let shared = !rows.isEmpty && !newRows.isEmpty && newRows.prefix(32).contains { line(of: $0.id) != nil }
+            Retired.later(rows)
             rows = newRows
             rebuildLines()
             table.reloadData()
@@ -306,6 +312,9 @@ final class FileTableController: NSObject, NSTableViewDataSource, NSTableViewDel
         let urls = Set(table.selectedRowIndexes.compactMap { row(atLine: $0)?.id })
         guard urls != selection else { return }
         selection = urls
+        if urls.count == 1, let line = table.selectedRowIndexes.first, let row = row(atLine: line), row.item.isFolder {
+            ListingCache.shared.readAhead(row.id, .pointer)
+        }
         // The highlight goes on screen now: the changed rows are drawn and handed to the window
         // server before SwiftUI hears about it on the next turn of the run loop, so the
         // inspector and status bar laying themselves out never hold the highlight back. Rapid
@@ -799,6 +808,7 @@ final class FileTableView: NSTableView {
             (view(atColumn: 0, row: old, makeIfNecessary: false) as? FileCellView)?.needsDisplay = true
         }
         hoveredLine = line
+        if let line, let row = controller?.row(atLine: line), row.item.isFolder { ListingCache.shared.readAhead(row.id, .pointer) }
     }
 
     // MARK: Dragging
@@ -922,7 +932,11 @@ struct FileTableLayout {
 final class FileCellView: NSView {
     static let identifier = NSUserInterfaceItemIdentifier("FileCell")
     weak var controller: FileTableController?
-    var row: ListRow?
+    var row: ListRow? {
+        didSet { if row?.item != oldValue?.item { chip = nil } }
+    }
+    /// The type chip's label and color, worked out once per item rather than on every draw.
+    private var chip: (label: String, color: NSColor)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -996,16 +1010,19 @@ final class FileCellView: NSView {
         }
 
         // Type chip.
-        let style = TypeChip.style(for: item)
-        let chipColor = theme.color(for: style.color)
-        let label = NSAttributedString(string: style.label, attributes: [.font: theme.chip, .foregroundColor: chipColor])
-        let labelSize = label.size()
-        let chipWidth = max(34, ceil(labelSize.width) + 10)
-        let chipRect = NSRect(x: layout.type.lowerBound + (FileTableLayout.typeWidth - chipWidth) / 2, y: midY - (labelSize.height + 3) / 2,
-                              width: chipWidth, height: ceil(labelSize.height) + 3)
-        chipColor.withAlphaComponent(0.14).setFill()
+        let chip = self.chip ?? {
+            let style = TypeChip.style(for: item)
+            return (style.label, theme.color(for: style.color))
+        }()
+        self.chip = chip
+        let label = TextLines.shared.line(chip.label, font: theme.chip, color: chip.color)
+        let labelHeight = TextLines.height(of: theme.chip)
+        let chipWidth = max(34, ceil(label.width) + 10)
+        let chipRect = NSRect(x: layout.type.lowerBound + (FileTableLayout.typeWidth - chipWidth) / 2, y: midY - (labelHeight + 3) / 2,
+                              width: chipWidth, height: ceil(labelHeight) + 3)
+        theme.chipFill(chip.color).setFill()
         NSBezierPath(roundedRect: chipRect, xRadius: 4, yRadius: 4).fill()
-        label.draw(at: NSPoint(x: chipRect.midX - labelSize.width / 2, y: chipRect.minY + 1.5))
+        TextLines.draw(label.line, font: theme.chip, at: NSPoint(x: chipRect.midX - label.width / 2, y: chipRect.minY + 1.5))
 
         // Size: a bar for scale, then the number.
         let measured = row.liveFolderSize && row.size == nil ? FolderSizeStore.shared.size(for: item.path) : nil
@@ -1046,15 +1063,15 @@ final class FileCellView: NSView {
     static func drawText(_ text: String, font: NSFont, color: NSColor, x: CGFloat, midY: CGFloat, width: CGFloat,
                          alignment: NSTextAlignment = .left, truncation: NSLineBreakMode = .byTruncatingTail) -> CGFloat {
         guard width > 0, !text.isEmpty else { return 0 }
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineBreakMode = truncation
-        paragraph.alignment = alignment
-        let string = NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: color, .paragraphStyle: paragraph])
-        let natural = ceil(string.size().width)
-        let height = ceil(font.ascender - font.descender + font.leading)
-        let rect = NSRect(x: x, y: midY - height / 2, width: width, height: height)
-        string.draw(with: rect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
-        return min(natural, width)
+        let fitted = TextLines.shared.line(text, font: font, color: color, fitting: width, truncation: truncation)
+        let top = midY - ceil(TextLines.height(of: font)) / 2
+        let x = switch alignment {
+        case .right: x + width - fitted.width
+        case .center: x + (width - fitted.width) / 2
+        default: x
+        }
+        TextLines.draw(fitted.line, font: font, at: NSPoint(x: x, y: top))
+        return min(ceil(fitted.width), width)
     }
 
     static func centered(_ size: NSSize, in rect: NSRect) -> NSRect {
@@ -1197,6 +1214,80 @@ final class FileTableHeaderView: NSTableHeaderView {
     override func resetCursorRects() {}
 }
 
+// MARK: - Text
+
+/// Lines of text for rows, laid out once by Core Text and kept. Rows say the same things over
+/// and over ("7 B", "1h", "TXT", and each name every time its row is drawn again), and laying
+/// a string out with AppKit's string drawing, to measure it and again to draw it, was half of
+/// what drawing a row cost.
+@MainActor
+final class TextLines {
+    static let shared = TextLines()
+
+    struct Fitted {
+        let line: CTLine
+        let width: CGFloat
+    }
+
+    private struct Key: Hashable {
+        let text: String
+        let font: NSFont
+        let color: NSColor
+        /// The width it was cut to fit, and how; zero for the whole line.
+        var width: CGFloat = 0
+        var truncation = 0
+    }
+
+    private var lines: [Key: Fitted] = [:]
+
+    /// The whole line.
+    func line(_ text: String, font: NSFont, color: NSColor) -> Fitted {
+        let key = Key(text: text, font: font, color: color)
+        if let hit = lines[key] { return hit }
+        if lines.count > 6000 { lines.removeAll(keepingCapacity: true) }
+        let string = NSAttributedString(string: text, attributes: [
+            .font: font, NSAttributedString.Key(kCTForegroundColorAttributeName as String): color.cgColor,
+        ])
+        let line = CTLineCreateWithAttributedString(string)
+        let fitted = Fitted(line: line, width: CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil)))
+        lines[key] = fitted
+        return fitted
+    }
+
+    /// The line cut down with "…" (at the end, or in the middle) when it's wider than `width`.
+    func line(_ text: String, font: NSFont, color: NSColor, fitting width: CGFloat, truncation: NSLineBreakMode) -> Fitted {
+        let whole = line(text, font: font, color: color)
+        guard whole.width > width else { return whole }
+        let type: CTLineTruncationType = switch truncation {
+        case .byTruncatingMiddle: .middle
+        case .byTruncatingHead: .start
+        default: .end
+        }
+        let key = Key(text: text, font: font, color: color, width: width, truncation: Int(type.rawValue) + 1)
+        if let hit = lines[key] { return hit }
+        let token = line("…", font: font, color: color).line
+        let cut = CTLineCreateTruncatedLine(whole.line, Double(width), type, token) ?? whole.line
+        let fitted = Fitted(line: cut, width: CGFloat(CTLineGetTypographicBounds(cut, nil, nil, nil)))
+        lines[key] = fitted
+        return fitted
+    }
+
+    /// A line's height in `font`, as AppKit's string drawing lays it out.
+    static func height(of font: NSFont) -> CGFloat {
+        font.ascender - font.descender + font.leading
+    }
+
+    /// Draws a line whose top is at `point`, in a flipped view.
+    static func draw(_ line: CTLine, font: NSFont, at point: NSPoint) {
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        context.saveGState()
+        context.textMatrix = CGAffineTransform(scaleX: 1, y: -1)
+        context.textPosition = CGPoint(x: point.x, y: point.y + font.ascender)
+        CTLineDraw(line, context)
+        context.restoreGState()
+    }
+}
+
 // MARK: - Colors and fonts
 
 /// The theme as AppKit colors and fonts, converted once per list (a new theme rebuilds the
@@ -1218,7 +1309,8 @@ final class TableTheme {
         return base.fontDescriptor.withDesign(.rounded).flatMap { NSFont(descriptor: $0, size: 9) } ?? base
     }()
     let chevronSize = NSSize(width: 6, height: 10)
-    private var colorCache: [String: NSColor] = [:]
+    private var colorCache: [Color: NSColor] = [:]
+    private var chipFills: [NSColor: NSColor] = [:]
     private var symbolCache: [String: NSImage] = [:]
 
     init() {
@@ -1241,11 +1333,18 @@ final class TableTheme {
 
     /// A SwiftUI color as an NSColor, converted once.
     func color(for color: Color) -> NSColor {
-        let key = color.description
-        if let cached = colorCache[key] { return cached }
+        if let cached = colorCache[color] { return cached }
         let converted = NSColor(color)
-        colorCache[key] = converted
+        colorCache[color] = converted
         return converted
+    }
+
+    /// The faint fill behind a type chip of this color.
+    func chipFill(_ color: NSColor) -> NSColor {
+        if let cached = chipFills[color] { return cached }
+        let fill = color.withAlphaComponent(0.14)
+        chipFills[color] = fill
+        return fill
     }
 
     func chevron(color: NSColor, expanded: Bool) -> NSImage {
@@ -1258,7 +1357,7 @@ final class TableTheme {
         symbol(ascending ? "arrow.up" : "arrow.down", size: 8, weight: .bold, color: color)
     }
 
-    private func symbol(_ name: String, size: CGFloat, weight: NSFont.Weight, color: NSColor) -> NSImage {
+    func symbol(_ name: String, size: CGFloat, weight: NSFont.Weight, color: NSColor) -> NSImage {
         let key = "\(name)|\(size)|\(weight.rawValue)|\(color.description)"
         if let cached = symbolCache[key] { return cached }
         let config = NSImage.SymbolConfiguration(pointSize: size, weight: weight).applying(.init(paletteColors: [color]))

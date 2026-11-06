@@ -183,7 +183,7 @@ struct ExplorerCommands: Commands {
 
     var body: some Commands {
         CommandGroup(after: .newItem) {
-            Button("New Tab") { workspace?.newTab() }
+            Button("New Tab") { workspace?.openNewTab() }
                 .keyboardShortcut("t")
             Button("Open in New Tab") {
                 guard let workspace, let model else { return }
@@ -195,7 +195,7 @@ struct ExplorerCommands: Commands {
             .disabled(!(model?.activeSelection.contains(where: Self.isFolder) ?? false))
             Button(workspace?.isSplit == true ? "Close Pane" : "Close Tab") {
                 guard let workspace else { return }
-                if !workspace.closeActivePane() { NSApp.keyWindow?.performClose(nil) }
+                if !workspace.closeActivePaneByHand() { NSApp.keyWindow?.performClose(nil) }
             }
             .keyboardShortcut("w")
             Divider()
@@ -365,14 +365,14 @@ struct ExplorerCommands: Commands {
         }
 
         CommandGroup(before: .windowArrangement) {
-            Button("Next Tab") { workspace?.selectNext() }
+            Button("Next Tab") { workspace?.pickNextTab() }
                 .keyboardShortcut(.tab, modifiers: .control)
-            Button("Previous Tab") { workspace?.selectPrevious() }
+            Button("Previous Tab") { workspace?.pickPreviousTab() }
                 .keyboardShortcut(.tab, modifiers: [.control, .shift])
             ForEach(1..<10) { number in
                 Button(number == 9 ? "Last Tab" : "Tab \(number)") {
                     guard let workspace else { return }
-                    workspace.select(number == 9 ? workspace.tabs.count - 1 : number - 1)
+                    workspace.pickTab(number == 9 ? workspace.tabs.count - 1 : number - 1)
                 }
                 .keyboardShortcut(KeyEquivalent(Character("\(number)")))
             }

@@ -2,6 +2,22 @@ import AppKit
 import UniformTypeIdentifiers
 
 enum Format {
+    private static let displayNames: NSCache<NSString, NSString> = {
+        let cache = NSCache<NSString, NSString>()
+        cache.countLimit = 2000
+        return cache
+    }()
+
+    /// The name Finder shows for a path ("Downloads" in its own language, "Macintosh HD" for /).
+    /// Remembered: asking LaunchServices each time a tab or pin was drawn took a millisecond or
+    /// more per name. A renamed folder has a new path, so it's looked up afresh.
+    static func displayName(_ path: String) -> String {
+        if let name = displayNames.object(forKey: path as NSString) { return name as String }
+        let name = FileManager.default.displayName(atPath: path)
+        displayNames.setObject(name as NSString, forKey: path as NSString)
+        return name
+    }
+
     /// Decimal units like Finder, one decimal below 100: "0 B", "512 B", "4.2 KB", "266 MB", "12.4 GB".
     static func bytes(_ value: Int64) -> String {
         let units = ["B", "KB", "MB", "GB", "TB", "PB"]
@@ -103,7 +119,13 @@ enum Icons {
 }
 
 extension URL {
-    static var home: URL { FileManager.default.homeDirectoryForCurrentUser }
+    static let home = FileManager.default.homeDirectoryForCurrentUser
 
-    var isRoot: Bool { standardizedFileURL.path == "/" }
+    /// Whether this is /. Standardizing a path asks the disk about it, so that's only done for
+    /// paths that could still turn out to be / ("/a/..").
+    var isRoot: Bool {
+        let path = path
+        if path == "/" { return true }
+        return path.contains("..") && standardizedFileURL.path == "/"
+    }
 }

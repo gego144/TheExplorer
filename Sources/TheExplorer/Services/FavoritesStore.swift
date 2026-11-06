@@ -8,7 +8,7 @@ struct Favorite: Identifiable, Codable, Hashable {
     var addedAt = Date()
 
     var url: URL { URL(fileURLWithPath: path) }
-    var name: String { FileManager.default.displayName(atPath: path) }
+    var name: String { Format.displayName(path) }
     var exists: Bool { FileManager.default.fileExists(atPath: path) }
 }
 

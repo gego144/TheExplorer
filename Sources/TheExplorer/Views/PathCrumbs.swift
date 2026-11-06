@@ -83,7 +83,7 @@ final class PathCrumbsView: NSView {
 
     private func title(for url: URL) -> String {
         if url.path == URL.home.standardizedFileURL.path { return "~" }
-        if url.isRoot { return FileManager.default.displayName(atPath: "/") }
+        if url.isRoot { return Format.displayName("/") }
         return url.lastPathComponent
     }
 
@@ -200,6 +200,7 @@ final class PathCrumbsView: NSView {
         if index != hovered {
             hovered = index
             needsDisplay = true
+            if let index, case .folder(let folder) = parts[index].part { ListingCache.shared.readAhead(trail[folder], .pointer) }
         }
         (index != nil ? NSCursor.pointingHand : NSCursor.arrow).set()
     }
