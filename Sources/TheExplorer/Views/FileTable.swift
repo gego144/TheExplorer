@@ -962,6 +962,14 @@ final class FileCellView: NSView {
     override var isFlipped: Bool { true }
     override var wantsUpdateLayer: Bool { false }
 
+    /// The columns are placed from the width, and the layer only redraws when asked, so a new
+    /// width (the window resized) has to ask; otherwise the row keeps its old picture.
+    override func setFrameSize(_ newSize: NSSize) {
+        let changed = newSize != frame.size
+        super.setFrameSize(newSize)
+        if changed { needsDisplay = true }
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         guard let row, let controller else { return }
         let theme = controller.theme
