@@ -297,6 +297,24 @@ enum DebugSnapshots {
                     total += LatencyMeter.mainThreadCPU() - before
                 }
                 log("\(scene): \(String(format: "%.1f", total * 1000 / Double(count)))ms on the main thread per move up")
+            case "kloop":
+                // kloop:<n> opens the command bar (⌘K) and closes it (esc), n times, and logs the
+                // main thread's time per open and per close.
+                let count = Int(argument) ?? 20
+                var opening = 0.0, closing = 0.0
+                RegionHostingView.layoutTime = [:]
+                for _ in 0..<count {
+                    var before = LatencyMeter.mainThreadCPU()
+                    InputDriver.press("cmd+k")
+                    try? await Task.sleep(for: .milliseconds(150))
+                    opening += LatencyMeter.mainThreadCPU() - before
+                    before = LatencyMeter.mainThreadCPU()
+                    InputDriver.press("esc")
+                    try? await Task.sleep(for: .milliseconds(150))
+                    closing += LatencyMeter.mainThreadCPU() - before
+                }
+                log("\(scene): \(String(format: "%.1f", opening * 1000 / Double(count)))ms per open, \(String(format: "%.1f", closing * 1000 / Double(count)))ms per close, on the main thread")
+                log("\(scene) layout per open+close: " + RegionHostingView.layoutTime.map { "\($0.key.isEmpty ? "?" : $0.key) \(String(format: "%.1f", $0.value * 1000 / Double(count)))ms" }.sorted().joined(separator: ", "))
             case "switchloop":
                 // switchloop:<n> opens a second tab and switches between the two, n times, 120ms
                 // apart, and logs the main thread's time per switch.
@@ -403,18 +421,31 @@ enum DebugSnapshots {
                 // For tests with the real mouse (only when you've agreed to them): bring the window forward.
                 NSApp.activate()
                 InputDriver.window?.makeKeyAndOrderFront(nil)
+            case "unpin":
+                // unpin:<path> takes a pin away (to tidy up after real-mouse tests).
+                FavoritesStore.shared.remove(URL(fileURLWithPath: argument))
             case "watchframes":
                 // Logs every visible row's center in screen coordinates (top-left origin, as
                 // CGEvent uses) twice a second, for an outside tool driving the real mouse.
                 let until = Date().addingTimeInterval(Double(argument) ?? 30)
                 while Date() < until {
                     if let window = InputDriver.window, let primary = NSScreen.screens.first {
+                        // Lists drawn by AppKit (the file list, tabs, sidebar) say where their
+                        // rows are when asked; the old frames of rows gone since are dropped.
+                        RowGeometry.frames = [:]
+                        _ = RowGeometry.frame(named: "")
                         let rows = RowGeometry.frames.map { url, frame -> String in
                             let x = window.frame.minX + frame.midX
                             let y = primary.frame.height - (window.frame.maxY - frame.midY)
                             return "\(url.lastPathComponent)=\(Int(x)),\(Int(y))"
                         }
                         log("frames " + rows.sorted().joined(separator: ";") + " selected=" + workspace.selected.selection.map(\.lastPathComponent).sorted().joined(separator: ","))
+                        log("state tabs=" + workspace.tabs.map { $0.currentURL.lastPathComponent }.joined(separator: ",")
+                            + " current=\(workspace.tabs.firstIndex { $0 === workspace.currentTab } ?? -1)"
+                            + " url=\(workspace.selected.currentURL.lastPathComponent)"
+                            + " sheet=\(window.attachedSheet != nil) key=\(window.isKeyWindow)"
+                            + " window=\(Int(window.frame.minX)),\(Int(primary.frame.height - window.frame.maxY))"
+                            + " pins=" + FavoritesStore.shared.favorites.map { ($0.path as NSString).lastPathComponent }.joined(separator: ","))
                     }
                     try? await Task.sleep(for: .milliseconds(500))
                 }

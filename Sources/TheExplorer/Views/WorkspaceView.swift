@@ -525,8 +525,10 @@ struct Omnibox: View {
     private var listed: [URL] { isPathMode ? suggestions : query.isEmpty ? recents : [] }
 
     var body: some View {
-        HStack(spacing: 6) {
-            if showsField {
+        // Both rows are always there, one of them hidden: building the text field each time ⌘K
+        // was pressed took ~25ms, and focusing it then had to wait a turn for it to exist.
+        ZStack {
+            HStack(spacing: 6) {
                 Image(systemName: isPathMode ? "arrow.turn.down.right" : "magnifyingglass")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(isPathMode ? Theme.accent : Theme.textSecondary)
@@ -549,7 +551,10 @@ struct Omnibox: View {
                     .buttonStyle(GhostButtonStyle(padding: 2))
                     .help("Clear (esc)")
                 }
-            } else {
+            }
+            .opacity(showsField ? 1 : 0)
+            .allowsHitTesting(showsField)
+            HStack(spacing: 6) {
                 Breadcrumbs(model: model)
                 if model.destination == .folder, let snapshot = model.git?.snapshot {
                     GitBranchChip(snapshot: snapshot)
@@ -566,6 +571,8 @@ struct Omnibox: View {
                 .foregroundStyle(Theme.textTertiary)
                 .fixedSize()
             }
+            .opacity(showsField ? 0 : 1)
+            .allowsHitTesting(!showsField)
         }
         .padding(.horizontal, 6)
         .frame(height: 30)
@@ -668,8 +675,7 @@ struct Omnibox: View {
         query = text
         recents = FolderVisits.shared.top(8, excluding: model.destination == .folder ? [model.currentURL.path] : [])
         editing = true
-        // Focus once the field is on screen; focusing a view that doesn't exist yet is ignored.
-        DispatchQueue.main.async { focused = true }
+        focused = true
         // If focus didn't take (e.g. the window isn't key), don't leave an empty field behind.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             if !focused && query.isEmpty { editing = false }
@@ -696,7 +702,7 @@ struct Omnibox: View {
         } else if !query.isEmpty {
             // Search stays on; jump into the results.
             focused = false
-            model.listFocusRequest += 1
+            focusList()
         }
     }
 
@@ -708,7 +714,14 @@ struct Omnibox: View {
     private func finish() {
         query = ""
         focused = false
-        model.listFocusRequest += 1
+        focusList()
+    }
+
+    /// Hands keyboard focus to the list once the field has let go of it; asked for in the same
+    /// turn, the field giving up focus afterwards left it with the window instead.
+    private func focusList() {
+        let model = model
+        DispatchQueue.main.async { model.listFocusRequest += 1 }
     }
 
     private func moveHighlight(_ delta: Int) -> KeyPress.Result {
@@ -898,92 +911,3 @@ private struct Chip: View {
     }
 }
 
-// MARK: - Status bar
-
-struct StatusBar: View {
-    let model: BrowserModel
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Text(summary)
-                .font(Theme.mono)
-                .foregroundStyle(Theme.textSecondary)
-            if let status = model.transferStatus {
-                ProgressView().controlSize(.mini)
-                Text(status).lineLimit(1).truncationMode(.middle)
-                    .foregroundStyle(Theme.accent)
-            } else if let status = model.historyStatus {
-                Text(status).lineLimit(1).truncationMode(.middle)
-                    .foregroundStyle(Theme.accent)
-            } else if model.isLoading || (model.isSearching && model.search.isRunning) {
-                ProgressView().controlSize(.mini)
-            }
-            Spacer()
-            TransferActivity { folder, placed in model.navigate(to: folder, selecting: placed) }
-            ActionActivity()
-            if model.destination == .drive, let account = model.drive.location?.accountID {
-                DriveUsageIndicator(accountID: account)
-            } else if let volume = model.volume {
-                Text(volume.name).foregroundStyle(Theme.textSecondary)
-                HeatBar(fraction: Double(volume.used) / Double(max(volume.total, 1)), height: 4, color: Theme.accent)
-                    .frame(width: 110)
-                Text("\(Format.bytes(volume.available)) free")
-                    .font(Theme.mono)
-                    .foregroundStyle(Theme.textSecondary)
-            }
-        }
-        .font(.system(size: 11))
-        .padding(.horizontal, 12)
-        .frame(height: 26)
-        .background(Theme.background)
-        .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
-    }
-
-    private var summary: String {
-        if model.isSearching {
-            let count = model.search.visibleHits.count
-            return "\(count.formatted()) \(count == 1 ? "result" : "results")"
-        }
-        switch model.destination {
-        case .recents, .newFiles:
-            let list = model.destination == .recents ? model.recents : model.newFiles
-            let count = list.rows.count
-            var text = "\(count.formatted()) \(count == 1 ? "item" : "items")"
-            if !list.selection.isEmpty { text += " · \(list.selection.count.formatted()) selected" }
-            return text
-        case .storage:
-            guard let result = StorageModel.shared.result else { return "" }
-            return "\(Format.bytes(result.root.size)) · \(result.root.fileCount.formatted()) files scanned"
-        case .s3:
-            let (folders, files) = model.s3.counts
-            var text = "\(folders.formatted()) \(folders == 1 ? "folder" : "folders") · \(files.formatted()) \(files == 1 ? "file" : "files")"
-            if model.s3.hasMore { text += "+" }
-            if !model.s3.selection.isEmpty { text += " · \(model.s3.selection.count.formatted()) selected" }
-            return text
-        case .drive:
-            let drive = model.drive
-            var text: String
-            if drive.isSearching {
-                text = "\(drive.rows.count.formatted())\(drive.hasMore ? "+" : "") \(drive.rows.count == 1 ? "result" : "results")"
-            } else {
-                let (folders, files) = drive.counts
-                text = "\(folders.formatted()) \(folders == 1 ? "folder" : "folders") · \(files.formatted()) \(files == 1 ? "file" : "files")"
-                if drive.hasMore { text += "+" }
-            }
-            if !drive.selection.isEmpty { text += " · \(drive.selection.count.formatted()) selected" }
-            return text
-        case .folder:
-            let folders = model.folderCount, files = model.fileCount
-            var text = "\(folders.formatted()) \(folders == 1 ? "dir" : "dirs") · \(files.formatted()) \(files == 1 ? "file" : "files")"
-            if model.hiddenCount > 0 { text += " · \(model.hiddenCount.formatted()) hidden" }
-            if !model.selection.isEmpty {
-                let sizes = FolderSizeStore.shared
-                let selection = model.selection
-                let selected = model.rows.filter { selection.contains($0.id) }
-                let bytes = selected.compactMap { $0.size ?? sizes.size(for: $0.item.path)?.bytes }.reduce(0, +)
-                text += " · \(selected.count.formatted()) selected" + (bytes > 0 ? " (\(Format.bytes(bytes)))" : "")
-            }
-            return text
-        }
-    }
-}

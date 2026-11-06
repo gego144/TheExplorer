@@ -9,8 +9,8 @@ extension EnvironmentValues {
     @Entry var showSettings: () -> Void = {}
 }
 
-/// The window's parts, laid out by AppKit: the tab strip and sidebar (drawn by AppKit too),
-/// and the command bar, panes, inspector and status bar, each in a hosting view of its own.
+/// The window's parts, laid out by AppKit: the tab strip, sidebar and status bar (drawn by
+/// AppKit too), and the command bar, panes and inspector, each in a hosting view of its own.
 ///
 /// SwiftUI lays out one hosting view at a time. With the whole window in one, a click in the
 /// list had SwiftUI re-measure the command bar, inspector and status bar too, ~60ms in all;
@@ -67,6 +67,18 @@ class RegionHostingView: NSHostingView<AnyView> {
     }
 
     @MainActor required init?(coder: NSCoder) { fatalError() }
+
+    #if DEBUG
+    /// Which part this is, and the time each part's layout has taken (for the loop scenes).
+    var debugName = ""
+    static var layoutTime: [String: Double] = [:]
+
+    override func layout() {
+        let start = ProcessInfo.processInfo.systemUptime
+        super.layout()
+        Self.layoutTime[debugName, default: 0] += ProcessInfo.processInfo.systemUptime - start
+    }
+    #endif
 }
 
 final class WorkspaceShellView: NSView {
@@ -76,7 +88,7 @@ final class WorkspaceShellView: NSView {
     private var sidebar: NSView!
     private var panes: RegionHostingView!
     private var inspector: RegionHostingView!
-    private var status: RegionHostingView!
+    private var status: NSView!
 
     /// What decides the layout, read under Observation tracking so a change re-lays it out.
     private var showsSidebar = true
@@ -84,6 +96,8 @@ final class WorkspaceShellView: NSView {
     private var tracking = false
 
     static let commandHeight: CGFloat = 46
+    /// How far the command bar's view reaches, with room for its dropdown.
+    static let commandReach: CGFloat = 460
     static let statusHeight: CGFloat = 26
     static let sidebarWidth: CGFloat = 192
     static let inspectorWidth: CGFloat = 296
@@ -100,6 +114,9 @@ final class WorkspaceShellView: NSView {
             }
             #endif
             let view = kind.init(rootView: AnyView(content.modifier(RegionStyle(values: values))))
+            #if DEBUG
+            view.debugName = name
+            #endif
             addSubview(view)
             return view
         }
@@ -113,7 +130,8 @@ final class WorkspaceShellView: NSView {
         addSubview(sidebar)
         panes = host(PanesRegion(workspace: workspace), name: "list")
         inspector = host(InspectorRegion(workspace: workspace), name: "inspector")
-        status = host(StatusBarRegion(workspace: workspace), name: "status")
+        status = StatusBarView(workspace: workspace, values: values)
+        addSubview(status)
         // The command bar's dropdown hangs over the content below it.
         command.layer?.zPosition = 1
         shell = self
@@ -128,14 +146,7 @@ final class WorkspaceShellView: NSView {
         didSet {
             guard dropdown != oldValue else { return }
             (command as? CommandBarHostingView)?.dropdown = dropdown
-            needsLayout = true
         }
-    }
-
-    /// Where this view's top is in the window, from the window's top left.
-    fileprivate var topInWindow: CGFloat {
-        guard let content = window?.contentView else { return 0 }
-        return content.bounds.height - convert(bounds, to: nil).maxY
     }
 
     override var isFlipped: Bool { true }
@@ -187,10 +198,11 @@ final class WorkspaceShellView: NSView {
         panes.frame = NSRect(x: left, y: y, width: max(0, width - left - right), height: bodyHeight)
         inspector.frame = NSRect(x: width - right, y: y, width: right, height: bodyHeight)
         status.frame = NSRect(x: 0, y: height - Self.statusHeight, width: width, height: Self.statusHeight)
-        // The command bar's view reaches down over the content while a dropdown is open; its
-        // empty part passes clicks through (see CommandBarHostingView).
-        let reach = dropdown.map { max(Self.commandHeight, $0.maxY - topInWindow - commandY + 24) } ?? Self.commandHeight
-        command.frame = NSRect(x: 0, y: commandY, width: width, height: min(reach, height - commandY))
+        // The command bar's view always reaches down over the content, far enough for its
+        // dropdown; the part below the bar passes clicks through unless the dropdown is there
+        // (see CommandBarHostingView). Growing it as the dropdown opened and shrinking it as
+        // it closed laid the whole bar out again each time, ~15ms.
+        command.frame = NSRect(x: 0, y: commandY, width: width, height: min(Self.commandReach, height - commandY))
     }
 }
 
@@ -229,11 +241,6 @@ private struct CommandBarRegion: View {
 private struct InspectorRegion: View {
     let workspace: Workspace
     var body: some View { InspectorColumn(model: workspace.selected) }
-}
-
-private struct StatusBarRegion: View {
-    let workspace: Workspace
-    var body: some View { StatusBar(model: workspace.selected) }
 }
 
 extension EnvironmentValues {

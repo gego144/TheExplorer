@@ -688,8 +688,9 @@ private final class SidebarList: NSView, NSDraggingSource {
     // MARK: Dragging pins out
 
     func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
-        // A pin carries its item to copy or link; moving it is left to the file list.
-        [.copy, .link, .generic]
+        // A pin carries its item as the file list does: dropped in a folder it moves there
+        // (copies with ⌥, or onto another disk).
+        [.copy, .move, .link, .generic]
     }
 
     // MARK: Dropping

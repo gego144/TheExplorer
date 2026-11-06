@@ -116,7 +116,6 @@ private struct ItemDetails: View {
                     Text(item.name)
                         .font(.system(size: 13.5, weight: .semibold))
                         .lineLimit(3)
-                        .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: 6) {
                         TypeChip(item: item)
@@ -130,7 +129,6 @@ private struct ItemDetails: View {
                             .font(.system(size: 12, weight: .semibold, design: .monospaced))
                             .foregroundStyle(Theme.accent)
                             .lineLimit(1)
-                            .textSelection(.enabled)
                     }
                 }
             }
@@ -189,7 +187,6 @@ private struct ItemDetails: View {
                 Text(Format.path(item.path))
                     .font(Theme.mono)
                     .foregroundStyle(Theme.textSecondary)
-                    .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                 Button("Copy Path") { FileActions.copyPaths([item.url]) }
                     .buttonStyle(SubtleButtonStyle())
@@ -265,7 +262,7 @@ private struct DetailRow: View {
                 .font(.system(size: 11.5, weight: emphasized ? .semibold : .regular, design: .monospaced))
                 .foregroundStyle(emphasized ? Theme.accent : Theme.text)
                 .lineLimit(1)
-                .minimumScaleFactor(0.85)
+                .truncationMode(.middle)
         }
         .font(.system(size: 11.5))
     }

@@ -105,6 +105,7 @@ final class BrowserModel: Identifiable {
     private(set) var items: [FileItem] = [] {
         didSet {
             Retired.later(oldValue)
+            itemIndex = nil
             if !adoptingRows { rebuildRows() }
         }
     }
@@ -124,7 +125,21 @@ final class BrowserModel: Identifiable {
     @ObservationIgnored private var children: [URL: [FileItem]] = [:]
     /// The folder as shown: hidden files and the kind filter applied, sorted. Rebuilt only when
     /// the listing, sort or filters change, never while rendering.
-    private(set) var rows: [ListRow] = [] { didSet { Retired.later(oldValue) } }
+    private(set) var rows: [ListRow] = [] {
+        didSet {
+            Retired.later(oldValue)
+            rowIndex = nil
+        }
+    }
+    /// Where each row is, built the first time something looks one up.
+    @ObservationIgnored private var rowIndex: [URL: Int]?
+    @ObservationIgnored private var itemIndex: [URL: Int]?
+
+    /// A row by its URL, without going through them all.
+    func row(for url: URL) -> ListRow? {
+        if rowIndex == nil { rowIndex = Dictionary(rows.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first }) }
+        return rowIndex?[url].map { rows[$0] }
+    }
     /// Largest size among `rows`, for scaling the size bars.
     private(set) var maxSize: Int64 = 0
     /// Counts for the folder itself, not counting the contents of expanded folders.
@@ -375,7 +390,8 @@ final class BrowserModel: Identifiable {
 
     /// A listed item's details, without going to the disk for them.
     func listedItem(_ url: URL) -> FileItem? {
-        if let item = items.first(where: { $0.url == url }) { return item }
+        if itemIndex == nil { itemIndex = Dictionary(items.enumerated().map { ($1.url, $0) }, uniquingKeysWith: { first, _ in first }) }
+        if let index = itemIndex?[url] { return items[index] }
         for folder in expanded {
             if let item = children[folder]?.first(where: { $0.url == url }) { return item }
         }

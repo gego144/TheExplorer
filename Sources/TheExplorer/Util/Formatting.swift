@@ -31,29 +31,37 @@ enum Format {
         return String(format: scaled < 99.95 ? "%.1f %@" : "%.0f %@", scaled, units[unit])
     }
 
+    /// Date formatters made once: building a format for each date (Date.formatted) cost a
+    /// fraction of a millisecond a time, several times per selection change in the inspector.
+    private static func formatter(_ setup: (DateFormatter) -> Void) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent
+        setup(formatter)
+        return formatter
+    }
+
+    private static let timeOnly = formatter { $0.dateStyle = .none; $0.timeStyle = .short }
+    private static let dateAndTime = formatter { $0.dateStyle = .medium; $0.timeStyle = .short }
+    private static let monthDay = formatter { $0.setLocalizedDateFormatFromTemplate("MMMd") }
+    private static let monthDayYear = formatter { $0.setLocalizedDateFormatFromTemplate("MMMdy") }
+    private static let calendar = Calendar.autoupdatingCurrent
+
     static func date(_ date: Date?) -> String {
         guard let date else { return "—" }
-        let calendar = Calendar.current
-        if calendar.isDateInToday(date) {
-            return "Today at " + date.formatted(date: .omitted, time: .shortened)
-        }
-        if calendar.isDateInYesterday(date) {
-            return "Yesterday at " + date.formatted(date: .omitted, time: .shortened)
-        }
-        return date.formatted(date: .abbreviated, time: .shortened)
+        if calendar.isDateInToday(date) { return "Today at " + timeOnly.string(from: date) }
+        if calendar.isDateInYesterday(date) { return "Yesterday at " + timeOnly.string(from: date) }
+        return dateAndTime.string(from: date)
     }
 
     /// Compact absolute date: "Today 11:47 PM", "Jun 6 1:53 PM", "Jun 6, 2024".
     static func compactDate(_ date: Date?) -> String {
         guard let date else { return "—" }
-        let calendar = Calendar.current
-        let time = date.formatted(date: .omitted, time: .shortened)
-        if calendar.isDateInToday(date) { return "Today \(time)" }
-        if calendar.isDateInYesterday(date) { return "Yesterday \(time)" }
+        if calendar.isDateInToday(date) { return "Today " + timeOnly.string(from: date) }
+        if calendar.isDateInYesterday(date) { return "Yesterday " + timeOnly.string(from: date) }
         if calendar.isDate(date, equalTo: Date(), toGranularity: .year) {
-            return date.formatted(.dateTime.month(.abbreviated).day()) + " \(time)"
+            return monthDay.string(from: date) + " " + timeOnly.string(from: date)
         }
-        return date.formatted(.dateTime.month(.abbreviated).day().year())
+        return monthDayYear.string(from: date)
     }
 
     static func relative(_ date: Date?) -> String {
