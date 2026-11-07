@@ -222,9 +222,9 @@ struct ExplorerCommands: Commands {
             Divider()
             Button("Copy Path") { model.map { FileActions.copyPaths(pathTargets($0)) } }
                 .keyboardShortcut("c", modifiers: [.command, .option])
-            Button("Search") { model?.omniboxRequest = OmniboxRequest(text: "") }
+            Button("Find") { model?.openFind() }
                 .keyboardShortcut("f")
-            Button("Command Bar") { model?.omniboxRequest = OmniboxRequest(text: "") }
+            Button("Go Anywhere") { model?.omniboxRequest = OmniboxRequest(text: "") }
                 .keyboardShortcut("k")
         }
 

@@ -145,6 +145,15 @@ final class WorkspaceShellView: NSView {
 
     override var isFlipped: Bool { true }
 
+    /// Esc from the results (the list, the gallery) clears the search and gives you the folder
+    /// back, as it does in the find field.
+    override func cancelOperation(_ sender: Any?) {
+        let model = workspace.selected
+        guard model.isFinding || !model.searchText.isEmpty else { return super.cancelOperation(sender) }
+        model.endFind()
+        model.listFocusRequest += 1
+    }
+
     /// Reads what the layout depends on (sidebar and inspector shown, and whether the inspector
     /// has anything to show) and lays out again when any of it changes.
     private func trackLayout() {

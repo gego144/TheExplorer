@@ -71,6 +71,9 @@ enum DebugSnapshots {
             case "range":
                 let recents = model.destination == .newFiles ? model.newFiles : model.recents
                 if let days = Int(argument), let range = RecentsRange(rawValue: days) { recents.range = range }
+            case "find":
+                // find: opens Find (⌘F); find:<text> hands it text, as ⌘K's Find line does.
+                model.openFind(argument.isEmpty ? nil : argument)
             case "search":
                 model.searchText = argument
             case "searchmac":

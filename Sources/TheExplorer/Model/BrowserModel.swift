@@ -166,6 +166,11 @@ final class BrowserModel: Identifiable {
 
     var searchText = ""
     var searchScope: SearchScope = .folder
+    /// Find (⌘F): the path row is a search field, filtering the list where you are. It stays
+    /// open while there's a search, and closes when you go somewhere else.
+    var isFinding = false
+    /// Bumped to put the keyboard in the find field.
+    var findFocusRequest = 0
 
     var showHidden: Bool {
         didSet {
@@ -188,6 +193,39 @@ final class BrowserModel: Identifiable {
     var omniboxRequest: OmniboxRequest?
     /// Bumped to move keyboard focus back to the file list.
     var listFocusRequest = 0
+
+    /// Opens Find. With `text` (handed over from ⌘K) it searches that straight away and the
+    /// list takes the keyboard, so the results are ready to use; without, the field does.
+    func openFind(_ text: String? = nil, everywhere: Bool = false) {
+        if !isFinding {
+            // A fresh find searches where you are; outside a folder, everything.
+            searchScope = destination == .folder ? .folder : .mac
+        }
+        if everywhere && !destination.isRemote { searchScope = .mac }
+        isFinding = true
+        if let text {
+            searchText = text
+            listFocusRequest += 1
+        } else {
+            findFocusRequest += 1
+        }
+    }
+
+    /// Clears the search and closes Find.
+    func endFind() {
+        if !searchText.isEmpty { searchText = "" }
+        if isFinding { isFinding = false }
+    }
+
+    /// Where Find searches, in words: "TheExplorer", "Google Drive", "your Mac".
+    var findScopeName: String {
+        switch destination {
+        case .drive: return "Google Drive"
+        case .s3: return s3.location.map { $0.itemName.isEmpty ? ($0.bucket ?? "S3") : $0.itemName } ?? "S3"
+        case .folder where searchScope == .folder: return Format.displayName(currentURL.path)
+        default: return "your Mac"
+        }
+    }
 
     let search = SearchModel()
     let recents = RecentsModel(mode: .opened)
@@ -500,7 +538,7 @@ final class BrowserModel: Identifiable {
     // MARK: - Navigation
 
     func show(_ destination: Destination) {
-        searchText = ""
+        endFind()
         self.destination = destination
     }
 
@@ -518,7 +556,7 @@ final class BrowserModel: Identifiable {
             return
         }
         let url = url.standardizedFileURL
-        searchText = ""
+        endFind()
         let leaving = historyURL
         let wasRemote = destination.isRemote
         destination = .folder
@@ -611,7 +649,7 @@ final class BrowserModel: Identifiable {
 
     /// Browses a connection's buckets or a folder in a bucket.
     func showS3(_ location: S3Location, recordHistory: Bool = true) {
-        searchText = ""
+        endFind()
         if recordHistory, historyURL != location.url || destination != .s3 {
             backStack.append(historyURL)
             forwardStack.removeAll()
@@ -622,7 +660,7 @@ final class BrowserModel: Identifiable {
 
     /// Browses a Google account's top level, a Drive folder or one of its lists.
     func showDrive(_ location: DriveLocation, recordHistory: Bool = true) {
-        searchText = ""
+        endFind()
         if recordHistory, historyURL != location.url || destination != .drive {
             backStack.append(historyURL)
             forwardStack.removeAll()

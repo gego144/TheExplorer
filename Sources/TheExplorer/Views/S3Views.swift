@@ -26,6 +26,7 @@ struct S3View: View {
                 onSort: { s3.sort = s3.sort.toggled(to: $0) },
                 dateTitle: s3.location?.bucket == nil ? "Created" : "Modified",
                 empty: emptyState,
+                focusRequest: model.listFocusRequest,
                 onOpen: open,
                 onQuickLook: { model.quickLook($0, in: $1) },
                 onDropInto: { urls, folder in model.receiveDrop(urls, into: folder) },

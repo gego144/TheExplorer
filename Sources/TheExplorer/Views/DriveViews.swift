@@ -27,6 +27,7 @@ struct DriveView: View {
                 onSort: { drive.sort = drive.sort.toggled(to: $0) },
                 dateTitle: drive.location?.id == DriveLocation.drivesID ? "Created" : "Modified",
                 empty: emptyState,
+                focusRequest: model.listFocusRequest,
                 onOpen: open,
                 onQuickLook: { model.quickLook($0, in: $1) },
                 onDropInto: { urls, folder in model.receiveDrop(urls, into: folder) },

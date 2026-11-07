@@ -23,12 +23,10 @@ struct SearchResultsView: View {
         }
 
         return VStack(spacing: 0) {
+            // Where it searches is beside the find field; here, what was found.
             PaneHeader {
-                Image(systemName: model.searchScope == .mac ? "globe" : "folder")
-                    .foregroundStyle(Theme.accent)
-                Text(scopeDescription)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                Text(countDescription(rows.count))
+                    .foregroundStyle(Theme.textSecondary)
                 Spacer()
                 if search.isIndexing {
                     Text("Indexing your files…")
@@ -39,9 +37,6 @@ struct SearchResultsView: View {
                         .font(Theme.mono)
                         .foregroundStyle(Theme.textTertiary)
                 }
-                Text(countDescription(rows.count))
-                    .font(Theme.mono)
-                    .foregroundStyle(Theme.textSecondary)
                 Segmented(selection: $search.kindFilter, options: [(.all, "All"), (.folders, "Dirs"), (.files, "Files")])
                     .fixedSize()
             }
@@ -54,7 +49,7 @@ struct SearchResultsView: View {
                 showLocation: true,
                 empty: search.isRunning ? nil : EmptyState(
                     symbol: "magnifyingglass", title: "No matches for “\(model.searchText)”",
-                    hint: model.searchScope == .folder ? "Try “Everywhere” to search all your files." : "Library, hidden folders and the insides of apps aren't indexed. Go to the folder and search “Here” with hidden files shown (⇧⌘.) to look at everything in it."),
+                    hint: model.searchScope == .folder ? "Choose “Everywhere on Your Mac” beside the search, or press ⌘↩." : "Library, hidden folders and the insides of apps aren't indexed. Go to the folder and find there with hidden files shown (⇧⌘.) to look at everything in it."),
                 focusRequest: model.listFocusRequest,
                 onOpen: { urls, newTab in open(urls, newTab: newTab, rows: rows) },
                 onQuickLook: { model.quickLook($0, in: $1) },
@@ -86,13 +81,6 @@ struct SearchResultsView: View {
             model.open(item)
         } else {
             FileOpener.open(items.map(\.url))
-        }
-    }
-
-    private var scopeDescription: String {
-        switch model.searchScope {
-        case .mac: "Searching your files"
-        case .folder: "Searching “\(Format.displayName(model.currentURL.path))” and below"
         }
     }
 

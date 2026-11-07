@@ -10,9 +10,12 @@ Every folder's total size is calculated in the background and drawn as a bar, so
 
 <img src="docs/screenshots/folder-sizes.png" alt="A folder listing with size bars, type chips and the inspector" width="100%">
 
-## One bar for paths and search
+## Find, and going anywhere
 
-The command bar shows where you are as clickable chips. Press ⌘K and type to search, or start with `/` or `~` to jump to a path with folder completion (↑↓ to choose, ⇥ to complete). *Everywhere* searches all your files, and *Here* the current folder and everything below it.
+Two keys, two jobs:
+
+- **Find (⌘F)** searches where you are. The path row turns into a search field and the list below shows the results as you type, ready to open, drag or preview. Beside the field it says where it's searching: in a folder you can switch between the folder (and everything below it) and *Everywhere on Your Mac* (⌘↩); in Google Drive it searches the whole account; in S3 it filters the folder. ↓ or ↩ moves into the results, and esc (or ×) clears the search and gives you the folder back. Clicking the empty part of the path row opens Find too.
+- **Go anywhere (⌘K)** jumps somewhere: the folders you visit most before you type, then matching folders and files on your Mac as you do. Start with `/` or `~` to jump to a path with folder completion (↑↓ to choose, ⇥ to complete). Its top line hands what you typed to Find where you are, and ⌘↩ finds it everywhere on your Mac. It never searches behind itself.
 
 Search works like a launcher's rather than Spotlight's. TheExplorer keeps its own index of file names: your home folder, Applications, iCloud Drive and cloud storage. The index is built once (about a second for a few hundred thousand files) and saved. FSEvents keeps it current from then on, so results update on every keystroke in a few milliseconds. At launch the saved index loads in a few milliseconds. FSEvents then replays whatever changed while the app was closed, and only those folders are re-read.
 - **Fuzzy matching.** Matching is case- and accent-insensitive, and the letters you type don't have to be next to each other: `tex` finds *TheExplorer* and `qrp` finds *q3-report.pdf*. Typos are forgiven too: a swapped, missing, extra or wrong letter (two in longer words), so `audit` finds *audting.mp4* and `reciept` finds *receipt.pdf*. Words under four letters, and first letters, have to be right, which keeps short queries clean.
@@ -126,7 +129,7 @@ Google Drive shows up under Cloud in the sidebar once you've signed in. TheExplo
 
   Then choose the JSON file (or paste the client ID and secret) and click Add Account. Google opens in your browser. Because the client is yours rather than a published app, Google says it hasn't verified it: choose Advanced, then Go to (your app's name). You can add several Google accounts with the same client.
 - **Browsing:** clicking Google Drive in the sidebar opens My Drive. Under it are Shared with me, Starred and each of your shared drives, a click away; the arrow on the account folds them away. Shortcuts open the folder they point to.
-- **Search:** typing in the command bar (⌘K) searches the whole account with Drive's own search, in names and inside documents.
+- **Search:** Find (⌘F) in Drive searches the whole account with Drive's own search, in names and inside documents.
 - **Upload:** drop files or folders onto a Drive folder, a folder row, a breadcrumb or the sidebar account, or paste. Folders upload with everything in them.
 - **Download:** right-click › Download to Downloads (or the inspector's Download button) saves to your Downloads folder, and Download To… asks where. You can also drag items onto Finder, the desktop or any folder in TheExplorer, or press F5 with a local folder in the other pane. The status bar says where each download went; click it for the list, where Show opens the folder with what arrived selected.
 - **Google Docs, Sheets and Slides** download as Word, Excel and PowerPoint files; right-click › Download As offers PDF, Markdown, CSV and the rest. Opening one opens it in your browser, and Space previews it as a PDF. Forms, Sites and My Maps only open in the browser.
@@ -174,7 +177,7 @@ Commands run in zsh with your login profile, so Homebrew tools like `ffmpeg` are
 ## And the rest
 
 - **Tabs.** Browser-style tabs, each with its own folder, history and search. Drop files on a tab to move them there. Tabs come back where you left them after you quit.
-- **Split pane.** ⌘/ splits a tab into two folders side by side, each with its own history. Drag the line between them to resize the panes, or double-click it to even them out. The active pane has a bright line along its header, and the command bar, sidebar, inspector and menus all act on it. Click a pane or press Tab to switch. F5 copies the selection to the other pane's folder and F6 moves it there (also in the right-click menu), or drag between them. View › Swap Panes and Show Same Folder in Other Pane are there too. ⌘W closes the active pane, and splits (and where you left the divider) come back after you quit.
+- **Split pane.** ⌘/ splits a tab into two folders side by side, each with its own history. Drag the line between them to resize the panes, or double-click it to even them out. The active pane's header is raised and the other pane is dimmed; the path row, Find, sidebar, inspector and menus all act on the active one. Click a pane or press Tab to switch, and a drop makes the pane it lands in active. F5 copies the selection to the other pane's folder and F6 moves it there (also in the right-click menu), or drag between them. View › Swap Panes and Show Same Folder in Other Pane are there too. ⌘W closes the active pane, and splits (and where you left the divider) come back after you quit.
 - **Pinned.** Pin files or folders to the sidebar with ⌘D or by dropping them on the "Pinned" heading. Dropping onto a pinned folder moves items into it.
 - **Git status.** In a repository, changed files get a letter: **M** modified, **A** added, **U** untracked, **R** renamed, red for deleted or conflicted. Folders get a dot when something inside changed, ignored files are dimmed, and the path bar shows the branch, ahead/behind and the number of changes. It updates as you edit, stage, commit or switch branches, including in git worktrees.
 - **Cut, copy and paste.** ⌘X, ⌘C and ⌘V for files, including with Finder in either direction. Cut items fade until you paste them, ⌥⌘V moves whatever was copied, and Duplicate is in the right-click menu. Pasting into an S3 or Google Drive folder uploads.
@@ -200,7 +203,8 @@ For the storage scan to include protected folders like Mail and Messages, grant 
 | Copy / move the selection to the other pane | F5 / F6 |
 | Next / previous tab, jump to tab | ⌃Tab / ⌃⇧Tab, ⌘1…⌘9 |
 | Open folder in new tab | ⌥⌘↓ (or ⌘-double-click) |
-| Search, jump to a path, or pick a recent folder | ⌘K or ⌘F |
+| Find where you are | ⌘F |
+| Go anywhere: a recent folder, a file, or a path | ⌘K |
 | Edit the current path | ⌘L or ⇧⌘G |
 | Back / Forward / Enclosing folder | ⌘[ / ⌘] / ⌘↑ |
 | Open selection | ⌘↓, Return, or double-click |

@@ -2,11 +2,13 @@ import AppKit
 import Observation
 import SwiftUI
 
-/// ⌘K: one place to go anywhere. Before you type, the folders you visit most; type to search
-/// (matching folders you visit, the files the search finds, and to show every result or
-/// search the whole Mac); type a path starting with / or ~ to jump there, with folder
-/// completion. ↩ goes to the highlighted line, ⌘↩ searches everywhere, ⇥ completes a path,
-/// esc closes. While a search is typed the list behind shows its results too.
+/// ⌘K: go anywhere. Before you type, the folders you visit most; type a name for matching
+/// folders and files on your Mac, with Find for where you are on the top line; type a path
+/// starting with / or ~ to jump there, with folder completion. ↩ goes to the highlighted line,
+/// ⌘↩ finds everywhere on your Mac, ⇥ completes a path, esc closes.
+///
+/// It never searches the list behind: that's Find's job (⌘F), whose results you can use, so
+/// a search typed here is handed over to Find rather than run under the palette.
 final class CommandPaletteView: NSView, NSTextFieldDelegate {
     private let workspace: Workspace
     private let theme = TableTheme()
@@ -42,6 +44,8 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate {
     private var suggestions: [URL] = []
     private var suggestionTask: Task<Void, Never>?
     private weak var model: BrowserModel?
+    /// The palette's own search of your Mac, for its Files lines.
+    private let fileSearch = SearchModel()
     private var lastRequest: [ObjectIdentifier: UUID] = [:]
     private var generation = 0
     private var tracking: NSTrackingArea?
@@ -70,7 +74,7 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate {
         field.textColor = theme.text
         field.cell?.isScrollable = true
         field.cell?.wraps = false
-        field.placeholderAttributedString = NSAttributedString(string: "Search, or type a path like ~/Dev", attributes: [
+        field.placeholderAttributedString = NSAttributedString(string: "Go to a folder or file, or type a path like ~/Dev", attributes: [
             .foregroundColor: theme.textTertiary, .font: NSFont.systemFont(ofSize: 16),
         ])
         addSubview(field)
@@ -83,7 +87,7 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate {
 
     // MARK: Opening and closing
 
-    /// Opens when a pane asks (⌘K, ⌘F, Go to Path…, a click on the path row).
+    /// Opens when a pane asks (⌘K, Go to Path…).
     private func followRequests() {
         generation += 1
         let current = generation
@@ -117,12 +121,12 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate {
         field.currentEditor()?.selectedRange = NSRange(location: (text as NSString).length, length: 0)
     }
 
-    /// Closes the palette; `keepSearch` leaves a typed search's results in the list.
-    private func close(keepSearch: Bool = false) {
+    /// Closes the palette, handing the keyboard back to the list.
+    private func close() {
         guard !isHidden else { return }
         isHidden = true
         suggestionTask?.cancel()
-        if !keepSearch, let model, !model.searchText.isEmpty { model.searchText = "" }
+        fileSearch.clear()
         window?.makeFirstResponder(nil)
         let model = model
         DispatchQueue.main.async { model?.listFocusRequest += 1 }
@@ -138,11 +142,14 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate {
         changed()
     }
 
-    /// The query changed: the search behind follows it, and the lines are listed again.
+    /// The query changed: the palette's own search follows it, and the lines are listed again.
     private func changed() {
-        guard let model else { return }
-        let search = isPathMode ? "" : query.trimmingCharacters(in: .whitespaces)
-        if model.searchText != search { model.searchText = search }
+        let text = isPathMode ? "" : query.trimmingCharacters(in: .whitespaces)
+        if text.isEmpty {
+            fileSearch.clear()
+        } else {
+            fileSearch.run(text: text, scope: .mac, folder: URL.home, includeHidden: false)
+        }
         suggest()
         list()
     }
@@ -182,25 +189,28 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate {
             .filter { $0.lastPathComponent.lowercased().contains(lowered) }
             .prefix(3)
             .map { folderEntry($0) }
-        let hits = model.search.visibleHits.prefix(6).map { hit in
-            hit.item.isFolder ? folderEntry(hit.item.url)
-                : Entry(kind: .file(hit.item), name: hit.item.name, detail: Format.path(hit.item.url.deletingLastPathComponent().path))
-        }
-        let here = model.searchScope == .folder ? "in \(Format.displayName(model.currentURL.path))" : "everywhere"
-        var actions = [Entry(kind: .action { [weak self] in self?.close(keepSearch: true) },
-                             name: "Show all results \(here)", symbol: "list.bullet")]
-        if model.searchScope == .folder {
-            actions.append(Entry(kind: .action { [weak self] in self?.searchEverywhere() },
-                                 name: "Search everywhere for “\(text)”", key: "⌘↩", symbol: "globe"))
-        }
-        var sections: [(String, [Entry])] = []
+        let shownFolders = Set(folders.compactMap { entry -> URL? in if case .folder(let url) = entry.kind { url } else { nil } })
+        let hits = fileSearch.visibleHits.lazy
+            .filter { !shownFolders.contains($0.item.url) }
+            .prefix(5)
+            .map { hit in
+                hit.item.isFolder ? self.folderEntry(hit.item.url)
+                    : Entry(kind: .file(hit.item), name: hit.item.name, detail: Format.path(hit.item.url.deletingLastPathComponent().path))
+            }
+        // First, Find where you are: the results land in the list, where you can use them.
+        let scope = model.destination == .folder ? Format.displayName(model.currentURL.path) : model.findScopeName
+        var sections: [(String, [Entry])] = [("", [Entry(kind: .action { [weak self] in self?.find(everywhere: false) },
+                                                        name: "Find “\(text)” in \(scope)", symbol: "magnifyingglass")])]
         if !folders.isEmpty { sections.append(("Folders you visit", Array(folders))) }
         if !hits.isEmpty {
-            sections.append(("Files", Array(hits)))
-        } else if model.search.isRunning || model.search.isIndexing {
-            sections.append(("Searching…", []))
+            sections.append(("On your Mac", Array(hits)))
+        } else if fileSearch.isRunning || fileSearch.isIndexing {
+            sections.append(("Searching your Mac…", []))
         }
-        sections.append(("Actions", actions))
+        if !model.destination.isRemote && !(model.destination == .folder && model.searchScope == .mac && model.isFinding) {
+            sections.append(("", [Entry(kind: .action { [weak self] in self?.find(everywhere: true) },
+                                        name: "Find “\(text)” everywhere on your Mac", key: "⌘↩", symbol: "globe")]))
+        }
         return sections
     }
 
@@ -208,9 +218,12 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate {
         suggestions.isEmpty ? [] : [("Folders", suggestions.map { folderEntry($0) })]
     }
 
-    private func searchEverywhere() {
-        model?.searchScope = .mac
-        close(keepSearch: true)
+    /// Hands what's typed to Find: where you are, or everywhere on your Mac.
+    private func find(everywhere: Bool) {
+        let text = query.trimmingCharacters(in: .whitespaces)
+        let model = model
+        close()
+        model?.openFind(text, everywhere: everywhere)
     }
 
     /// Folder completions for a typed path, listed off the main thread.
@@ -272,7 +285,7 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate {
             close()
         case #selector(NSResponder.insertNewline(_:)):
             if NSApp.currentEvent?.modifierFlags.contains(.command) == true, !isPathMode, !query.isEmpty {
-                searchEverywhere()
+                find(everywhere: model?.destination.isRemote == false)
             } else {
                 submit()
             }
@@ -340,8 +353,11 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate {
         var index = 0
         for (number, section) in sections.enumerated() {
             if number > 0 { y += 6 }
-            titles.append((section.title, y))
-            y += 24
+            // A section without a title (Find's line) has no heading to make room for.
+            if !section.title.isEmpty {
+                titles.append((section.title, y))
+                y += 24
+            }
             for _ in section.entries {
                 rows.append((index, NSRect(x: 8, y: y, width: width - 16, height: Self.rowHeight)))
                 y += Self.rowHeight + 1

@@ -3,8 +3,9 @@ import Observation
 import SwiftUI
 
 /// The row above the list: back and forward, where you are ("~ › Dev › TheExplorer"), and the
-/// repository's branch when there is one. A click on its empty part opens ⌘K.
-final class PathBarView: NSView {
+/// repository's branch when there is one. Find (⌘F, or a click on its empty part) turns it into
+/// a search field that filters the list right there, with where it searches beside it.
+final class PathBarView: NSView, NSTextFieldDelegate {
     static let height: CGFloat = 36
 
     private let workspace: Workspace
@@ -25,15 +26,35 @@ final class PathBarView: NSView {
     private var generation = 0
     private weak var remoteModel: BrowserModel?
 
+    // Find.
+    private let findField = FindField()
+    private let scopeButton: QuietButton
+    private let clearButton: BarButton
+    private let findFill = NSColor(Theme.track)
+    private var finding = false
+    private var lastFindFocus: [ObjectIdentifier: Int] = [:]
+
     init(workspace: Workspace, values: RegionValues) {
         self.workspace = workspace
         self.values = values
         back = BarButton("chevron.left", style: .ghost, size: 11, weight: .semibold, help: "Back (⌘[)", theme: theme)
         forward = BarButton("chevron.right", style: .ghost, size: 11, weight: .semibold, help: "Forward (⌘])", theme: theme)
+        scopeButton = QuietButton("", help: "Where to search", theme: theme)
+        clearButton = BarButton("xmark", style: .ghost, size: 9, weight: .bold, help: "Clear (esc)", theme: theme)
         super.init(frame: .zero)
         back.action = { [weak workspace] in workspace?.selected.goBack() }
         forward.action = { [weak workspace] in workspace?.selected.goForward() }
-        for view in [back, forward, crumbs] as [NSView] { addSubview(view) }
+        clearButton.action = { [weak self] in self?.endFind() }
+        findField.delegate = self
+        findField.isBordered = false
+        findField.isBezeled = false
+        findField.drawsBackground = false
+        findField.focusRingType = .none
+        findField.font = NSFont.systemFont(ofSize: 12.5)
+        findField.textColor = theme.text
+        findField.cell?.isScrollable = true
+        findField.cell?.wraps = false
+        for view in [back, forward, crumbs, findField, scopeButton, clearButton] as [NSView] { addSubview(view) }
         refresh()
     }
 
@@ -64,8 +85,83 @@ final class PathBarView: NSView {
         let trail = Self.trail(of: model)
         if crumbs.trail != trail { crumbs.trail = trail }
         updateRemoteCrumbs(model)
+        applyFind(model)
         needsLayout = true
         needsDisplay = true
+    }
+
+    // MARK: Find
+
+    private func applyFind(_ model: BrowserModel) {
+        finding = model.isFinding || !model.searchText.isEmpty
+        for view in [findField, scopeButton, clearButton] as [NSView] { view.isHidden = !finding }
+        let editing = findField.currentEditor() != nil
+        if findField.stringValue != model.searchText && !(editing && finding) { findField.stringValue = model.searchText }
+        let scope = model.findScopeName
+        findField.placeholderAttributedString = NSAttributedString(string: "Find in \(scope)", attributes: [
+            .foregroundColor: theme.textTertiary, .font: NSFont.systemFont(ofSize: 12.5),
+        ])
+        // On your Mac you choose here or everywhere; Drive searches the whole account, S3 the folder.
+        let choosable = model.destination == .folder
+        scopeButton.title = "in " + scope + (choosable ? " ▾" : "")
+        scopeButton.popUpMenu = choosable ? { [weak self] in self?.scopeMenu() ?? NSMenu() } : nil
+        scopeButton.isOn = false
+        let key = ObjectIdentifier(model)
+        let request = model.findFocusRequest
+        if lastFindFocus[key] != request {
+            let first = lastFindFocus[key] == nil
+            lastFindFocus[key] = request
+            // A pane seen for the first time only notes where its requests are.
+            if !first {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, !self.findField.isHidden else { return }
+                    self.window?.makeFirstResponder(self.findField)
+                    self.findField.currentEditor()?.selectedRange = NSRange(location: (self.findField.stringValue as NSString).length, length: 0)
+                }
+            }
+        }
+    }
+
+    private func scopeMenu() -> NSMenu {
+        let model = workspace.selected
+        let menu = NSMenu()
+        let here = ActionMenuItem("In \(Format.displayName(model.currentURL.path))") { model.searchScope = .folder }
+        here.state = model.searchScope == .folder ? .on : .off
+        let everywhere = ActionMenuItem("Everywhere on Your Mac") { model.searchScope = .mac }
+        everywhere.state = model.searchScope == .mac ? .on : .off
+        menu.addItem(here)
+        menu.addItem(everywhere)
+        return menu
+    }
+
+    private func endFind() {
+        let model = workspace.selected
+        model.endFind()
+        model.listFocusRequest += 1
+    }
+
+    func controlTextDidChange(_ notification: Notification) {
+        let model = workspace.selected
+        if model.searchText != findField.stringValue { model.searchText = findField.stringValue }
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        let model = workspace.selected
+        switch selector {
+        case #selector(NSResponder.cancelOperation(_:)):
+            endFind()
+        case #selector(NSResponder.insertNewline(_:)):
+            if NSApp.currentEvent?.modifierFlags.contains(.command) == true, model.destination == .folder {
+                model.searchScope = .mac
+            } else {
+                model.listFocusRequest += 1
+            }
+        case #selector(NSResponder.moveDown(_:)):
+            model.listFocusRequest += 1
+        default:
+            return false
+        }
+        return true
     }
 
     /// The folders from the home folder (or /) down to this one.
@@ -131,15 +227,35 @@ final class PathBarView: NSView {
         } ?? 0
         let frame = NSRect(x: navEnd - 6, y: (bounds.height - Theme.smallControlHeight) / 2,
                            width: max(0, bounds.width - navEnd + 6 - 16 - gitWidth), height: Theme.smallControlHeight)
-        crumbs.isHidden = destination != .folder
+        crumbs.isHidden = destination != .folder || finding
+        remoteCrumbs?.isHidden = finding
         crumbs.frame = frame
         remoteCrumbs?.frame = frame
+        guard finding else { return }
+        let box = findBox
+        clearButton.frame = NSRect(x: box.maxX - 24, y: box.midY - 10, width: 20, height: 20)
+        let scopeWidth = min(scopeButton.width, max(0, box.width * 0.45))
+        scopeButton.frame = NSRect(x: clearButton.frame.minX - 2 - scopeWidth, y: box.midY - 11, width: scopeWidth, height: 22)
+        findField.frame = NSRect(x: box.minX + 28, y: box.midY - 8, width: max(0, scopeButton.frame.minX - 6 - box.minX - 28), height: 17)
+    }
+
+    /// The field's rounded box, across the row after back and forward.
+    private var findBox: NSRect {
+        NSRect(x: navEnd - 2, y: (bounds.height - 28) / 2, width: max(0, bounds.width - navEnd + 2 - 12), height: 28)
     }
 
     override func draw(_ dirtyRect: NSRect) {
         theme.border.setFill()
         NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1).fill()
         let midY = bounds.midY
+        if finding {
+            let box = findBox
+            findFill.setFill()
+            NSBezierPath(roundedRect: box, xRadius: Theme.controlRadius + 1, yRadius: Theme.controlRadius + 1).fill()
+            let icon = theme.symbol("magnifyingglass", size: 11.5, weight: .medium, color: theme.textSecondary)
+            icon.draw(in: FileCellView.centered(icon.size, in: NSRect(x: box.minX + 8, y: box.minY, width: 16, height: box.height)))
+            return
+        }
         // A place that isn't a folder ("Recents") shows its name.
         if destination != .folder && !destination.isRemote {
             FileCellView.drawText(placeTitle, font: titleFont, color: theme.text, x: navEnd, midY: midY, width: bounds.width - navEnd - 16)
@@ -156,15 +272,22 @@ final class PathBarView: NSView {
         }
     }
 
-    /// The empty part of the row opens ⌘K, as the field there used to.
+    /// The empty part of the row opens Find; while finding, a click anywhere in the box types there.
     override func mouseDown(with event: NSEvent) {
-        workspace.selected.omniboxRequest = OmniboxRequest(text: "")
+        if finding {
+            window?.makeFirstResponder(findField)
+        } else {
+            workspace.selected.openFind()
+        }
     }
 
     override func resetCursorRects() {
         addCursorRect(bounds, cursor: .iBeam)
     }
 }
+
+/// The find field in the path row.
+final class FindField: NSTextField {}
 
 /// The view controls at the right of the tab bar: the sort (with the other view options in its
 /// menu), list or gallery, and the details panel.

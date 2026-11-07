@@ -106,7 +106,7 @@ final class StatusBarView: NSView {
     // MARK: Layout and drawing
 
     /// The keys worth knowing, along the left.
-    private static let hints = [("⌘K", "Go anywhere"), ("Space", "Preview"), ("↩", "Open"), ("⌘⌫", "Move to Trash")]
+    private static let hints = [("⌘F", "Find"), ("⌘K", "Go anywhere"), ("Space", "Preview"), ("⌘⌫", "Move to Trash")]
 
     private var hintsEnd: CGFloat {
         var x: CGFloat = 16
