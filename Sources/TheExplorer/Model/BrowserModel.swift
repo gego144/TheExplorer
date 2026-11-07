@@ -1084,7 +1084,10 @@ final class BrowserModel: Identifiable {
         #if DEBUG
         FileHandle.standardError.write(Data("[snapshot] receiveDrop \(urls.map(\.path)) into \(folder.path)\n".utf8))
         #endif
-        return transfer(urls, into: folder)
+        let accepted = transfer(urls, into: folder)
+        // You carry on where the items went: this pane becomes the active one.
+        if accepted { Session.dropLanded(in: self) }
+        return accepted
     }
 
     /// Moves or copies items into `folder`: by the drop rules (move on the same disk, copy

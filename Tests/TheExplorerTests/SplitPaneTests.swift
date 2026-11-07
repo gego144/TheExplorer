@@ -99,4 +99,35 @@ struct SplitPaneTests {
         // Nothing selected: nothing to send.
         #expect(!workspace.sendToOtherPane(from: workspace.currentTab, mode: .copy))
     }
+
+    /// Dropping into the pane you weren't in makes it the active one, so Back acts there.
+    @Test func aDropMakesItsPaneActive() {
+        let workspace = workspace()
+        workspace.toggleSplit()
+        let first = workspace.currentTab
+        let second = workspace.selected
+        workspace.activate(first)
+        #expect(workspace.dropLanded(in: second))
+        #expect(workspace.selected === second)
+        #expect(workspace.dropLanded(in: first))
+        #expect(workspace.selected === first)
+    }
+
+    /// A drop onto another tab (or a pane of one) brings that tab to the front.
+    @Test func aDropOnAnotherTabSelectsIt() {
+        let workspace = workspace()
+        workspace.toggleSplit()
+        let splitTab = workspace.currentTab
+        let second = workspace.selected
+        workspace.newTab(right)
+        let plainTab = workspace.currentTab
+        #expect(plainTab !== splitTab)
+        #expect(workspace.dropLanded(in: second))
+        #expect(workspace.currentTab === splitTab && workspace.selected === second)
+        #expect(workspace.dropLanded(in: plainTab))
+        #expect(workspace.currentTab === plainTab)
+        // A pane from another window isn't this one's to show.
+        #expect(!workspace.dropLanded(in: BrowserModel(url: right)))
+        #expect(workspace.currentTab === plainTab)
+    }
 }

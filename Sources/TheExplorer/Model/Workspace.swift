@@ -358,6 +358,19 @@ final class Workspace {
         if let index = tabs.firstIndex(where: { $0 === tab }) { select(index) }
     }
 
+    /// After a drop lands in one of this window's panes, that's where you carry on: its tab
+    /// comes to the front, it becomes the active pane, and its list takes the keyboard, so
+    /// Back and the keys act where the items went rather than where they came from.
+    /// Returns false when the pane isn't in this window.
+    @discardableResult
+    func dropLanded(in pane: BrowserModel) -> Bool {
+        guard let tab = tabs.first(where: { $0 === pane || secondPane(of: $0) === pane }) else { return false }
+        if tab !== currentTab { select(tab) }
+        activate(pane)
+        pane.listFocusRequest += 1
+        return true
+    }
+
 
     /// Closes a tab. Returns false when it was the last one, so the caller closes the window.
     @discardableResult
@@ -421,6 +434,13 @@ enum Session {
     private static var pending: [(urls: [URL], revealing: Bool)] = []
 
     static func activated(_ workspace: Workspace) { lastActive = workspace }
+
+    /// A drop landed in `pane`; the window holding it makes it the one you're working in.
+    static func dropLanded(in pane: BrowserModel) {
+        for entry in live {
+            if entry.workspace?.dropLanded(in: pane) == true { return }
+        }
+    }
 
     /// Folders macOS asked the app to open (as the default file browser, Open With, `open -a`),
     /// or items to reveal. Returns false when there's no window to show them in yet.

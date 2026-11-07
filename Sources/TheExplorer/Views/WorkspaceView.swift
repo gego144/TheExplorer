@@ -284,8 +284,9 @@ private struct DividerGrip: NSViewRepresentable {
     }
 }
 
-/// One side of a split tab: a slim header saying where it is (bright when it's the active
-/// pane), then the pane's own list.
+/// One side of a split tab: a slim header saying where it is, then the pane's own list. The
+/// active pane's header is raised like the selected tab; the other pane's list is dimmed, so
+/// which side you're working in reads at a glance.
 private struct SplitPane<Content: View>: View {
     let model: BrowserModel
     let workspace: Workspace
@@ -296,6 +297,7 @@ private struct SplitPane<Content: View>: View {
         VStack(spacing: 0) {
             SplitPaneHeader(model: model, isActive: isActive, onActivate: { activate() }, onClose: { workspace.close(pane: model) })
             content()
+                .overlay(InactivePaneDim(isActive: isActive))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .environment(\.isActivePane, isActive)
@@ -313,6 +315,18 @@ private struct SplitPane<Content: View>: View {
     }
 }
 
+/// Dims the pane you're not working in. Its own view: written inline in the generic SplitPane,
+/// the release build's optimizer ran for over 15 minutes on it.
+private struct InactivePaneDim: View {
+    let isActive: Bool
+
+    var body: some View {
+        Rectangle()
+            .fill(Theme.background.opacity(isActive ? 0 : 0.38))
+            .allowsHitTesting(false)
+    }
+}
+
 private struct SplitPaneHeader: View {
     let model: BrowserModel
     let isActive: Bool
@@ -327,7 +341,7 @@ private struct SplitPaneHeader: View {
                 .foregroundStyle(isActive ? Theme.text : Theme.textTertiary)
             Text(model.title)
                 .font(.system(size: 11.5, weight: .semibold))
-                .foregroundStyle(isActive ? Theme.text : Theme.textSecondary)
+                .foregroundStyle(isActive ? Theme.text : Theme.textTertiary)
                 .lineLimit(1)
             if model.destination == .folder && !model.isSearching {
                 Text(Format.path(model.currentURL.deletingLastPathComponent().path))
@@ -346,10 +360,7 @@ private struct SplitPaneHeader: View {
         }
         .padding(.horizontal, 12)
         .frame(height: 26)
-        .background(isActive ? Theme.surface : Theme.background)
-        .overlay(alignment: .top) {
-            Rectangle().fill(isActive ? Theme.accent.opacity(0.85) : .clear).frame(height: 1.5)
-        }
+        .background(isActive ? Theme.raised : Theme.background)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
         .contentShape(.rect)
         .onTapGesture(perform: onActivate)

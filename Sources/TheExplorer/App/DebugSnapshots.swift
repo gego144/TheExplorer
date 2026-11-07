@@ -205,11 +205,13 @@ enum DebugSnapshots {
             case "newtab": workspace.newTab(URL(fileURLWithPath: argument))
             case "tab": workspace.select((Int(argument) ?? 1) - 1)
             case "omnibox": model.omniboxRequest = OmniboxRequest(text: parts.count > 1 ? parts[1] : "")
-            case "drop":
+            case "drop", "dropother":
                 // drop:<sources, comma-separated>><destination folder>, the same path a real drop
-                // takes. "s3:bucket/key" names an S3 item in the first connection.
+                // takes. "s3:bucket/key" names an S3 item in the first connection. dropother drops
+                // into the split's other pane (the one not active), as a drag across would.
                 let ends = (parts.count > 1 ? parts[1] : "").components(separatedBy: ">")
-                model.receiveDrop(ends[0].split(separator: ",").map { Self.debugURL(String($0)) }, into: Self.debugURL(ends[1]))
+                let target = parts[0] == "dropother" ? workspace.otherPane ?? model : model
+                target.receiveDrop(ends[0].split(separator: ",").map { Self.debugURL(String($0)) }, into: Self.debugURL(ends[1]))
             case "s3":
                 // s3: shows the first connection; s3:bucket/prefix/ a folder in it.
                 // The raw argument: tilde expansion would drop the trailing "/" that marks a folder.
@@ -817,8 +819,16 @@ enum DebugSnapshots {
     /// capturing your own windows needs no Screen Recording permission.
     private static func capture(to path: String) {
         // The frontmost of the app's windows (e.g. Settings once it's open).
-        guard let window = NSApp.orderedWindows.first(where: { $0.isVisible && $0.contentView != nil }),
-              let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGWindowListCreateImage") else { return }
+        guard let window = NSApp.orderedWindows.first(where: { $0.isVisible && $0.contentView != nil }) else { return }
+        // EXPLORER_CAPTURE_VIEW=1 has the window draw itself instead: the window server gives
+        // back blank images while the displays sleep.
+        if ProcessInfo.processInfo.environment["EXPLORER_CAPTURE_VIEW"] != nil, let view = window.contentView,
+           let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+            view.cacheDisplay(in: view.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+            return
+        }
+        guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGWindowListCreateImage") else { return }
         let create = unsafeBitCast(symbol, to: WindowImageFn.self)
         // kCGWindowListOptionIncludingWindow = 8, kCGWindowImageBoundsIgnoreFraming = 1
         guard let image = create(.null, 8, UInt32(window.windowNumber), 1)?.takeRetainedValue() else { return }
