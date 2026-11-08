@@ -384,10 +384,13 @@ struct DriveUsageIndicator: View {
 
     var body: some View {
         if let usage = DriveStore.shared.usage[accountID] {
-            Text("Google Drive").foregroundStyle(Theme.textSecondary)
+            Text("Google Drive").foregroundStyle(Theme.textTertiary)
             if let limit = usage.limit {
-                HeatBar(fraction: Double(usage.usage) / Double(max(limit, 1)), height: 4, color: Theme.accent)
-                    .frame(width: 110)
+                // As the disk's bar looks: quiet while there's room, amber past nine tenths.
+                let fraction = Double(usage.usage) / Double(max(limit, 1))
+                HeatBar(fraction: fraction, height: 4, color: fraction > 0.9 ? Theme.warning : Theme.textSecondary,
+                        track: Theme.border.mix(with: Theme.textTertiary, by: 0.5))
+                    .frame(width: 96)
                 Text("\(DriveAbout.format(max(0, limit - usage.usage))) free")
                     .font(Theme.mono)
                     .foregroundStyle(Theme.textSecondary)

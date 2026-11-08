@@ -366,9 +366,6 @@ private final class SidebarList: NSView, NSDraggingSource {
             }
             items.append(row)
         }
-        if let volume = model.volume, model.destination == .folder {
-            items.append(SidebarItem(kind: .hint, title: "\(Format.bytes(volume.available)) available"))
-        }
         return items
     }
 
