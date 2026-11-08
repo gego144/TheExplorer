@@ -7,26 +7,44 @@ struct SettingsView: View {
     @Bindable private var prefs = Prefs.shared
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(spacing: 0) {
+            // The tabs stay put; what's under them scrolls once it's taller than the screen allows.
             Segmented(selection: $prefs.settingsTab, options: [(.general, "General"), (.actions, "Actions"), (.openWith, "Open With"),
                                                                (.cloud, "Cloud"), (.shortcuts, "Shortcuts")])
                 .fixedSize()
                 .frame(maxWidth: .infinity)
-            switch prefs.settingsTab {
-            case .general: general
-            case .actions: ActionsSettings()
-            case .openWith: OpenWithSettings()
-            case .cloud: CloudSettings()
-            case .shortcuts: ShortcutsSettings()
+                .padding(.top, 14)
+                .padding(.bottom, 14)
+            Rectangle().fill(Theme.border).frame(height: 1)
+            FittedScroll(maxHeight: Self.maxContentHeight) {
+                Group {
+                    switch prefs.settingsTab {
+                    case .general: general
+                    case .actions: ActionsSettings()
+                    case .openWith: OpenWithSettings()
+                    case .cloud: CloudSettings()
+                    case .shortcuts: ShortcutsSettings()
+                    }
+                }
+                .padding(20)
             }
         }
         .toggleStyle(WorkbenchSwitchStyle())
         .controlSize(.small)
-        .padding(20)
-        .frame(width: 520)
+        .frame(width: 540)
         .fixedSize(horizontal: false, vertical: true)
         .background(Theme.background)
         .preferredColorScheme(Theme.colorScheme)
+    }
+
+    /// " (⌃⌘T)": a command's keys as they are now (they can be changed), or `fallback` without any.
+    private static func keys(_ command: ShortcutCommand, or fallback: String = "") -> String {
+        Shortcuts.shared.shortcut(command).map { " (\($0.display))" } ?? fallback
+    }
+
+    /// As tall as the screen comfortably allows, under the title bar and tabs.
+    private static var maxContentHeight: CGFloat {
+        min(660, max(360, (NSScreen.main?.visibleFrame.height ?? 800) - 160))
     }
 
     private var general: some View {
@@ -36,7 +54,7 @@ struct SettingsView: View {
             }
 
             section("Default file browser") {
-                SettingRow("“Show in Finder” opens", hint: "Where other apps’ “Show in Finder” and “Reveal” buttons show files. Applies right away.") {
+                SettingRow("“Show in Finder” opens", hint: "Where other apps’ “Show in Finder” buttons take you.") {
                     FileViewerPicker(prefs: prefs)
                 }
                 RowDivider()
@@ -54,13 +72,13 @@ struct SettingsView: View {
             }
 
             section("Terminal") {
-                SettingRow("Open folders in", hint: "Used by Open in Terminal (⌃⌘T) and the right-click menus.") {
+                SettingRow("Open folders in", hint: "For Open in Terminal\(Self.keys(.openInTerminal)) and the right-click menu.") {
                     TerminalPicker(selection: $prefs.terminalID)
                 }
             }
 
             section("Search") {
-                SettingRow("Index", hint: "Your home folder, Applications, iCloud Drive and cloud storage, kept current as files change. Library, hidden folders, the insides of apps, folders like node_modules and anything a project’s .gitignore lists are left out.") {
+                SettingRow("Index", hint: "Your home folder, Applications and cloud drives, kept current. Library, hidden and dependency folders are left out.") {
                     SearchIndexStatus()
                 }
             }
@@ -72,7 +90,7 @@ struct SettingsView: View {
             }
 
             section("Browsing defaults") {
-                SettingRow("Sort by", hint: "New tabs start with this order; click a column header to change it per tab.") {
+                SettingRow("Sort by", hint: "For new tabs. A column header changes one tab.") {
                     HStack(spacing: 6) {
                         ChromeMenu {
                             Picker("Sort by", selection: $prefs.defaultSort.key) {
@@ -91,7 +109,7 @@ struct SettingsView: View {
                 RowDivider()
                 SettingRow("Folders first") { Toggle("", isOn: $prefs.foldersFirst).labelsHidden() }
                 RowDivider()
-                SettingRow("Show hidden files", hint: "⇧⌘. toggles this in any tab.") {
+                SettingRow("Show hidden files", hint: "Switch it in any tab with\(Self.keys(.toggleHidden, or: " View › Show Hidden Files")).") {
                     Toggle("", isOn: $prefs.showHidden).labelsHidden()
                 }
             }
@@ -108,7 +126,7 @@ struct SettingsView: View {
                     }
                 }
                 RowDivider()
-                SettingRow("Hide clutter", hint: "Leaves out Library, hidden folders and dependency folders like node_modules.") {
+                SettingRow("Hide clutter", hint: "Leaves out Library, hidden and dependency folders.") {
                     Toggle("", isOn: $prefs.newHidesClutter).labelsHidden()
                 }
             }
@@ -117,21 +135,21 @@ struct SettingsView: View {
 
     private var folderOpenerHint: String {
         if prefs.folderOpenerID.caseInsensitiveCompare(FolderHandler.thisAppID) == .orderedSame {
-            return "Folders opened from other apps, the Dock and Spotlight open here."
+            return "Folders from other apps, the Dock and Spotlight open here."
         }
-        return "macOS keeps Finder for folders opened from other apps, the Dock and Spotlight, and doesn’t let other apps take that over. To open a folder here from Finder, right-click it and choose Open With › TheExplorer."
+        return "macOS keeps folders from the Dock and Spotlight in Finder."
     }
 
     private var takeoverHint: String {
         if prefs.takeOverFinder && FinderTakeover.shared.isDenied {
-            return "macOS hasn’t let TheExplorer control Finder. Turn it on in System Settings › Privacy & Security › Automation › TheExplorer › Finder."
+            return "Allow it in System Settings › Privacy & Security › Automation."
         }
-        return "For folders macOS still opens in Finder (the Dock, Spotlight, downloads and attachments): their Finder windows close and the folder opens here, with the same files selected. Windows like AirDrop stay in Finder. macOS asks once to let TheExplorer control Finder."
+        return "When macOS opens a folder in Finder anyway, it moves here."
     }
 
     private var startHint: String {
         switch prefs.startLocation {
-        case .lastFolder: "Wherever you were last. Windows open at launch restore their own tabs."
+        case .lastFolder: "Wherever you were last."
         case .home: "Your home folder."
         case .custom: Format.path(prefs.startFolder)
         }
@@ -182,6 +200,31 @@ private struct SearchIndexStatus: View {
     }
 }
 
+/// A scroll view as tall as what's in it, up to `maxHeight`: short tabs stay short, long ones scroll.
+private struct FittedScroll<Content: View>: View {
+    let maxHeight: CGFloat
+    @ViewBuilder let content: Content
+    @State private var height: CGFloat = 0
+
+    var body: some View {
+        ScrollView {
+            content
+                .background(GeometryReader { geometry in
+                    Color.clear.preference(key: ContentHeight.self, value: geometry.size.height)
+                })
+                .thinScrollers()
+        }
+        .scrollIndicators(.automatic)
+        .frame(height: min(max(height, 1), maxHeight))
+        .onPreferenceChange(ContentHeight.self) { height = $0 }
+    }
+}
+
+private struct ContentHeight: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
 private struct RowDivider: View {
     var body: some View {
         Rectangle().fill(Theme.border).frame(height: 1).padding(.leading, 12)
@@ -204,11 +247,11 @@ private struct SettingRow<Control: View>: View {
         HStack(alignment: .center, spacing: 16) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 12.5, weight: .medium))
+                    .font(.system(size: 13))
                     .foregroundStyle(Theme.text)
                 if let hint {
                     Text(hint)
-                        .font(.system(size: 11))
+                        .font(.system(size: 11.5))
                         .foregroundStyle(Theme.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }

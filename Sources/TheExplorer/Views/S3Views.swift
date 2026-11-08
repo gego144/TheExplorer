@@ -503,7 +503,7 @@ struct CloudSettings: View {
                 if store.connections.isEmpty {
                     VStack(spacing: 6) {
                         Text("No connections yet").font(.system(size: 12.5, weight: .medium))
-                        Text("Connect S3 to browse your buckets in the sidebar, drop files on them to upload, and drag them out to download. Your AWS CLI profiles work as they are.")
+                        Text("Browse buckets in the sidebar, drop files on them to upload, drag them out to download.")
                             .font(.system(size: 11))
                             .foregroundStyle(Theme.textTertiary)
                             .multilineTextAlignment(.center)
@@ -534,7 +534,7 @@ struct CloudSettings: View {
                 }
             }
             .panel(padding: 0)
-            Text("Profiles read ~/.aws like the AWS CLI does (SSO and roles work through the CLI). Access keys are kept in your Keychain.")
+            Text("Uses your AWS CLI profiles (~/.aws). Access keys are kept in your Keychain.")
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)

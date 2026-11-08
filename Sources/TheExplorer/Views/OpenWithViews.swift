@@ -116,7 +116,7 @@ struct OpenWithSettings: View {
                     VStack(spacing: 6) {
                         Text("Files open in their macOS default app")
                             .font(.system(size: 12.5, weight: .medium))
-                        Text("Add a rule to open types like png or mp4 in an app you choose, or right-click a file › Open With › Always Open With.")
+                        Text("Add a rule, or right-click a file › Open With › Always Open With.")
                             .font(.system(size: 11))
                             .foregroundStyle(Theme.textTertiary)
                             .multilineTextAlignment(.center)
@@ -132,7 +132,7 @@ struct OpenWithSettings: View {
                 }
             }
             .panel(padding: 0)
-            Text("Rules apply when you open files from TheExplorer (double-click, Return or ⌘↓). Other apps, and Finder, keep using the macOS defaults. Separate types with commas.")
+            Text("For files opened from TheExplorer. Separate types with commas.")
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)

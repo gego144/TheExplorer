@@ -458,7 +458,7 @@ struct DriveSettings: View {
                     if store.accounts.isEmpty && signIn == nil {
                         VStack(spacing: 6) {
                             Text("No accounts yet").font(.system(size: 12.5, weight: .medium))
-                            Text("Add your Google account to browse Drive in the sidebar, drop files on it to upload, and drag them out to download.")
+                            Text("Browse Drive in the sidebar, drop files on it to upload, drag them out to download.")
                                 .font(.system(size: 11))
                                 .foregroundStyle(Theme.textTertiary)
                                 .multilineTextAlignment(.center)
@@ -494,7 +494,7 @@ struct DriveSettings: View {
                     .foregroundStyle(Theme.danger)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Text("Sign-ins and the client secret are kept in your Keychain. Removing an account signs it out with Google too.")
+            Text("Sign-ins are kept in your Keychain. Removing an account signs it out with Google too.")
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)

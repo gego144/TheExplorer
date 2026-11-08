@@ -315,15 +315,14 @@ struct Segmented<Value: Hashable>: View {
     }
 }
 
-/// Uppercase section caption ("PINNED", "VIEWS"…).
+/// A section heading, in sentence case ("Appearance", "S3 connections").
 struct SectionCaption: View {
     let title: String
 
     var body: some View {
-        Text(title.uppercased())
-            .font(.system(size: 9.5, weight: .semibold))
-            .tracking(0.8)
-            .foregroundStyle(Theme.textTertiary)
+        Text(title)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(Theme.textSecondary)
     }
 }
 
@@ -362,12 +361,11 @@ struct HeatBar: View {
 }
 
 extension View {
-    /// Rounded card surface used for the inspector and panels.
+    /// A group of rows (settings, the inspector's cards): a lifted fill, no outline.
     func panel(padding: CGFloat = 12) -> some View {
         self
             .padding(padding)
             .background(Theme.surface, in: .rect(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.border))
     }
 }
 

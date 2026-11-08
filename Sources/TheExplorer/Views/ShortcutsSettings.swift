@@ -59,6 +59,7 @@ struct ShortcutsSettings: View {
                     }
                 }
                 .padding(.bottom, 4)
+                .thinScrollers()
             }
             .scrollIndicators(.automatic)
             .frame(height: 460)

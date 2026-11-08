@@ -233,7 +233,7 @@ struct ActionsSettings: View {
                     VStack(spacing: 6) {
                         Text("No actions yet")
                             .font(.system(size: 12.5, weight: .medium))
-                        Text("An action is a shell command you can run on files from the right-click menu, like turning a video into an HLS stream with ffmpeg.")
+                        Text("A shell command to run on files from the right-click menu.")
                             .font(.system(size: 11))
                             .foregroundStyle(Theme.textTertiary)
                             .multilineTextAlignment(.center)
@@ -251,7 +251,7 @@ struct ActionsSettings: View {
                 }
             }
             .panel(padding: 0)
-            Text("Run them from the right-click menu or the Actions menu (⌃⌥1–9 for the first nine). Commands run in zsh in the item’s folder, with your login profile, so tools like ffmpeg from Homebrew work.")
+            Text("From the right-click menu or the Actions menu (⌃⌥1–9 for the first nine). They run in zsh, in the item’s folder.")
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)

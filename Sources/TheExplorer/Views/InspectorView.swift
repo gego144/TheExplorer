@@ -280,20 +280,22 @@ private struct MultipleSelectionSummary: View {
         let folderBytes = folders.compactMap { sizes.size(for: $0.path)?.bytes }.reduce(0, +)
         let pending = folders.contains { sizes.size(for: $0.path) == nil }
 
-        VStack(alignment: .leading, spacing: 10) {
+        let files = items.count - folders.count
+        VStack(alignment: .leading, spacing: 4) {
             Text("\(urls.count) selected")
                 .font(.system(size: 14, weight: .semibold))
-            Text("\(folders.count) dirs · \(items.count - folders.count) files")
-                .font(Theme.mono)
-                .foregroundStyle(Theme.textSecondary)
+            // As the single-item card's line under the name: what they are, and their size.
             HStack(spacing: 6) {
-                Text(Format.bytes(fileBytes + folderBytes))
-                    .font(.system(size: 18, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(Theme.accent)
+                Text([folders.isEmpty ? nil : "\(folders.count) \(folders.count == 1 ? "folder" : "folders")",
+                      files == 0 ? nil : "\(files) \(files == 1 ? "file" : "files")",
+                      Format.bytes(fileBytes + folderBytes)].compactMap { $0 }.joined(separator: " · "))
+                    .font(.system(size: 12).monospacedDigit())
+                    .foregroundStyle(Theme.textSecondary)
                 if pending { ProgressView().controlSize(.mini) }
             }
-            Button("Copy Paths") { FileActions.copyPaths(urls) }
+            Button("Copy paths") { FileActions.copyPaths(urls) }
                 .buttonStyle(SubtleButtonStyle())
+                .padding(.top, 10)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .task(id: urls) {

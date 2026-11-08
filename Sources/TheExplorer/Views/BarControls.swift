@@ -486,3 +486,31 @@ final class ThinScroller: NSScroller {
         needsDisplay = true
     }
 }
+
+extension View {
+    /// Gives the SwiftUI scroll view this sits in the app's thin scroll bar (SwiftUI offers no
+    /// way to choose one, and the wide "always show" bar looks out of place).
+    func thinScrollers() -> some View {
+        background(ThinScrollerInstaller().frame(width: 0, height: 0))
+    }
+}
+
+private struct ThinScrollerInstaller: NSViewRepresentable {
+    func makeNSView(context: Context) -> Installer { Installer() }
+    func updateNSView(_ view: Installer, context: Context) {}
+
+    final class Installer: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            // Once SwiftUI has put it inside its scroll view.
+            DispatchQueue.main.async { [weak self] in
+                guard let scroll = self?.enclosingScrollView, !(scroll.verticalScroller is ThinScroller) else { return }
+                scroll.verticalScroller = ThinScroller()
+                // Swapped in after SwiftUI laid it out: place and draw the new one.
+                scroll.tile()
+                scroll.reflectScrolledClipView(scroll.contentView)
+                scroll.verticalScroller?.needsDisplay = true
+            }
+        }
+    }
+}
