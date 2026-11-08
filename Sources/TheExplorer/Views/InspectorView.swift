@@ -126,8 +126,8 @@ private struct ItemDetails: View {
                     }
                     if let summary = media?.summary {
                         Text(summary)
-                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(Theme.accent)
+                            .font(.system(size: 12).monospacedDigit())
+                            .foregroundStyle(Theme.textSecondary)
                             .lineLimit(1)
                     }
                 }
@@ -208,12 +208,12 @@ private struct ItemDetails: View {
         if item.isFolder {
             let size = sizes.size(for: item.path)
             HStack {
-                Text("size").foregroundStyle(Theme.textTertiary)
+                Text("Size").foregroundStyle(Theme.textTertiary)
                 Spacer()
                 if let size {
                     Text((size.complete ? "" : "≥ ") + Format.bytes(size.bytes))
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(Theme.accent)
+                        .font(.system(size: 12, weight: .medium).monospacedDigit())
+                        .foregroundStyle(Theme.text)
                     Button {
                         sizes.request([item.path], force: true)
                     } label: {
@@ -256,11 +256,11 @@ private struct DetailRow: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(label).foregroundStyle(Theme.textTertiary)
+            Text(label.prefix(1).uppercased() + label.dropFirst()).foregroundStyle(Theme.textTertiary)
             Spacer(minLength: 10)
             Text(value)
-                .font(.system(size: 11.5, weight: emphasized ? .semibold : .regular, design: .monospaced))
-                .foregroundStyle(emphasized ? Theme.accent : Theme.text)
+                .font(.system(size: 12, weight: emphasized ? .medium : .regular).monospacedDigit())
+                .foregroundStyle(Theme.text)
                 .lineLimit(1)
                 .truncationMode(.middle)
         }

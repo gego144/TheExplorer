@@ -114,7 +114,7 @@ private struct TileView: View {
                 .overlay(alignment: .bottomTrailing) {
                     if showsPercent {
                         Text(Format.percent(tile.size, of: total))
-                            .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 18, weight: .semibold).monospacedDigit())
                             .foregroundStyle(color.opacity(0.55))
                             .padding(8)
                     }

@@ -364,10 +364,10 @@ struct DriveInspector: View {
 
     private func detail(_ label: String, _ value: String) -> some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(label).foregroundStyle(Theme.textTertiary)
+            Text(label.prefix(1).uppercased() + label.dropFirst()).foregroundStyle(Theme.textTertiary)
             Spacer(minLength: 10)
             Text(value)
-                .font(.system(size: 11.5, design: .monospaced))
+                .font(.system(size: 12).monospacedDigit())
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .textSelection(.enabled)

@@ -128,7 +128,7 @@ private struct VolumeSummary: View {
                     .foregroundStyle(Theme.textSecondary)
                 Spacer()
                 Text("\(Format.bytes(volume.available)) free")
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 12.5, weight: .semibold).monospacedDigit())
                     .foregroundStyle(Theme.accent)
             }
             GeometryReader { proxy in
@@ -212,7 +212,7 @@ private struct ScanProgressView: View {
                                 Spacer(minLength: 12)
                                 HeatBar(fraction: Double(folder.bytes) / Double(largest), height: 4, width: 130)
                                 Text(Format.bytes(folder.bytes))
-                                    .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
+                                    .font(.system(size: 12, weight: .medium).monospacedDigit())
                                     .frame(width: 78, alignment: .trailing)
                             }
                             .padding(.horizontal, 8)
@@ -350,7 +350,7 @@ private struct StorageRow: View {
                 .foregroundStyle(Theme.textSecondary)
                 .frame(width: 46, alignment: .trailing)
             Text(Format.bytes(node.size))
-                .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
+                .font(.system(size: 12, weight: .medium).monospacedDigit())
                 .frame(width: 78, alignment: .trailing)
         }
         .padding(.horizontal, 8)
