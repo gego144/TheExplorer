@@ -272,7 +272,8 @@ struct CrumbStyle: ButtonStyle {
                 .lineLimit(1)
                 .padding(.horizontal, 6)
                 .frame(height: Theme.smallControlHeight)
-                .foregroundStyle(isCurrent || hovering || highlighted ? Theme.text : Theme.textSecondary)
+                // Parents a clear step under the current folder, as the local path's crumbs are.
+                .foregroundStyle(isCurrent || hovering || highlighted ? Theme.text : Theme.textSecondary.mix(with: Theme.text, by: 0.4))
                 .background(fill(hovering, pressed: configuration.isPressed), in: .rect(cornerRadius: Theme.chipRadius))
                 .overlay {
                     if highlighted {

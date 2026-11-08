@@ -58,12 +58,14 @@ final class PathCrumbsView: NSView {
     private let slashFont = NSFont.systemFont(ofSize: 12)
     private lazy var colors = Colors()
 
+    /// Parents a clear step under the folder you're in, which sits on a raised fill like the
+    /// selected tab; a crumb you point at gets a fill you can see.
     private struct Colors {
         let text = NSColor(Theme.text)
-        let secondary = NSColor(Theme.textSecondary)
-        let slash = NSColor(Theme.textTertiary).withAlphaComponent(0.7)
+        let secondary = NSColor(Theme.textSecondary).blended(withFraction: 0.4, of: NSColor(Theme.text)) ?? NSColor(Theme.textSecondary)
+        let slash = NSColor(Theme.textTertiary)
         let raised = NSColor(Theme.raised)
-        let hover = NSColor(Theme.colors.hoverFill)
+        let hover = NSColor(Theme.colors.raisedHover)
         let pressed = NSColor(Theme.colors.pressedFill)
         let accent = NSColor(Theme.accent).withAlphaComponent(0.7)
     }
@@ -156,7 +158,7 @@ final class PathCrumbsView: NSView {
 
     private func drawChip(index: Int, rect: NSRect, current: Bool) {
         let fill: NSColor? = pressed == index ? colors.pressed
-            : (hovered == index || dropTarget == index ? colors.hover : nil)
+            : (hovered == index || dropTarget == index ? colors.hover : (current ? colors.raised : nil))
         let shape = NSBezierPath(roundedRect: rect, xRadius: Theme.chipRadius, yRadius: Theme.chipRadius)
         if let fill {
             fill.setFill()
