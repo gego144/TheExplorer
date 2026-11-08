@@ -334,6 +334,16 @@ final class SubtleButton: NSView {
 final class QuietButton: NSView {
     var title: String { didSet { if title != oldValue { invalidateIntrinsicContentSize(); needsDisplay = true } } }
     var isOn = false { didSet { if isOn != oldValue { needsDisplay = true } } }
+    /// False makes it a plain label: quiet text, no hover, no pointing hand, clicks go through
+    /// to what's under it. For a word that says something but offers no choice.
+    var isInteractive = true {
+        didSet {
+            guard isInteractive != oldValue else { return }
+            hovering = false
+            needsDisplay = true
+            window?.invalidateCursorRects(for: self)
+        }
+    }
     var action: () -> Void = {}
     var popUpMenu: (() -> NSMenu)?
 
@@ -363,6 +373,10 @@ final class QuietButton: NSView {
     var width: CGFloat { ceil(TextLines.shared.line(title, font: font, color: theme.text).width) + 20 }
 
     override func draw(_ dirtyRect: NSRect) {
+        guard isInteractive else {
+            FileCellView.drawText(title, font: font, color: theme.textTertiary, x: 0, midY: bounds.midY, width: bounds.width, alignment: .center)
+            return
+        }
         if pressed || hovering || isOn {
             (pressed ? pressedFill : (hovering ? theme.raisedHover : raised)).setFill()
             NSBezierPath(roundedRect: bounds, xRadius: Theme.controlRadius, yRadius: Theme.controlRadius).fill()
@@ -381,18 +395,22 @@ final class QuietButton: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) {
+        guard isInteractive else { return }
         hovering = true
         needsDisplay = true
     }
 
     override func mouseExited(with event: NSEvent) {
-        hovering = HoverPreview.on
+        hovering = HoverPreview.on && isInteractive
         needsDisplay = true
     }
 
-    override func cursorUpdate(with event: NSEvent) { NSCursor.pointingHand.set() }
+    override func cursorUpdate(with event: NSEvent) {
+        (isInteractive ? NSCursor.pointingHand : NSCursor.arrow).set()
+    }
 
     override func mouseDown(with event: NSEvent) {
+        guard isInteractive else { return super.mouseDown(with: event) }
         if let popUpMenu {
             popUpMenu().popUp(positioning: nil, at: NSPoint(x: 0, y: bounds.maxY + 4), in: self)
             hovering = false

@@ -39,7 +39,7 @@ final class PathBarView: NSView, NSTextFieldDelegate {
         self.values = values
         back = BarButton("chevron.left", style: .ghost, size: 11, weight: .semibold, help: "Back (⌘[)", theme: theme)
         forward = BarButton("chevron.right", style: .ghost, size: 11, weight: .semibold, help: "Forward (⌘])", theme: theme)
-        scopeButton = QuietButton("", help: "Where to search", theme: theme)
+        scopeButton = QuietButton("", help: "Where Find searches", theme: theme)
         clearButton = BarButton("xmark", style: .ghost, size: 9, weight: .bold, help: "Clear (esc)", theme: theme)
         super.init(frame: .zero)
         back.action = { [weak workspace] in workspace?.selected.goBack() }
@@ -105,6 +105,14 @@ final class PathBarView: NSView, NSTextFieldDelegate {
         let choosable = model.destination == .folder
         scopeButton.title = "in " + scope + (choosable ? " ▾" : "")
         scopeButton.popUpMenu = choosable ? { [weak self] in self?.scopeMenu() ?? NSMenu() } : nil
+        // Only a choice looks like a button; Drive's and S3's scope just says where.
+        scopeButton.isInteractive = choosable
+        scopeButton.toolTip = switch model.destination {
+        case .folder: "Search this folder and everything in it, or everywhere on your Mac"
+        case .drive: "Google Drive's search covers your whole account: names, and the text inside documents"
+        case .s3: model.s3.location?.bucket == nil ? "Searches every file in every bucket" : "Searches every file in this folder and below"
+        default: "Searches everywhere on your Mac"
+        }
         scopeButton.isOn = false
         let key = ObjectIdentifier(model)
         let request = model.findFocusRequest
