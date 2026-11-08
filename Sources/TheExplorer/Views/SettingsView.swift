@@ -2,13 +2,14 @@ import SwiftUI
 
 /// Settings (⌘,). General: the color theme, the default file browser, the terminal to open folders in, where new
 /// windows start, and the defaults new tabs begin with. Actions: your shell commands for files.
-/// Open With: the apps that open file types from TheExplorer.
+/// Open With: the apps that open file types from TheExplorer. Shortcuts: the menus' keys, changeable.
 struct SettingsView: View {
     @Bindable private var prefs = Prefs.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Segmented(selection: $prefs.settingsTab, options: [(.general, "General"), (.actions, "Actions"), (.openWith, "Open With"), (.cloud, "Cloud")])
+            Segmented(selection: $prefs.settingsTab, options: [(.general, "General"), (.actions, "Actions"), (.openWith, "Open With"),
+                                                               (.cloud, "Cloud"), (.shortcuts, "Shortcuts")])
                 .fixedSize()
                 .frame(maxWidth: .infinity)
             switch prefs.settingsTab {
@@ -16,6 +17,7 @@ struct SettingsView: View {
             case .actions: ActionsSettings()
             case .openWith: OpenWithSettings()
             case .cloud: CloudSettings()
+            case .shortcuts: ShortcutsSettings()
             }
         }
         .toggleStyle(WorkbenchSwitchStyle())

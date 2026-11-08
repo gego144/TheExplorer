@@ -196,6 +196,8 @@ For the storage scan to include protected folders like Mail and Messages, grant 
 
 ## Keyboard shortcuts
 
+These are the defaults. Settings › Shortcuts changes any menu command's keys: click a shortcut and press new ones (esc cancels, ⌫ leaves the command without one). Keys another command had move over, and the page says which command lost them; the arrow beside a changed shortcut puts it back, and Restore Defaults puts them all back. Letters, numbers and symbols need ⌘ or ⌃, so typing still works. Undo, cut, copy, paste, select all, ⌘1–⌘9 for tabs, and the keys the list handles itself (Space, Return, the arrows, Tab) stay as they are.
+
 | Action | Shortcut |
 | --- | --- |
 | New tab / Close tab (or the active pane) | ⌘T / ⌘W |

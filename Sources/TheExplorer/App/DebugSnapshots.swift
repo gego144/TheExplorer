@@ -570,6 +570,34 @@ enum DebugSnapshots {
                     let tail = run.output.split(separator: "\n").suffix(2).joined(separator: " ⏎ ")
                     log("run \(run.name): \(run.state) \(run.completed)/\(run.total) items=\(run.items.map(\.lastPathComponent)) output=\(tail.prefix(240))")
                 }
+            case "setshortcut":
+                // setshortcut:<command>=<keys> changes a shortcut as Settings › Shortcuts does, e.g.
+                // setshortcut:find=cmd+e; "=none" leaves it without one, "=default" resets it.
+                // Changes are saved, so a run that changes one should end with setshortcut:all=default.
+                let pieces = argument.components(separatedBy: "=")
+                if pieces.first == "all" {
+                    Shortcuts.shared.resetAll()
+                } else if let command = ShortcutCommand(rawValue: pieces[0]), pieces.count == 2 {
+                    if pieces[1] == "default" {
+                        Shortcuts.shared.reset(command)
+                    } else if pieces[1] == "none" {
+                        Shortcuts.shared.set(nil, for: command)
+                    } else {
+                        let parts = pieces[1].lowercased().split(separator: "+").map(String.init)
+                        let shortcut = Shortcut(key: parts.last ?? "", command: parts.contains("cmd"), shift: parts.contains("shift"),
+                                                option: parts.contains("opt"), control: parts.contains("ctrl"))
+                        let taken = Shortcuts.shared.set(shortcut, for: command)
+                        log("\(scene): \(command.title) is \(shortcut.display)\(taken.map { ", taken from \($0.title)" } ?? "")")
+                    }
+                }
+            case "recordshortcut":
+                // recordshortcut:<command> starts recording its keys, as clicking it in Settings ›
+                // Shortcuts does (the page must be showing); postkey: then presses them.
+                Shortcuts.shared.recording = ShortcutCommand(rawValue: argument)
+            case "postkey":
+                // postkey:<keys> puts a key press in the app's event queue, where a real one arrives,
+                // so event monitors (the shortcut recorder) see it, unlike key:.
+                InputDriver.post(argument)
             case "menu":
                 // Logs a menu bar menu's items: title, enabled, shortcut.
                 let menu = NSApp.mainMenu?.items.first { $0.title == argument }?.submenu
@@ -681,6 +709,7 @@ enum DebugSnapshots {
                     case "actions": .actions
                     case "cloud": .cloud
                     case "openwith": .openWith
+                    case "shortcuts": .shortcuts
                     default: .general
                     }
                 }

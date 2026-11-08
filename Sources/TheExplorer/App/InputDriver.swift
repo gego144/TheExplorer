@@ -36,6 +36,29 @@ enum InputDriver {
         send(characters: characters, keyCode: keyCode, flags: flags)
     }
 
+    /// Like `press`, but through the app's event queue, where a real key press arrives: event
+    /// monitors see it first, as they would yours.
+    static func post(_ spec: String) {
+        var flags: NSEvent.ModifierFlags = []
+        var key = ""
+        for part in spec.lowercased().split(separator: "+") {
+            switch part {
+            case "cmd": flags.insert(.command)
+            case "shift": flags.insert(.shift)
+            case "opt", "alt": flags.insert(.option)
+            case "ctrl": flags.insert(.control)
+            default: key = String(part)
+            }
+        }
+        let (characters, keyCode) = Self.key(key)
+        guard let window = NSApp.keyWindow ?? NSApp.orderedWindows.first,
+              let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags,
+                                           timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                           context: nil, characters: characters, charactersIgnoringModifiers: characters.lowercased(),
+                                           isARepeat: false, keyCode: keyCode) else { return }
+        NSApp.postEvent(event, atStart: false)
+    }
+
     /// Types text into whatever has focus, one key at a time.
     static func type(_ text: String) async {
         for character in text {

@@ -174,6 +174,8 @@ struct ExplorerCommands: Commands {
     private var workspace: Workspace? { focusedWorkspace ?? Session.scriptedWorkspace }
 
     private var model: BrowserModel? { workspace?.selected }
+    /// Read here so a shortcut changed in Settings › Shortcuts updates the menus at once.
+    private var shortcuts: Shortcuts { Shortcuts.shared }
 
     /// Lists make folder URLs with a trailing slash, so files (most of a big selection) are
     /// ruled out without reading the disk. This runs whenever the selection changes.
@@ -184,29 +186,29 @@ struct ExplorerCommands: Commands {
     var body: some Commands {
         CommandGroup(after: .newItem) {
             Button("New Tab") { workspace?.openNewTab() }
-                .keyboardShortcut("t")
+                .keyboardShortcut(shortcuts.keyboardShortcut(.newTab))
             Button("Open in New Tab") {
                 guard let workspace, let model else { return }
                 for url in model.activeSelection.sorted(by: { $0.path < $1.path }) where Self.isFolder(url) {
                     workspace.newTab(url, select: false)
                 }
             }
-            .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+            .keyboardShortcut(shortcuts.keyboardShortcut(.openInNewTab))
             .disabled(!(model?.activeSelection.contains(where: Self.isFolder) ?? false))
             Button(workspace?.isSplit == true ? "Close Pane" : "Close Tab") {
                 guard let workspace else { return }
                 if !workspace.closeActivePaneByHand() { NSApp.keyWindow?.performClose(nil) }
             }
-            .keyboardShortcut("w")
+            .keyboardShortcut(shortcuts.keyboardShortcut(.closeTab))
             Divider()
             Button("New Folder…") { model?.creating = .folder }
-                .keyboardShortcut("n", modifiers: [.command, .shift])
+                .keyboardShortcut(shortcuts.keyboardShortcut(.newFolder))
                 .disabled(!(model?.canCreateItems ?? false))
             Button("New File…") { model?.creating = .file }
-                .keyboardShortcut("n", modifiers: [.command, .option])
+                .keyboardShortcut(shortcuts.keyboardShortcut(.newFile))
                 .disabled(!(model?.canCreateItems ?? false))
             Button(FileActions.openInTerminalTitle) { model.map { FileActions.openInTerminal($0.currentURL) } }
-                .keyboardShortcut("t", modifiers: [.command, .control])
+                .keyboardShortcut(shortcuts.keyboardShortcut(.openInTerminal))
                 .disabled(model?.destination != .folder)
         }
 
@@ -221,26 +223,26 @@ struct ExplorerCommands: Commands {
         CommandGroup(after: .pasteboard) {
             Divider()
             Button("Copy Path") { model.map { FileActions.copyPaths(pathTargets($0)) } }
-                .keyboardShortcut("c", modifiers: [.command, .option])
+                .keyboardShortcut(shortcuts.keyboardShortcut(.copyPath))
             Button("Find") { model?.openFind() }
-                .keyboardShortcut("f")
+                .keyboardShortcut(shortcuts.keyboardShortcut(.find))
             Button("Go Anywhere") { model?.omniboxRequest = OmniboxRequest(text: "") }
-                .keyboardShortcut("k")
+                .keyboardShortcut(shortcuts.keyboardShortcut(.goAnywhere))
         }
 
         CommandMenu("Item") {
             Button("Open") { model?.openSelection() }
-                .keyboardShortcut(.downArrow)
+                .keyboardShortcut(shortcuts.keyboardShortcut(.open))
                 .disabled(model?.activeSelection.isEmpty ?? true)
             Button("Quick Look") { model?.quickLook() }
-                .keyboardShortcut("y")
+                .keyboardShortcut(shortcuts.keyboardShortcut(.quickLook))
             Button("Show in Enclosing Folder") {
                 if let model, let url = model.activeSelection.first { model.reveal(url) }
             }
-            .keyboardShortcut("r")
+            .keyboardShortcut(shortcuts.keyboardShortcut(.showInEnclosingFolder))
             .disabled(model?.activeSelection.count != 1)
             Button(FileActions.revealTitle) { model.map { FileActions.revealInFinder(pathTargets($0)) } }
-                .keyboardShortcut("r", modifiers: [.command, .option])
+                .keyboardShortcut(shortcuts.keyboardShortcut(.revealInFinder))
             Divider()
             Button("Pin / Unpin") {
                 guard let model else { return }
@@ -252,9 +254,9 @@ struct ExplorerCommands: Commands {
                     targets.forEach { store.add($0) }
                 }
             }
-            .keyboardShortcut("d")
+            .keyboardShortcut(shortcuts.keyboardShortcut(.pin))
             Button("Rename…") { model?.beginRename() }
-                .keyboardShortcut(.return, modifiers: [.command, .shift])
+                .keyboardShortcut(shortcuts.keyboardShortcut(.rename))
                 .disabled(!(model?.canRename ?? false))
             Divider()
             Button("Move to Trash") {
@@ -271,37 +273,37 @@ struct ExplorerCommands: Commands {
                     model.trash(model.activeSelection)
                 }
             }
-            .keyboardShortcut(.delete)
+            .keyboardShortcut(shortcuts.keyboardShortcut(.moveToTrash))
             .disabled(model?.activeSelection.isEmpty ?? true)
             Divider()
             // Not disabled ahead of time (the menu bar isn't rebuilt when panes change); they
             // beep when there's no other pane to send to.
             Button("Copy to Other Pane") { sendToOtherPane(.copy) }
-                .keyboardShortcut(Self.functionKey(NSF5FunctionKey), modifiers: [])
+                .keyboardShortcut(shortcuts.keyboardShortcut(.copyToOtherPane))
             Button("Move to Other Pane") { sendToOtherPane(.move) }
-                .keyboardShortcut(Self.functionKey(NSF6FunctionKey), modifiers: [])
+                .keyboardShortcut(shortcuts.keyboardShortcut(.moveToOtherPane))
         }
 
         CommandGroup(after: .sidebar) {
             Button(Prefs.shared.showSidebar ? "Hide Sidebar" : "Show Sidebar") { Prefs.shared.showSidebar.toggle() }
-                .keyboardShortcut("s", modifiers: [.command, .option])
+                .keyboardShortcut(shortcuts.keyboardShortcut(.toggleSidebar))
             Button(Prefs.shared.showInspector ? "Hide Inspector" : "Show Inspector") { Prefs.shared.showInspector.toggle() }
-                .keyboardShortcut("i")
+                .keyboardShortcut(shortcuts.keyboardShortcut(.toggleInspector))
             Button(model?.showHidden == true ? "Hide Hidden Files" : "Show Hidden Files") { model?.showHidden.toggle() }
-                .keyboardShortcut(".", modifiers: [.command, .shift])
+                .keyboardShortcut(shortcuts.keyboardShortcut(.toggleHidden))
             Button("Folders First") { model?.foldersFirst.toggle() }
             Divider()
             Button("as List") { model?.layout = .list }
-                .keyboardShortcut("1", modifiers: [.command, .option])
+                .keyboardShortcut(shortcuts.keyboardShortcut(.asList))
             Button("as Gallery") { model?.layout = .gallery }
-                .keyboardShortcut("2", modifiers: [.command, .option])
+                .keyboardShortcut(shortcuts.keyboardShortcut(.asGallery))
             Button("Bigger Thumbnails") { Self.resizeTiles(by: 1.2) }
-                .keyboardShortcut("=")
+                .keyboardShortcut(shortcuts.keyboardShortcut(.biggerThumbnails))
             Button("Smaller Thumbnails") { Self.resizeTiles(by: 1 / 1.2) }
-                .keyboardShortcut("-")
+                .keyboardShortcut(shortcuts.keyboardShortcut(.smallerThumbnails))
             Divider()
             Button(workspace?.isSplit == true ? "Close Split" : "Split Pane") { workspace?.toggleSplit() }
-                .keyboardShortcut("/")
+                .keyboardShortcut(shortcuts.keyboardShortcut(.splitPane))
             Button("Switch Pane") { paneAction { $0.switchPane() } }
             Button("Swap Panes") { paneAction { $0.swapPanes() } }
             Button("Show Same Folder in Other Pane") { paneAction { $0.showSameFolderInOtherPane() } }
@@ -313,7 +315,7 @@ struct ExplorerCommands: Commands {
                 default: model?.reload(keepSelection: true)
                 }
             }
-                .keyboardShortcut("r", modifiers: [.command, .shift])
+                .keyboardShortcut(shortcuts.keyboardShortcut(.refresh))
             Button("Recalculate Folder Sizes") { model?.recalculateSizes() }
             Divider()
         }
@@ -324,10 +326,10 @@ struct ExplorerCommands: Commands {
 
         CommandMenu("Go") {
             Button("Back") { model?.goBack() }
-                .keyboardShortcut("[")
+                .keyboardShortcut(shortcuts.keyboardShortcut(.back))
                 .disabled(model?.backStack.isEmpty ?? true)
             Button("Forward") { model?.goForward() }
-                .keyboardShortcut("]")
+                .keyboardShortcut(shortcuts.keyboardShortcut(.forward))
                 .disabled(model?.forwardStack.isEmpty ?? true)
             Button("Enclosing Folder") {
                 guard let model else { return }
@@ -337,38 +339,38 @@ struct ExplorerCommands: Commands {
                     model.goUp()
                 }
             }
-            .keyboardShortcut(.upArrow)
+            .keyboardShortcut(shortcuts.keyboardShortcut(.enclosingFolder))
             Divider()
             Button("Recents") { model?.show(.recents) }
-                .keyboardShortcut("f", modifiers: [.command, .shift])
+                .keyboardShortcut(shortcuts.keyboardShortcut(.recents))
             Button("New") { model?.show(.newFiles) }
-                .keyboardShortcut("e", modifiers: [.command, .shift])
+                .keyboardShortcut(shortcuts.keyboardShortcut(.newFiles))
             Button("Storage") { model?.show(.storage) }
-                .keyboardShortcut("b", modifiers: [.command, .shift])
+                .keyboardShortcut(shortcuts.keyboardShortcut(.storage))
             Divider()
             Button("Home") { model?.navigate(to: .home) }
-                .keyboardShortcut("h", modifiers: [.command, .shift])
+                .keyboardShortcut(shortcuts.keyboardShortcut(.home))
             Button("Desktop") { go(.desktopDirectory) }
-                .keyboardShortcut("d", modifiers: [.command, .shift])
+                .keyboardShortcut(shortcuts.keyboardShortcut(.desktop))
             Button("Documents") { go(.documentDirectory) }
-                .keyboardShortcut("o", modifiers: [.command, .shift])
+                .keyboardShortcut(shortcuts.keyboardShortcut(.documents))
             Button("Downloads") { go(.downloadsDirectory) }
-                .keyboardShortcut("l", modifiers: [.command, .option])
+                .keyboardShortcut(shortcuts.keyboardShortcut(.downloads))
             Button("Applications") { model?.navigate(to: URL(fileURLWithPath: "/Applications")) }
-                .keyboardShortcut("a", modifiers: [.command, .shift])
+                .keyboardShortcut(shortcuts.keyboardShortcut(.applications))
             RecentFoldersMenu(model: model)
             Divider()
             Button("Go to Path…") { goToPath() }
-                .keyboardShortcut("l")
+                .keyboardShortcut(shortcuts.keyboardShortcut(.goToPath))
             Button("Go to Folder…") { goToPath() }
-                .keyboardShortcut("g", modifiers: [.command, .shift])
+                .keyboardShortcut(shortcuts.keyboardShortcut(.goToFolder))
         }
 
         CommandGroup(before: .windowArrangement) {
             Button("Next Tab") { workspace?.pickNextTab() }
-                .keyboardShortcut(.tab, modifiers: .control)
+                .keyboardShortcut(shortcuts.keyboardShortcut(.nextTab))
             Button("Previous Tab") { workspace?.pickPreviousTab() }
-                .keyboardShortcut(.tab, modifiers: [.control, .shift])
+                .keyboardShortcut(shortcuts.keyboardShortcut(.previousTab))
             ForEach(1..<10) { number in
                 Button(number == 9 ? "Last Tab" : "Tab \(number)") {
                     guard let workspace else { return }
@@ -404,9 +406,6 @@ struct ExplorerCommands: Commands {
         Prefs.shared.galleryTileSize = min(range.upperBound, max(range.lowerBound, (Prefs.shared.galleryTileSize * factor).rounded()))
     }
 
-    static func functionKey(_ key: Int) -> KeyEquivalent {
-        KeyEquivalent(Unicode.Scalar(UInt16(key)).map(Character.init) ?? " ")
-    }
 
     private func go(_ directory: FileManager.SearchPathDirectory) {
         if let url = FileManager.default.urls(for: directory, in: .userDomainMask).first {
