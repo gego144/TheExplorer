@@ -2,13 +2,13 @@
 
 Everything TheExplorer does and how to use it. For building and working on the code, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
-**Contents:** [Folder sizes](#real-folder-sizes) · [Paths and search](#one-bar-for-paths-and-search) · [Gallery](#gallery) · [Previews](#previews-and-zip-archives) · [Storage](#storage-map) · [S3](#s3-like-a-folder) · [Google Drive](#google-drive) · [Actions](#actions) · [Recents and New](#recents-and-new) · [Settings](#settings) · [Everything else](#and-the-rest) · [Permissions](#permissions) · [Keyboard shortcuts](#keyboard-shortcuts)
+**Contents:** [Folder sizes](#real-folder-sizes) · [Find and Go anywhere](#find-and-going-anywhere) · [Gallery](#gallery) · [Previews](#previews-and-zip-archives) · [Storage](#storage-map) · [S3](#s3-like-a-folder) · [Google Drive](#google-drive) · [Actions](#actions) · [Recents and New](#recents-and-new) · [Settings](#settings) · [Everything else](#and-the-rest) · [Permissions](#permissions) · [Keyboard shortcuts](#keyboard-shortcuts)
 
 ## Real folder sizes
 
-Every folder's total size is calculated in the background and drawn as a bar, so the heavy folders stand out. Sizes are kept between launches and stay put until something inside the folder changes (FSEvents says what), so a big folder is only walked again when it needs to be, and at most every few minutes if it never stops changing. Type chips (`DIR`, `SWIFT`, `PDF`, `ZIP`…) tell folders from files at a glance, and you can filter to just folders or just files. Click a folder's arrow (or press →) to expand it in place; double-click still opens it.
+Every folder's total size is calculated in the background, so the heavy folders stand out. Sizes are kept between launches and stay put until something inside the folder changes (FSEvents says what), so a big folder is only walked again when it needs to be, and at most every few minutes if it never stops changing. Each row says what kind of file it is in words, with a small icon tinted by type, and the sort menu (top right) filters to just folders or just files. Click a folder's arrow (or press →) to expand it in place; double-click still opens it.
 
-<img src="docs/screenshots/folder-sizes.png" alt="A folder listing with size bars, type chips and the inspector" width="100%">
+<img src="docs/screenshots/folder-sizes.png" alt="A folder listing with each folder's total size, and the details panel" width="100%">
 
 ## Find, and going anywhere
 
@@ -22,20 +22,20 @@ Search works like a launcher's rather than Spotlight's. TheExplorer keeps its ow
 - **Ranking.** Whole names beat prefixes, prefixes beat word starts, and those beat everything else. Recently opened and recently changed files rise to the top.
 - **Folder words.** Extra words can match the folders a file is in, so `explorer readme` finds the README inside *TheExplorer*.
 - **Recent folders.** TheExplorer learns which folders you work in, the way zoxide does: how often you visit, weighted toward the last hour and day. Passing through a folder doesn't count; staying a moment or opening a file there does. Open ⌘K without typing to see them, or use Go › Recent Folders. They rank higher in search, along with what's in them, so `expl` lands on the project you live in rather than another folder with a similar name, and path completion lists them first.
-- **What's left out.** Library, hidden folders, the insides of apps and packages, dependency folders like `node_modules`, Unity's project caches, and any folder a project's `.gitignore` lists (build output, caches) aren't indexed, though the folders themselves are. Generated hash-named files rank last. To search everything in a folder, go there, show hidden files (⇧⌘.) and search *Here*.
+- **What's left out.** Library, hidden folders, the insides of apps and packages, dependency folders like `node_modules`, Unity's project caches, and any folder a project's `.gitignore` lists (build output, caches) aren't indexed, though the folders themselves are. Generated hash-named files rank last. To search everything in a folder, go there, show hidden files (⇧⌘.) and Find there.
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/screenshots/path-bar.png" alt="Path completion in the command bar"></td>
-    <td width="50%"><img src="docs/screenshots/search.png" alt="Search results with locations"></td>
+    <td width="50%"><img src="docs/screenshots/path-bar.png" alt="Path completion in Go anywhere"></td>
+    <td width="50%"><img src="docs/screenshots/search.png" alt="Find results with where each one is"></td>
   </tr>
   <tr>
     <td align="center"><sub>Jump anywhere with path completion</sub></td>
-    <td align="center"><sub>Search this folder or the whole Mac, typos and all</sub></td>
+    <td align="center"><sub>Find in this folder or the whole Mac, typos and all</sub></td>
   </tr>
 </table>
 
-<img src="docs/screenshots/recent-folders.png" alt="Recent folders listed when the command bar opens" width="100%">
+<img src="docs/screenshots/recent-folders.png" alt="The folders you visit most, listed when Go anywhere opens" width="100%">
 
 ## Gallery
 
@@ -45,7 +45,7 @@ Photos fill their tiles. Videos show how long they are, and folders and other fi
 
 ## Previews and zip archives
 
-Selecting a document, image, PDF, video, audio or code file shows a live preview in the inspector, along with what's inside it:
+Selecting a document, image, PDF, video, audio or code file shows a live preview in the details panel, along with what's inside it:
 - **Images:** dimensions, aspect ratio, color profile, and frame count and length for animations. Camera, lens and exposure appear for photos.
 - **SVGs:** size and viewBox.
 - **Video:** resolution, length, codec (H.264, HEVC, ProRes, AV1…), frame rate, HDR and bitrates.
@@ -65,8 +65,8 @@ For everything else, Space opens Quick Look, and ↑/↓ then step through every
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/screenshots/preview.png" alt="An image previewed in the inspector"></td>
-    <td width="50%"><img src="docs/screenshots/zip.png" alt="A zip archive's contents listed in the inspector"></td>
+    <td width="50%"><img src="docs/screenshots/preview.png" alt="An image previewed in the details panel"></td>
+    <td width="50%"><img src="docs/screenshots/zip.png" alt="A zip archive's contents listed in the details panel"></td>
   </tr>
   <tr>
     <td align="center"><sub>Dimensions, color and more for images</sub></td>
@@ -79,7 +79,7 @@ For everything else, Space opens Quick Look, and ↑/↓ then step through every
 <table>
   <tr>
     <td width="50%"><img src="docs/screenshots/markdown.png" alt="A Markdown file rendered over the window"></td>
-    <td width="50%"><img src="docs/screenshots/json.png" alt="A JSON file as a collapsible tree in the inspector"></td>
+    <td width="50%"><img src="docs/screenshots/json.png" alt="A JSON file as a collapsible tree in the details panel"></td>
   </tr>
   <tr>
     <td align="center"><sub>Markdown, rendered</sub></td>
@@ -103,11 +103,11 @@ Send photos from your iPhone over Wi-Fi, with no cable, iCloud or app to install
 
 ## S3, like a folder
 
-Connect S3 in Settings › Cloud and your buckets show up in the sidebar. Browse them like any folder, with the same list, breadcrumbs, back/forward, filtering and inspector.
+Connect S3 in Settings › Cloud and your buckets show up in the sidebar. Browse them like any folder, with the same list, breadcrumbs, back/forward, filtering and details panel.
 
 - **Upload:** drop files or folders onto an S3 folder, a folder row, a breadcrumb or the sidebar connection. Folders upload with everything in them, and big files upload in parallel parts.
 - **Download:** drag S3 items onto Finder, the desktop, or any folder, tab, sidebar place or breadcrumb in TheExplorer, or right-click › Download. Folders come down with everything in them, and a name that's taken gets a number instead of being overwritten. Double-click opens a file and Space previews it.
-- **Previews:** select a file and the inspector previews it without downloading it: the first 32 KB of text files, a frame from about a second into videos (streamed, so only the start of the video is read), and images and PDFs up to 25 and 20 MB read into memory. Bigger photos show the thumbnail embedded at their start. Space downloads the file for the full Quick Look.
+- **Previews:** select a file and the details panel previews it without downloading it: the first 32 KB of text files, a frame from about a second into videos (streamed, so only the start of the video is read), and images and PDFs up to 25 and 20 MB read into memory. Bigger photos show the thumbnail embedded at their start. Space downloads the file for the full Quick Look.
 - **Share and manage:** right-click to copy an `s3://` URI or a share link that works for 7 days, create folders, or delete.
 - **Progress:** the status bar shows progress with Stop for every transfer.
 - **Credentials:** use your AWS CLI profiles as they are. That includes SSO and assumed roles, through `aws configure export-credentials`. Or add access keys, which are kept in your Keychain.
@@ -131,14 +131,14 @@ Google Drive shows up under Cloud in the sidebar once you've signed in. TheExplo
 - **Browsing:** clicking Google Drive in the sidebar opens My Drive. Under it are Shared with me, Starred and each of your shared drives, a click away; the arrow on the account folds them away. Shortcuts open the folder they point to.
 - **Search:** Find (⌘F) in Drive searches the whole account with Drive's own search. Name matches come back first; files that match only inside follow a moment later.
 - **Upload:** drop files or folders onto a Drive folder, a folder row, a breadcrumb or the sidebar account, or paste. Folders upload with everything in them.
-- **Download:** right-click › Download to Downloads (or the inspector's Download button) saves to your Downloads folder, and Download To… asks where. You can also drag items onto Finder, the desktop or any folder in TheExplorer, or press F5 with a local folder in the other pane. The status bar says where each download went; click it for the list, where Show opens the folder with what arrived selected.
+- **Download:** right-click › Download to Downloads (or the details panel's Download button) saves to your Downloads folder, and Download To… asks where. You can also drag items onto Finder, the desktop or any folder in TheExplorer, or press F5 with a local folder in the other pane. The status bar says where each download went; click it for the list, where Show opens the folder with what arrived selected.
 - **Google Docs, Sheets and Slides** download as Word, Excel and PowerPoint files; right-click › Download As offers PDF, Markdown, CSV and the rest. Opening one opens it in your browser, and Space previews it as a PDF. Forms, Sites and My Maps only open in the browser.
-- **Sharing:** right-click › Share… (or the inspector's Share… button) shows everyone with access. Add people by email as viewers, commenters or editors, with or without an email from Google and a message; change someone's role or remove them; and set general access to Restricted, Anyone with the link, or (for Google Workspace accounts) anyone in your organization. Access that comes from a shared drive is shown but changed in the drive, and files only shared with you can't be changed. Making someone else the owner stays in Drive, since Google confirms it by email.
+- **Sharing:** right-click › Share… (or the details panel's Share… button) shows everyone with access. Add people by email as viewers, commenters or editors, with or without an email from Google and a message; change someone's role or remove them; and set general access to Restricted, Anyone with the link, or (for Google Workspace accounts) anyone in your organization. Access that comes from a shared drive is shown but changed in the drive, and files only shared with you can't be changed. Making someone else the owner stays in Drive, since Google confirms it by email.
 - **Moving and copying:** drag Drive items onto another Drive folder to move them; hold ⌥ to copy. Copy and paste works the same way. Drive can't copy folders, so those move or download instead.
 - **Rename, new folder and trash:** ⇧⌘↩, ⇧⌘N and ⌘⌫ work as they do for local files. Trashed items go to Drive's trash, where you can restore them for 30 days.
 - **Links:** right-click › Copy Link copies the Drive link, which opens the item for anyone it's shared with; Open in Browser opens it at drive.google.com.
-- **Previews:** the inspector shows Drive's own thumbnail for images, videos, PDFs, Docs, Sheets and Slides, and the first 32 KB of text files, without downloading anything.
-- **Storage:** the status bar and inspector show how much of your Drive is used.
+- **Previews:** the details panel shows Drive's own thumbnail for images, videos, PDFs, Docs, Sheets and Slides, and the first 32 KB of text files, without downloading anything.
+- **Storage:** the status bar and details panel show how much of your Drive is used.
 
 The client secret and each account's sign-in are kept in your Keychain. Removing an account in Settings also signs it out with Google, and nothing in your Drive is touched.
 
@@ -171,15 +171,16 @@ Commands run in zsh with your login profile, so Homebrew tools like `ffmpeg` are
 - **Default file browser.** Send other apps' "Show in Finder" and "Reveal" buttons to TheExplorer. Revealed items open in a tab with the items selected. macOS keeps Finder for folders opened from the Dock, Spotlight or other apps and doesn't let any app take that over, so Settings shows that too. For those, turn on **Catch Finder windows**: when Finder opens a folder window, TheExplorer closes it and opens the folder in a tab, with the same files selected. That covers the Dock and its stacks, Spotlight, and apps that open downloads or attachments in Finder. Windows that aren't folders, like AirDrop, stay in Finder. It needs permission to control Finder, which macOS asks for once, and it only works while TheExplorer is running.
 - **Terminal.** Choose what "Open in Terminal" (⌃⌘T) uses: Terminal, cmux, Ghostty, iTerm, Warp or any other app. cmux gets a new workspace in the folder.
 - **Defaults.** Where new windows start, sort order, folders first, hidden files, and New's time range and clutter filter.
+- **Shortcuts.** Change any menu command's keys (see [Keyboard shortcuts](#keyboard-shortcuts)).
 
 <br clear="right">
 
 ## And the rest
 
 - **Tabs.** Browser-style tabs, each with its own folder, history and search. Drop files on a tab to move them there. Tabs come back where you left them after you quit.
-- **Split pane.** ⌘/ splits a tab into two folders side by side, each with its own history. Drag the line between them to resize the panes, or double-click it to even them out. The active pane's header is raised and the other pane is dimmed; the path row, Find, sidebar, inspector and menus all act on the active one. Click a pane or press Tab to switch, and a drop makes the pane it lands in active. F5 copies the selection to the other pane's folder and F6 moves it there (also in the right-click menu), or drag between them. View › Swap Panes and Show Same Folder in Other Pane are there too. ⌘W closes the active pane, and splits (and where you left the divider) come back after you quit.
+- **Split pane.** ⌘/ splits a tab into two folders side by side, each with its own history. Drag the line between them to resize the panes, or double-click it to even them out. The active pane's header is raised and the other pane is dimmed; the path row, Find, sidebar, details panel and menus all act on the active one. Click a pane or press Tab to switch, and a drop makes the pane it lands in active. F5 copies the selection to the other pane's folder and F6 moves it there (also in the right-click menu), or drag between them. View › Swap Panes and Show Same Folder in Other Pane are there too. ⌘W closes the active pane, and splits (and where you left the divider) come back after you quit.
 - **Pinned.** Pin files or folders to the sidebar with ⌘D or by dropping them on the "Pinned" heading. Dropping onto a pinned folder moves items into it.
-- **Git status.** In a repository, changed files get a letter: **M** modified, **A** added, **U** untracked, **R** renamed, red for deleted or conflicted. Folders get a dot when something inside changed, ignored files are dimmed, and the path bar shows the branch, ahead/behind and the number of changes. It updates as you edit, stage, commit or switch branches, including in git worktrees.
+- **Git status.** In a repository, changed files get a letter: **M** modified, **A** added, **U** untracked, **R** renamed, red for deleted or conflicted. Folders get a dot when something inside changed, ignored files are dimmed, and the path row shows the branch, ahead/behind and the number of changes. It updates as you edit, stage, commit or switch branches, including in git worktrees.
 - **Cut, copy and paste.** ⌘X, ⌘C and ⌘V for files, including with Finder in either direction. Cut items fade until you paste them, ⌥⌘V moves whatever was copied, and Duplicate is in the right-click menu. Pasting into an S3 or Google Drive folder uploads.
 - **Compress.** Right-click › Compress (or Edit › Compress) zips the selection beside it, as Finder does: one item becomes "Name.zip", several become "Archive.zip", and an existing archive is never overwritten. The status bar shows it working, and the new archive is selected when it's done.
 - **Undo.** ⌘Z undoes the last move, copy, paste, rename, compress, new item or Move to Trash, from any tab or window.
@@ -199,6 +200,8 @@ For the storage scan to include protected folders like Mail and Messages, grant 
 Selecting a video shows a frame from it in the details panel, with a play button: click it to play the video right there. Videos macOS can't read itself (MKV, which OBS records to, WebM, AVI…) work too when ffmpeg is installed (`brew install ffmpeg`): it gives them their thumbnail, length and details, and to play one TheExplorer re-wraps it into MP4 first, without re-encoding, so that takes about as long as copying the file. Those copies are kept in ~/Library/Caches/TheExplorer/Playable, up to 4 GB.
 
 ## Keyboard shortcuts
+
+<p align="center"><img src="docs/screenshots/shortcuts.png" alt="Settings › Shortcuts" width="460"></p>
 
 These are the defaults. Settings › Shortcuts changes any menu command's keys: click a shortcut and press new ones (esc cancels, ⌫ leaves the command without one). Keys another command had move over, and the page says which command lost them; the arrow beside a changed shortcut puts it back, and Restore Defaults puts them all back. Letters, numbers and symbols need ⌘ or ⌃, so typing still works. Undo, cut, copy, paste, select all, ⌘1–⌘9 for tabs, and the keys the list handles itself (Space, Return, the arrows, Tab) stay as they are.
 
@@ -230,6 +233,6 @@ These are the defaults. Settings › Shortcuts changes any menu command's keys: 
 | Run action 1–9 on the selection | ⌃⌥1…⌃⌥9 |
 | Move to Trash | ⌘⌫ |
 | Undo / redo the last file change (any tab or window) | ⌘Z / ⇧⌘Z |
-| Sidebar / Inspector / Hidden files | ⌥⌘S / ⌘I / ⇧⌘. |
+| Sidebar / Details / Hidden files | ⌥⌘S / ⌘I / ⇧⌘. |
 | Refresh | ⇧⌘R |
 | Settings | ⌘, |

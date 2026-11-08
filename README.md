@@ -5,11 +5,11 @@
 # TheExplorer
 
 **A fast, native file explorer for macOS.**<br>
-Real folder sizes, search that forgives typos, previews of everything, git status and S3, in a dense dark UI built for the keyboard.
+Real folder sizes, search that forgives typos, previews of everything, git status, S3 and Google Drive, in a quiet dark UI built for the keyboard.
 
 ![macOS 15+](https://img.shields.io/badge/macOS-15%2B-111111?logo=apple&logoColor=white)
 ![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)
-![SwiftUI](https://img.shields.io/badge/UI-SwiftUI-2E2E2E)
+![AppKit and SwiftUI](https://img.shields.io/badge/UI-AppKit%20%2B%20SwiftUI-2E2E2E)
 
 [Features](#features) · [Install](#install) · [Guide](GUIDE.md) · [Development](DEVELOPMENT.md)
 
@@ -19,42 +19,42 @@ Real folder sizes, search that forgives typos, previews of everything, git statu
 
 ### Git status, right in the list
 
-In a repository, changed files get a letter (**M** modified, **U** untracked…) and folders get a dot when something inside changed. The path bar shows the branch and how many files changed, and code previews live in the inspector.
+In a repository, changed files get a letter (**M** modified, **U** untracked…) and folders get a dot when something inside changed. The path row shows the branch and how many files changed, and code previews show in the details panel.
 
-<img src="docs/screenshots/hero.png" alt="A git project expanded inline, with change badges, the branch chip and a code preview" width="100%">
+<img src="docs/screenshots/hero.png" alt="A git project expanded inline, with change letters, the branch and a code preview" width="100%">
 
 ### Split pane
 
-Press ⌘/ to put two folders side by side, Tab to switch between them, and F5 or F6 to copy or move the selection across.
+Press ⌘/ to put two folders side by side, Tab to switch between them, and F5 or F6 to copy or move the selection across. The pane you're in is raised and the other dimmed, and dropping files into a pane makes it the one you're in.
 
 <img src="docs/screenshots/split.png" alt="Two folders side by side in a split tab" width="100%">
 
 ### Real folder sizes
 
-Every folder's total size is worked out in the background and drawn as a bar, so the heavy ones stand out. Click a folder's arrow to expand it in place.
+Every folder's total size is worked out in the background, so the heavy ones stand out. Click a folder's arrow to expand it in place.
 
-<img src="docs/screenshots/folder-sizes.png" alt="A folder listing with size bars and type chips" width="100%">
+<img src="docs/screenshots/folder-sizes.png" alt="A folder listing with each folder's total size, and the details panel" width="100%">
 
-### Search that forgives typos
+### Find, and it forgives typos
 
-TheExplorer keeps its own live index instead of using Spotlight, so results update in milliseconds as you type. Matching is fuzzy and forgives slips: here `serch` finds the Search files.
+⌘F turns the path row into a search field and filters the list right there: the folder and everything in it, your whole Mac, Google Drive or an S3 bucket. On your Mac, TheExplorer keeps its own live index instead of using Spotlight, so results update in milliseconds as you type. Matching is fuzzy and forgives slips: here `serch` finds the Search files.
 
-<img src="docs/screenshots/search.png" alt="Search results for the misspelled query serch" width="100%">
+<img src="docs/screenshots/search.png" alt="Find results for the misspelled query serch" width="100%">
 
-### Recent folders and path jumping
+### Go anywhere
 
-Open ⌘K without typing to see the folders you use most, or start with `~` or `/` to jump to a path with completion. Folders you visit often rank first everywhere.
+⌘K jumps somewhere: open it to see the folders you use most, type to find folders and files across your Mac, or start with `~` or `/` to jump to a path with completion. Folders you visit often rank first everywhere.
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/screenshots/recent-folders.png" alt="Recent folders in the command bar"></td>
-    <td width="50%"><img src="docs/screenshots/path-bar.png" alt="Path completion in the command bar"></td>
+    <td width="50%"><img src="docs/screenshots/recent-folders.png" alt="The folders you visit most, in Go anywhere"></td>
+    <td width="50%"><img src="docs/screenshots/path-bar.png" alt="Path completion in Go anywhere"></td>
   </tr>
 </table>
 
 ### Previews with the details
 
-Select a file to preview it, with what's inside: dimensions and color for images, length, resolution and codec for video, and pages, lines or fonts for everything else.
+Select a file to preview it, with what's inside: dimensions and color for images, length, resolution and codec for video, and pages, lines or fonts for everything else. Videos play right there, and with ffmpeg installed so do the ones macOS can't read, like MKV and WebM.
 
 <table>
   <tr>
@@ -70,7 +70,7 @@ Markdown shows formatted, CSVs as a table, JSON as a tree you can fold and copy 
 <table>
   <tr>
     <td width="50%"><img src="docs/screenshots/markdown.png" alt="A Markdown file rendered over the window"></td>
-    <td width="50%"><img src="docs/screenshots/json.png" alt="A JSON file as a collapsible tree in the inspector"></td>
+    <td width="50%"><img src="docs/screenshots/json.png" alt="A JSON file as a collapsible tree in the details panel"></td>
   </tr>
 </table>
 
@@ -78,7 +78,7 @@ Markdown shows formatted, CSVs as a table, JSON as a tree you can fold and copy 
 
 Selecting a zip lists everything inside as a tree with sizes, instantly, even for huge archives. Drag files out to unpack just those.
 
-<img src="docs/screenshots/zip.png" alt="A zip archive's contents listed in the inspector" width="100%">
+<img src="docs/screenshots/zip.png" alt="A zip archive's contents listed in the details panel" width="100%">
 
 ### Storage map
 
@@ -88,9 +88,9 @@ Scan any folder or the whole Mac and drill into a treemap to see what's using yo
 
 ### S3, like a folder
 
-Browse your S3 buckets in the same list as your files. Drop files on a bucket to upload, and drag items to Finder or the desktop to download.
+Browse your S3 buckets in the same list as your files, or as a gallery. Drop files on a bucket to upload, and drag items to Finder or the desktop to download. Find searches every file in a bucket, even millions of them.
 
-<img src="docs/screenshots/s3.png" alt="Browsing an S3 bucket" width="100%">
+<img src="docs/screenshots/s3.png" alt="An S3 bucket's videos as a gallery, with one selected" width="100%">
 
 ### Google Drive, without Google's app
 
@@ -108,6 +108,12 @@ Turn shell commands you run on files, like an ffmpeg conversion, into right-clic
     <td width="50%"><img src="docs/screenshots/open-with.png" alt="Default apps for file types in Settings"></td>
   </tr>
 </table>
+
+### Your shortcuts
+
+Every menu command's keys can be changed in Settings: click a shortcut and press new keys. Keys another command had move over, and the page says which one lost them.
+
+<p align="center"><img src="docs/screenshots/shortcuts.png" alt="Settings › Shortcuts" width="520"></p>
 
 ### And the basics, done right
 
