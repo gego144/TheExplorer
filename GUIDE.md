@@ -194,6 +194,10 @@ Commands run in zsh with your login profile, so Homebrew tools like `ffmpeg` are
 
 For the storage scan to include protected folders like Mail and Messages, grant **Full Disk Access** (System Settings › Privacy & Security › Full Disk Access). The Storage view has a button that opens the right pane.
 
+## Videos
+
+Selecting a video shows a frame from it in the details panel, with a play button: click it to play the video right there. Videos macOS can't read itself (MKV, which OBS records to, WebM, AVI…) work too when ffmpeg is installed (`brew install ffmpeg`): it gives them their thumbnail, length and details, and to play one TheExplorer re-wraps it into MP4 first, without re-encoding, so that takes about as long as copying the file. Those copies are kept in ~/Library/Caches/TheExplorer/Playable, up to 4 GB.
+
 ## Keyboard shortcuts
 
 These are the defaults. Settings › Shortcuts changes any menu command's keys: click a shortcut and press new ones (esc cancels, ⌫ leaves the command without one). Keys another command had move over, and the page says which command lost them; the arrow beside a changed shortcut puts it back, and Restore Defaults puts them all back. Letters, numbers and symbols need ⌘ or ⌃, so typing still works. Undo, cut, copy, paste, select all, ⌘1–⌘9 for tabs, and the keys the list handles itself (Space, Return, the arrows, Tab) stay as they are.

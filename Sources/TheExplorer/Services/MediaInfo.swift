@@ -35,6 +35,7 @@ enum MediaInfoReader {
         let ext = url.pathExtension.lowercased()
         guard let type = type ?? UTType(filenameExtension: ext) else { return nil }
         if ext == "m3u8" { return playlist(url) }
+        if FFmpeg.isForeignVideo(url) { return await foreignVideo(url) }
         if type.conforms(to: .svg) { return svg(url) }
         if type.conforms(to: .image) { return image(url) }
         if type.conforms(to: .audiovisualContent) || type.conforms(to: .movie) || type.conforms(to: .audio) {
@@ -177,6 +178,48 @@ enum MediaInfoReader {
     }
 
     // MARK: Video and audio
+
+    /// A video macOS can't read (MKV…), described by ffprobe when it's installed.
+    static func foreignVideo(_ url: URL) async -> MediaInfo? {
+        guard let probe = await FFmpeg.probe(url) else { return nil }
+        var info = MediaInfo()
+        var summary: [String] = []
+        if let width = probe.width, let height = probe.height {
+            summary.append("\(width) × \(height)")
+        }
+        if let seconds = probe.duration, seconds > 0 {
+            summary.append(Format.duration(seconds))
+            info.rows.append(.init(label: "duration", value: Format.duration(seconds, precise: true)))
+        }
+        if let width = probe.width, let height = probe.height {
+            var value = "\(width) × \(height)"
+            if let ratio = aspectRatio(width, height) { value += " (\(ratio))" }
+            info.rows.append(.init(label: "resolution", value: value))
+        }
+        if let rate = probe.frameRate {
+            info.rows.append(.init(label: "frame rate", value: rate.rounded() == rate ? "\(Int(rate)) fps" : String(format: "%.2f fps", rate)))
+        }
+        if let codec = probe.videoCodec { info.rows.append(.init(label: "video", value: codec)) }
+        if let rate = probe.videoBitrate, rate > 0 { info.rows.append(.init(label: "video bitrate", value: Format.bitrate(rate))) }
+        if let codec = probe.audioCodec {
+            var parts = [codec]
+            if let rate = probe.sampleRate, rate > 0 {
+                let khz = rate / 1000
+                parts.append(khz.rounded() == khz ? "\(Int(khz)) kHz" : String(format: "%.1f kHz", khz))
+            }
+            switch probe.channels {
+            case 1: parts.append("mono")
+            case 2: parts.append("stereo")
+            case let channels? where channels > 2: parts.append("\(channels) channels")
+            default: break
+            }
+            info.rows.append(.init(label: "audio", value: parts.joined(separator: " · ")))
+        }
+        if let rate = probe.audioBitrate, rate > 0 { info.rows.append(.init(label: "audio bitrate", value: Format.bitrate(rate))) }
+        if let title = probe.title, !title.isEmpty { info.rows.append(.init(label: "title", value: title)) }
+        info.summary = summary.isEmpty ? nil : summary.joined(separator: " · ")
+        return info.isEmpty ? nil : info
+    }
 
     static func media(_ url: URL) async -> MediaInfo? {
         let asset = AVURLAsset(url: url)

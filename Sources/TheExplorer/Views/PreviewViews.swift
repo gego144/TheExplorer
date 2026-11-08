@@ -1,3 +1,4 @@
+import AVKit
 import Quartz
 import SwiftUI
 import UniformTypeIdentifiers
@@ -7,7 +8,7 @@ import UniformTypeIdentifiers
 /// contents for zip archives.
 struct FilePreview: View {
     enum Kind: Equatable {
-        case quickLook, archive
+        case quickLook, archive, video
         case rendered(RenderedKind)
 
         /// Shown big, above the file's name, rather than below its details.
@@ -23,6 +24,7 @@ struct FilePreview: View {
             return .rendered(rendered)
         }
         if type.conforms(to: .zip) { return .archive }
+        if FFmpeg.isForeignVideo(item.url) || type.conforms(to: .movie) || type.conforms(to: .video) { return .video }
         if type.conforms(to: .application) || type.conforms(to: .archive) || type.conforms(to: .diskImage) { return nil }
         if type.conforms(to: .content) || type.conforms(to: .text) || type.conforms(to: .sourceCode)
             || type.conforms(to: .json) || type.conforms(to: .propertyList) || type.conforms(to: .threeDContent) {
@@ -35,6 +37,7 @@ struct FilePreview: View {
         switch Self.kind(for: item) {
         case .quickLook: InlineQuickLook(url: item.url, onExpand: { model.quickLook([item.url]) })
         case .archive: ArchiveContentsView(url: item.url, archiveSize: item.fileSize, model: model)
+        case .video: VideoPreview(item: item, onExpand: { model.quickLook([item.url]) })
         case .rendered(let kind): RenderedPreview(kind: kind, item: item, model: model)
         case nil: EmptyView()
         }
@@ -80,6 +83,176 @@ private struct InlineQuickLook: View {
         }
     }
 }
+
+/// A video: a frame from it with a play button, then the video itself, playing right here.
+/// Quick Look's own preview drew nothing until played (a black box), and nothing at all for
+/// MKV, which macOS can't read; those get their frame from ffmpeg and play from a copy it
+/// re-wraps into MP4.
+private struct VideoPreview: View {
+    let item: FileItem
+    let onExpand: () -> Void
+
+    private enum Stage: Equatable {
+        case still
+        case preparing
+        case playing(URL)
+        case unavailable(String)
+    }
+
+    @State private var poster: CGImage?
+    @State private var stage = Stage.still
+    @State private var hovering = false
+
+    private var isForeign: Bool { FFmpeg.isForeignVideo(item.url) }
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.35))
+            if case .playing(let url) = stage {
+                PlayerRepresentable(url: url)
+                    .clipShape(.rect(cornerRadius: 8))
+            } else {
+                if let poster {
+                    Image(decorative: poster, scale: 1)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .clipShape(.rect(cornerRadius: 8))
+                }
+                overlay
+            }
+        }
+        .frame(height: 200)
+        .contentShape(.rect)
+        .onTapGesture { play() }
+        .onHover { hovering = $0 }
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border))
+        .overlay(alignment: .bottomTrailing) {
+            if !isForeign, stage != .preparing {
+                Button(action: onExpand) {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 10, weight: .bold))
+                }
+                .buttonStyle(FloatingIconStyle())
+                .padding(6)
+                .help("Quick Look (Space)")
+            }
+        }
+        .task(id: item.url) {
+            stage = .still
+            poster = nil
+            try? await Task.sleep(for: .milliseconds(140))
+            guard !Task.isCancelled else { return }
+            if isForeign && !FFmpeg.isInstalled {
+                stage = .unavailable("Previewing \(item.url.pathExtension.uppercased()) needs ffmpeg: brew install ffmpeg")
+                return
+            }
+            let image = await Self.poster(for: item.url, foreign: isForeign)
+            guard !Task.isCancelled else { return }
+            poster = image
+        }
+        #if DEBUG
+        .onReceive(NotificationCenter.default.publisher(for: .debugPlayPreview)) { _ in play() }
+        #endif
+    }
+
+    @ViewBuilder private var overlay: some View {
+        switch stage {
+        case .still:
+            Image(systemName: "play.fill")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 46, height: 46)
+                .background(.black.opacity(hovering ? 0.62 : 0.48), in: .circle)
+                .overlay(Circle().strokeBorder(.white.opacity(0.18)))
+                .help("Play")
+        case .preparing:
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Preparing to play…")
+            }
+            .font(.system(size: 11.5))
+            .foregroundStyle(.white.opacity(0.9))
+            .padding(.horizontal, 12)
+            .frame(height: 30)
+            .background(.black.opacity(0.55), in: .capsule)
+        case .unavailable(let reason):
+            Text(reason)
+                .font(.system(size: 11.5))
+                .foregroundStyle(Theme.textSecondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 20)
+        case .playing:
+            EmptyView()
+        }
+    }
+
+    private func play() {
+        guard stage == .still else { return }
+        guard isForeign else {
+            stage = .playing(item.url)
+            return
+        }
+        stage = .preparing
+        let url = item.url
+        Task {
+            let copy = await FFmpeg.playableCopy(of: url, modified: item.modified)
+            guard url == item.url, stage == .preparing else { return }
+            stage = copy.map { .playing($0) } ?? .unavailable("This video's format can't be played here. Open it in an app like IINA or VLC.")
+        }
+    }
+
+    /// A frame a little way in: the first one of a recording is often black.
+    private static func poster(for url: URL, foreign: Bool) async -> CGImage? {
+        if foreign {
+            let duration = await FFmpeg.probe(url)?.duration
+            return await FFmpeg.frame(url, side: 800, duration: duration)
+        }
+        let asset = AVURLAsset(url: url)
+        let seconds = (try? await asset.load(.duration).seconds).flatMap { $0.isFinite ? $0 : nil } ?? 0
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 800, height: 800)
+        generator.requestedTimeToleranceBefore = .positiveInfinity
+        generator.requestedTimeToleranceAfter = CMTime(seconds: 1, preferredTimescale: 600)
+        let time = CMTime(seconds: min(1, seconds * 0.1), preferredTimescale: 600)
+        return try? await generator.image(at: time).image
+    }
+}
+
+/// The system's player, with its controls under the video, playing as soon as it's shown.
+private struct PlayerRepresentable: NSViewRepresentable {
+    let url: URL
+
+    func makeNSView(context: Context) -> AVPlayerView {
+        let view = AVPlayerView()
+        view.controlsStyle = .inline
+        view.showsFullScreenToggleButton = true
+        view.videoGravity = .resizeAspect
+        let player = AVPlayer(url: url)
+        view.player = player
+        player.play()
+        return view
+    }
+
+    func updateNSView(_ view: AVPlayerView, context: Context) {
+        if (view.player?.currentItem?.asset as? AVURLAsset)?.url != url {
+            view.player?.replaceCurrentItem(with: AVPlayerItem(url: url))
+            view.player?.play()
+        }
+    }
+
+    static func dismantleNSView(_ view: AVPlayerView, coordinator: ()) {
+        view.player?.pause()
+        view.player = nil
+    }
+}
+
+#if DEBUG
+extension Notification.Name {
+    /// Scripted runs press the details panel's play button with this.
+    static let debugPlayPreview = Notification.Name("TheExplorerDebugPlayPreview")
+}
+#endif
 
 struct QuickLookRepresentable: NSViewRepresentable {
     let url: URL

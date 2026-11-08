@@ -594,6 +594,9 @@ enum DebugSnapshots {
                 // recordshortcut:<command> starts recording its keys, as clicking it in Settings ›
                 // Shortcuts does (the page must be showing); postkey: then presses them.
                 Shortcuts.shared.recording = ShortcutCommand(rawValue: argument)
+            case "playpreview":
+                // Presses the play button on the details panel's video preview.
+                NotificationCenter.default.post(name: .debugPlayPreview, object: nil)
             case "postkey":
                 // postkey:<keys> puts a key press in the app's event queue, where a real one arrives,
                 // so event monitors (the shortcut recorder) see it, unlike key:.

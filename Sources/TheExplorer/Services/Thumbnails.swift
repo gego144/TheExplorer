@@ -29,6 +29,8 @@ enum Thumbnails {
     /// Drive and S3 thumbnails are network requests; a few at a time keeps them quick to start
     /// and leaves the connection free for whatever else is happening.
     private static let remoteSlots = Slots(6)
+    /// ffmpeg is a process per frame; a few at a time, so a gallery of MKVs doesn't start dozens.
+    private static let ffmpegSlots = Slots(3)
 
     /// Sizes are rounded up to one of a few steps, so changing the tile size a little reuses
     /// what's cached.
@@ -54,6 +56,13 @@ enum Thumbnails {
         if RemoteFiles.isRemote(item.url) {
             let image = await remoteSlots.run { await RemotePreviews.thumbnail(item.url, size: item.fileSize, side: side) }
             entry = Entry(image: image, duration: DriveStore.shared.file(at: item.url)?.duration)
+        } else if FFmpeg.isForeignVideo(item.url) {
+            // Videos macOS can't read (MKV…): a frame and the length from ffmpeg, when it's there.
+            let made = await ffmpegSlots.run { () async -> (CGImage?, Double?)? in
+                let duration = await FFmpeg.probe(item.url)?.duration
+                return (await FFmpeg.frame(item.url, side: side, duration: duration), duration)
+            }
+            entry = Entry(image: made?.0, duration: made?.1)
         } else {
             async let image = localThumbnail(item.url, side: side)
             async let duration = isVideo(item) ? videoDuration(item.url) : nil
@@ -66,6 +75,7 @@ enum Thumbnails {
     }
 
     nonisolated static func isVideo(_ item: FileItem) -> Bool {
+        if FFmpeg.isForeignVideo(item.url) { return true }
         guard let type = item.contentType ?? UTType(filenameExtension: item.fileExtension) else { return false }
         return type.conforms(to: .movie) || type.conforms(to: .video)
     }
