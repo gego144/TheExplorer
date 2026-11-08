@@ -80,7 +80,16 @@ enum Format {
 
     /// Path with the home directory abbreviated to ~.
     static func path(_ path: String) -> String {
-        (path as NSString).abbreviatingWithTildeInPath
+        #if DEBUG
+        if let demo = URL.demoHome {
+            for home in [demo.path, demo.resolvingSymlinksInPath().path] {
+                if path == home { return "~" }
+                if path.hasPrefix(home + "/") { return "~" + path.dropFirst(home.count) }
+            }
+            return path
+        }
+        #endif
+        return (path as NSString).abbreviatingWithTildeInPath
     }
 
     /// "0:42", "3:07", "1:02:05"; `precise` keeps tenths under a minute ("0:04.3").
@@ -136,7 +145,19 @@ enum Icons {
 }
 
 extension URL {
-    static let home = FileManager.default.homeDirectoryForCurrentUser
+    static let home: URL = {
+        #if DEBUG
+        if let demoHome { return demoHome }
+        #endif
+        return FileManager.default.homeDirectoryForCurrentUser
+    }()
+
+    #if DEBUG
+    /// EXPLORER_DEMO_HOME stands in for the home folder in "~" paths, so README screenshots
+    /// read "~/Projects/…" while showing a demo folder rather than anything of yours.
+    static let demoHome: URL? = ProcessInfo.processInfo.environment["EXPLORER_DEMO_HOME"]
+        .map { URL(fileURLWithPath: $0, isDirectory: true).standardizedFileURL }
+    #endif
 
     /// Whether this is /. Standardizing a path asks the disk about it, so that's only done for
     /// paths that could still turn out to be / ("/a/..").
