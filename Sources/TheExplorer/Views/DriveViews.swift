@@ -21,7 +21,7 @@ struct DriveView: View {
                        actionTitle: "Retry", action: { drive.reload() }, onDismiss: { drive.dismissError() })
             }
             FileListView(
-                rows: drive.rows,
+                rows: rows,
                 selection: Binding(get: { drive.selection }, set: { drive.selection = $0 }),
                 sort: drive.sort,
                 onSort: { drive.sort = drive.sort.toggled(to: $0) },
@@ -47,6 +47,14 @@ struct DriveView: View {
             }
             drive.search(text)
         }
+    }
+
+    /// The listing; while a search is on its way, the folder's own items that match, at once.
+    private var rows: [ListRow] {
+        let text = model.searchText.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty, !drive.filesAreSearch else { return drive.rows }
+        let words = text.lowercased().split(separator: " ")
+        return drive.rows.filter { row in words.allSatisfy { row.item.name.lowercased().contains($0) } }
     }
 
     private var loadingMore: some View {

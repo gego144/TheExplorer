@@ -84,6 +84,8 @@ final class ListingCache {
     /// Reads a folder you're likely to open next, in the background, unless it was read in the
     /// last couple of seconds.
     func readAhead(_ url: URL, _ hint: Hint) {
+        // A Drive folder is listed ahead the same way, by Drive's own cache.
+        if url.scheme == DriveLocation.scheme, hint == .pointer { return DriveListingCache.shared.readAhead(url) }
         guard url.isFileURL else { return }
         readAheads[hint]?.cancel()
         readAheads[hint] = Task { [weak self] in

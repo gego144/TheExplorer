@@ -14,6 +14,7 @@ import re
 import struct
 import sys
 import threading
+import time
 import uuid
 import zlib
 from datetime import datetime, timezone
@@ -350,7 +351,9 @@ class Handler(BaseHTTPRequestHandler):
             found = [f for f in live if f["starred"]]
         elif m := re.search(r"name contains '((?:[^'\\]|\\.)*)'", q):
             text = m[1].replace("\\'", "'").replace("\\\\", "\\").lower()
-            found = [f for f in live if text in f["name"].lower() or text.encode() in f["content"].lower()]
+            # Names alone, unless the query also asks for the text inside.
+            inside = "fullText contains" in q
+            found = [f for f in live if text in f["name"].lower() or (inside and text.encode() in f["content"].lower())]
         else:
             return self.error(400, "invalid", "Invalid Value: " + q)
         if query.get("orderBy"):
@@ -364,6 +367,9 @@ class Handler(BaseHTTPRequestHandler):
         return self.send(200, reply)
 
     def do_GET(self):
+        # MOCK_DRIVE_LATENCY=<ms> makes listings answer as slowly as Google's do.
+        if "/files" in self.path and os.environ.get("MOCK_DRIVE_LATENCY"):
+            time.sleep(int(os.environ["MOCK_DRIVE_LATENCY"]) / 1000)
         self.route("GET")
 
     def do_POST(self):

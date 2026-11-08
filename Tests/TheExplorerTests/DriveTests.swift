@@ -229,6 +229,9 @@ struct DriveClientTests {
         #expect(try await drive.starred().files.map(\.name) == ["Projects"])
         #expect(try await drive.drives().drives.map(\.name) == ["Team"])
         #expect(try await drive.search("milk").files.map(\.name) == ["notes.txt"])
+        // Names first: "milk" is only inside notes.txt, so a names-only search doesn't find it.
+        #expect(try await drive.search("milk", namesOnly: true).files.isEmpty)
+        #expect(try await drive.search("notes", namesOnly: true).files.map(\.name) == ["notes.txt"])
         #expect(try await drive.search("it's").files.isEmpty)
         #expect(try await drive.file("root").id == "root-id")
 

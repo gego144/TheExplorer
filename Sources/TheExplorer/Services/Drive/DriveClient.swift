@@ -288,14 +288,17 @@ final class DriveClient: Sendable {
     }
 
     /// Drive's own search, in names and inside documents, across My Drive, shared files and
-    /// shared drives. Results come in Drive's relevance order.
-    func search(_ text: String, token: String? = nil) async throws -> DriveListing {
+    /// shared drives. Results come in Drive's relevance order, a hundred at a time: searching
+    /// inside documents is the slow part, and a smaller page comes back sooner.
+    /// `namesOnly` asks for name matches alone, which Drive answers much faster.
+    func search(_ text: String, namesOnly: Bool = false, token: String? = nil) async throws -> DriveListing {
         let value = Self.quoted(text)
-        return try await list(query: "trashed = false and (name contains \(value) or fullText contains \(value))", orderBy: nil, token: token)
+        let match = namesOnly ? "name contains \(value)" : "(name contains \(value) or fullText contains \(value))"
+        return try await list(query: "trashed = false and " + match, orderBy: nil, token: token, pageSize: 100)
     }
 
-    func list(query: String, orderBy: String?, token: String?) async throws -> DriveListing {
-        var items = [("q", query), ("pageSize", "1000"), ("fields", "nextPageToken,files(\(Self.fileFields))"),
+    func list(query: String, orderBy: String?, token: String?, pageSize: Int = 1000) async throws -> DriveListing {
+        var items = [("q", query), ("pageSize", String(pageSize)), ("fields", "nextPageToken,files(\(Self.fileFields))"),
                      ("includeItemsFromAllDrives", "true"), ("corpora", "allDrives")]
         if let orderBy { items.append(("orderBy", orderBy)) }
         if let token { items.append(("pageToken", token)) }

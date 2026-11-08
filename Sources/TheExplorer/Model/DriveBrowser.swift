@@ -31,6 +31,9 @@ final class DriveBrowser {
     var sort = SortSpec(key: .name, ascending: true) { didSet { rebuild() } }
 
     @ObservationIgnored private var files: [DriveFile] = []
+    /// Whether the rows are a search's results (rather than a folder's contents). Until a search's
+    /// first results come back, the view shows the folder's own matching items instead.
+    private(set) var filesAreSearch = false
     @ObservationIgnored private var drives: [SharedDrive] = []
     @ObservationIgnored private var nextToken: String?
     @ObservationIgnored private var loadTask: Task<Void, Never>?
@@ -75,9 +78,33 @@ final class DriveBrowser {
         selection = []
         rows = []
         files = []
+        filesAreSearch = false
         drives = []
+        nextToken = nil
         updateTrail()
-        reload()
+        // A folder listed recently shows at once while it's listed again; Google Drive's own
+        // places (My Drive, Shared with me, Starred) never need waiting for.
+        let cached = DriveListingCache.shared.entry(for: location)
+        if let cached {
+            files = cached.files
+            drives = cached.drives
+            nextToken = cached.nextToken
+            rebuild()
+        } else if location.id == DriveLocation.homeID {
+            rebuild()
+        }
+        // What you select in the remembered list while it's listed again stays selected.
+        reload(keepSelection: cached != nil)
+        #if DEBUG
+        let opened = ProcessInfo.processInfo.systemUptime
+        Task { [weak self] in
+            while let self, self.location == location, self.rows.isEmpty, ProcessInfo.processInfo.systemUptime - opened < 10 {
+                try? await Task.sleep(for: .milliseconds(5))
+            }
+            let ms = Int((ProcessInfo.processInfo.systemUptime - opened) * 1000)
+            FileHandle.standardError.write(Data("[snapshot] drive open \(location.name): rows after \(ms)ms\(cached != nil ? " (remembered)" : "")\n".utf8))
+        }
+        #endif
         if otherAccount { DriveStore.shared.refreshUsage(location.accountID) }
     }
 
@@ -112,26 +139,37 @@ final class DriveBrowser {
                 var drives: [SharedDrive] = []
                 var page = DriveListing()
                 if !query.isEmpty {
+                    // Names first: Drive answers those quickly, so they show while it looks
+                    // inside documents. Matches found only inside follow them.
+                    let names = try await client.search(query, namesOnly: true)
+                    guard !Task.isCancelled, location == self.location, query == self.query else { return }
+                    // The last search's results stay until this one's full results are in, so
+                    // refining what's typed doesn't drop matches only to bring them back.
+                    let named = Set(names.files.map(\.id))
+                    let earlier = filesAreSearch ? files.filter { !named.contains($0.id) } : []
+                    files = names.files + earlier
+                    filesAreSearch = true
+                    nextToken = nil
+                    remember(names.files, drives: [])
+                    rebuild()
                     page = try await client.search(query)
+                    let shown = Set(names.files.map(\.id))
+                    page.files = names.files + page.files.filter { !shown.contains($0.id) }
+                } else if location.id == DriveLocation.homeID {
+                    // Only to know whether to offer Shared drives.
+                    drives = (try? await client.allDrives()) ?? []
+                    DriveStore.shared.setSharedDrives(drives, for: location.accountID)
                 } else {
-                    switch location.id {
-                    case DriveLocation.homeID:
-                        // Only to know whether to offer Shared drives.
-                        drives = (try? await client.allDrives()) ?? []
-                        DriveStore.shared.setSharedDrives(drives, for: location.accountID)
-                    case DriveLocation.drivesID:
-                        drives = try await client.allDrives()
-                        DriveStore.shared.setSharedDrives(drives, for: location.accountID)
-                    case DriveLocation.sharedID: page = try await client.sharedWithMe()
-                    case DriveLocation.starredID: page = try await client.starred()
-                    default: page = try await client.list(in: location.id)
-                    }
+                    (page, drives) = try await DriveListingCache.firstPage(of: location, client: client)
+                    if location.id == DriveLocation.drivesID { DriveStore.shared.setSharedDrives(drives, for: location.accountID) }
                 }
                 guard !Task.isCancelled, location == self.location, query == self.query else { return }
                 files = page.files
+                filesAreSearch = !query.isEmpty
                 self.drives = drives
                 nextToken = page.nextToken
                 remember(page.files, drives: drives)
+                if query.isEmpty { DriveListingCache.shared.store(location, files: files, drives: drives, nextToken: nextToken) }
                 rebuild()
                 selection = keepSelection ? previous.intersection(rows.map(\.id)) : []
             } catch is CancellationError {
@@ -145,7 +183,7 @@ final class DriveBrowser {
         }
     }
 
-    /// Loads the next 1,000 items.
+    /// Loads the next page (1,000 items, or 100 search results).
     func loadMore() {
         guard hasMore, !isLoading, let location, let client, let token = nextToken else { return }
         isLoading = true
@@ -169,8 +207,11 @@ final class DriveBrowser {
                     }
                 }
                 guard location == self.location, query == self.query else { return }
-                files += page.files
+                // A search's later pages can repeat what the names-first search already showed.
+                let shown = Set(files.map(\.id))
+                files += page.files.filter { !shown.contains($0.id) }
                 nextToken = page.nextToken
+                if query.isEmpty { DriveListingCache.shared.store(location, files: files, drives: self.drives, nextToken: nextToken) }
                 remember(page.files, drives: [])
                 rebuild()
             } catch {
