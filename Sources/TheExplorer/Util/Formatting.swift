@@ -79,10 +79,19 @@ enum Format {
     }
 
     /// Path with the home directory abbreviated to ~.
+    /// "~/Dev" typed into a path field, as a full path.
+    static func expandingTilde(_ path: String) -> String {
+        #if DEBUG
+        if let demo = URL.demoHome, path == "~" || path.hasPrefix("~/") { return demo.path + path.dropFirst() }
+        #endif
+        return (path as NSString).expandingTildeInPath
+    }
+
     static func path(_ path: String) -> String {
         #if DEBUG
         if let demo = URL.demoHome {
-            for home in [demo.path, demo.resolvingSymlinksInPath().path] {
+            // Listings spell a folder under /tmp as /private/tmp.
+            for home in [demo.path, "/private" + demo.path] {
                 if path == home { return "~" }
                 if path.hasPrefix(home + "/") { return "~" + path.dropFirst(home.count) }
             }

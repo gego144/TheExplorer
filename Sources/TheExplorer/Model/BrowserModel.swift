@@ -701,7 +701,7 @@ final class BrowserModel: Identifiable {
     /// Navigates to a typed path. File paths open their folder with the file selected.
     @discardableResult
     func goTo(path raw: String) -> Bool {
-        let expanded = (raw.trimmingCharacters(in: .whitespacesAndNewlines) as NSString).expandingTildeInPath
+        let expanded = Format.expandingTilde(raw.trimmingCharacters(in: .whitespacesAndNewlines))
         guard !expanded.isEmpty else { return false }
         let url = URL(fileURLWithPath: expanded)
         var isDir: ObjCBool = false

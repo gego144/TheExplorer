@@ -66,7 +66,12 @@ enum DebugSnapshots {
                 model.selection = rows.isEmpty ? Set(wanted.map { URL(fileURLWithPath: $0) }) : Set(rows)
             case "recents": model.show(.recents)
             case "new": model.show(.newFiles)
-            case "expand": model.toggleExpanded(URL(fileURLWithPath: argument, isDirectory: true).standardizedFileURL)
+            case "expand":
+                // The listed row itself, as clicking its arrow uses (listings say /private/tmp
+                // where you'd type /tmp), falling back to the path as given.
+                let wanted = URL(fileURLWithPath: argument).standardizedFileURL.path
+                let row = model.rows.first { $0.id.standardizedFileURL.path == wanted }?.id
+                model.toggleExpanded(row ?? URL(fileURLWithPath: argument, isDirectory: true).standardizedFileURL)
             case "more": (model.destination == .newFiles ? model.newFiles : model.recents).loadMore()
             case "range":
                 let recents = model.destination == .newFiles ? model.newFiles : model.recents

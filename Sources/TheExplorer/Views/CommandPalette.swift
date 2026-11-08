@@ -247,7 +247,7 @@ final class CommandPaletteView: NSView, NSTextFieldDelegate {
     /// Folders matching what's typed: the contents of a folder ending in "/", otherwise siblings
     /// whose names start with the last component. The ones you visit most come first.
     nonisolated static func suggestions(for query: String, scores: [String: Double]) -> [URL] {
-        let expanded = (query as NSString).expandingTildeInPath
+        let expanded = Format.expandingTilde(query)
         let endsWithSlash = query.hasSuffix("/")
         let parent = endsWithSlash ? expanded : (expanded as NSString).deletingLastPathComponent
         let prefix = endsWithSlash ? "" : (expanded as NSString).lastPathComponent.lowercased()
