@@ -72,21 +72,35 @@ actor S3Client {
     }
 
     /// One page of a "folder": sub-prefixes and objects directly inside `prefix`.
-    func list(bucket: String, prefix: String, delimiter: String? = "/", token: String? = nil) async throws -> S3Listing {
+    /// `startAfter` begins the listing after that key (keys are in byte order), so a bucket can be
+    /// read in several ranges at once.
+    /// Only the request waits on the client; the page is read outside it, so several listings
+    /// (Find reads a bucket in ranges side by side) are parsed at the same time.
+    nonisolated func list(bucket: String, prefix: String, delimiter: String? = "/", token: String? = nil,
+                          startAfter: String? = nil) async throws -> S3Listing {
         var query = [("list-type", "2"), ("prefix", prefix), ("max-keys", "1000")]
         if let delimiter { query.append(("delimiter", delimiter)) }
         if let token { query.append(("continuation-token", token)) }
+        if let startAfter { query.append(("start-after", startAfter)) }
         let (data, _) = try await send("GET", bucket: bucket, key: nil, query: query)
-        let root = try XMLTree.parse(data)
-        var listing = S3Listing()
-        listing.prefixes = root.all("CommonPrefixes").compactMap { $0.text("Prefix") }
-        listing.objects = root.all("Contents").compactMap { item in
-            guard let key = item.text("Key") else { return nil }
-            return S3Object(key: key, size: Int64(item.text("Size") ?? "") ?? 0,
-                            modified: item.text("LastModified").flatMap(Self.date), storageClass: item.text("StorageClass"))
+        return try Self.listing(from: data)
+    }
+
+    /// A page of a listing from S3's XML. The parser's strings are let go here, page by page:
+    /// reading a bucket of a million keys otherwise piles them up until the whole read ends.
+    nonisolated static func listing(from data: Data) throws -> S3Listing {
+        try autoreleasepool {
+            let root = try XMLTree.parse(data)
+            var listing = S3Listing()
+            listing.prefixes = root.all("CommonPrefixes").compactMap { $0.text("Prefix") }
+            listing.objects = root.all("Contents").compactMap { item in
+                guard let key = item.text("Key") else { return nil }
+                return S3Object(key: key, size: Int64(item.text("Size") ?? "") ?? 0,
+                                modified: item.text("LastModified").flatMap(Self.date), storageClass: item.text("StorageClass"))
+            }
+            if root.text("IsTruncated") == "true" { listing.nextToken = root.text("NextContinuationToken") }
+            return listing
         }
-        if root.text("IsTruncated") == "true" { listing.nextToken = root.text("NextContinuationToken") }
-        return listing
     }
 
     /// Every object under `prefix`, however deep (for downloading or deleting a folder).
@@ -307,12 +321,56 @@ actor S3Client {
                        region: root?.text("Region") ?? response.value(forHTTPHeaderField: "x-amz-bucket-region"))
     }
 
+    /// S3's dates ("2024-05-01T12:34:56.000Z"): read straight from the digits, as a listing has a
+    /// thousand of them a page; anything else goes through a formatter.
     nonisolated static func date(_ text: String) -> Date? {
+        if let date = fastDate(text) { return date }
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let date = formatter.date(from: text) { return date }
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: text)
+    }
+}
+
+extension S3Client {
+    nonisolated static func fastDate(_ text: String) -> Date? {
+        let bytes = Array(text.utf8)
+        guard bytes.count >= 20, bytes.last == UInt8(ascii: "Z"), bytes[4] == UInt8(ascii: "-"), bytes[7] == UInt8(ascii: "-"),
+              bytes[10] == UInt8(ascii: "T"), bytes[13] == UInt8(ascii: ":"), bytes[16] == UInt8(ascii: ":") else { return nil }
+        func number(_ from: Int, _ count: Int) -> Int? {
+            var value = 0
+            for index in from..<(from + count) {
+                let digit = Int(bytes[index]) - 48
+                guard digit >= 0 && digit <= 9 else { return nil }
+                value = value * 10 + digit
+            }
+            return value
+        }
+        guard let year = number(0, 4), let month = number(5, 2), let day = number(8, 2),
+              let hour = number(11, 2), let minute = number(14, 2), let second = number(17, 2),
+              (1...12).contains(month), (1...31).contains(day), hour < 24, minute < 60, second < 61 else { return nil }
+        var fraction = 0.0
+        if bytes.count > 20, bytes[19] == UInt8(ascii: ".") {
+            var scale = 0.1
+            for index in 20..<(bytes.count - 1) {
+                let digit = Int(bytes[index]) - 48
+                guard digit >= 0 && digit <= 9 else { return nil }
+                fraction += Double(digit) * scale
+                scale /= 10
+            }
+        } else if bytes.count != 20 {
+            return nil
+        }
+        // Days since 1970 from the civil date (Howard Hinnant's algorithm).
+        let y = month <= 2 ? year - 1 : year
+        let era = (y >= 0 ? y : y - 399) / 400
+        let yearOfEra = y - era * 400
+        let dayOfYear = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1
+        let dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear
+        let days = era * 146_097 + dayOfEra - 719_468
+        let seconds = Double(days * 86_400 + hour * 3_600 + minute * 60 + second) + fraction
+        return Date(timeIntervalSince1970: seconds)
     }
 }
 

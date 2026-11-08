@@ -221,7 +221,10 @@ final class BrowserModel: Identifiable {
     var findScopeName: String {
         switch destination {
         case .drive: return "Google Drive"
-        case .s3: return s3.location.map { $0.itemName.isEmpty ? ($0.bucket ?? "S3") : $0.itemName } ?? "S3"
+        case .s3:
+            guard let location = s3.location else { return "S3" }
+            if location.bucket == nil { return "all buckets" }
+            return location.itemName.isEmpty ? location.bucket ?? "S3" : location.itemName
         case .folder where searchScope == .folder: return Format.displayName(currentURL.path)
         default: return "your Mac"
         }

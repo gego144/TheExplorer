@@ -25,17 +25,29 @@ struct S3View: View {
                 sort: s3.sort,
                 onSort: { s3.sort = s3.sort.toggled(to: $0) },
                 dateTitle: s3.location?.bucket == nil ? "Created" : "Modified",
+                showLocation: s3.isSearching,
                 empty: emptyState,
                 focusRequest: model.listFocusRequest,
                 onOpen: open,
                 onQuickLook: { model.quickLook($0, in: $1) },
                 onDropInto: { urls, folder in model.receiveDrop(urls, into: folder) },
                 onDropBackground: { urls in s3.location.map { model.receiveDrop(urls, into: $0.url) } ?? false },
-                onReachEnd: s3.hasMore ? { s3.loadMore() } : nil,
-                footer: s3.hasMore ? AnyView(loadingMore) : nil,
+                onReachEnd: s3.hasMore && !s3.isSearching ? { s3.loadMore() } : nil,
+                footer: s3.isSearching ? (s3.isSearchRunning ? AnyView(searchProgress) : nil) : (s3.hasMore ? AnyView(loadingMore) : nil),
                 rowMenu: { S3RowMenu(urls: $0, model: model, deleting: $deleting) },
                 backgroundMenu: { S3BackgroundMenu(model: model, naming: $naming) }
             )
+        }
+        // Find looks through everything below the folder (or every bucket), a moment after
+        // typing stops.
+        .task(id: model.searchText) {
+            let text = model.searchText.trimmingCharacters(in: .whitespaces)
+            if !text.isEmpty {
+                s3.pauseSearch()
+                try? await Task.sleep(for: .milliseconds(120))
+                guard !Task.isCancelled else { return }
+            }
+            s3.search(text)
         }
         .alert("New Folder", isPresented: $naming) {
             NamePrompt(initialName: "untitled folder", confirmTitle: "Create") { s3.createFolder(named: $0) }
@@ -52,11 +64,26 @@ struct S3View: View {
         }
     }
 
-    /// The listing, filtered by whatever is typed in the command bar.
+    /// The listing; while finding, what the search found below the folder (at a connection's
+    /// top, in every bucket).
     private var rows: [ListRow] {
-        let filter = model.searchText.trimmingCharacters(in: .whitespaces)
-        guard !filter.isEmpty else { return s3.rows }
-        return s3.rows.filter { $0.item.name.localizedCaseInsensitiveContains(filter) }
+        let text = model.searchText.trimmingCharacters(in: .whitespaces)
+        if text.isEmpty { return s3.rows }
+        if s3.searchReady { return s3.searchRows }
+        // Before the first results, the folder's own items that match, at once.
+        let words = text.lowercased().split(separator: " ")
+        return s3.rows.filter { row in words.allSatisfy { row.item.name.lowercased().contains($0) } }
+    }
+
+    private var searchProgress: some View {
+        HStack(spacing: 6) {
+            ProgressView().controlSize(.mini)
+            Text("Reading names from S3: \(s3.searchChecked.formatted()) so far. Matches appear as they're found.")
+        }
+        .font(.system(size: 11))
+        .foregroundStyle(Theme.textTertiary)
+        .frame(maxWidth: .infinity)
+        .padding(10)
     }
 
     private var loadingMore: some View {
@@ -78,7 +105,9 @@ struct S3View: View {
     private var emptyState: EmptyState? {
         guard !s3.isLoading, s3.error == nil else { return nil }
         if !model.searchText.trimmingCharacters(in: .whitespaces).isEmpty {
-            return EmptyState(symbol: "magnifyingglass", title: "No matches in this folder")
+            if s3.isSearchRunning { return nil }
+            return EmptyState(symbol: "magnifyingglass", title: s3.location?.bucket == nil ? "No matches in any bucket" : "No matches in this folder or below",
+                              hint: s3.searchChecked > 0 ? "Searched \(s3.searchChecked.formatted()) names." : nil)
         }
         if s3.location?.bucket == nil {
             return EmptyState(symbol: "cloud", title: "No buckets", hint: "These credentials can't see any buckets. Set a bucket in the connection to open it directly.")

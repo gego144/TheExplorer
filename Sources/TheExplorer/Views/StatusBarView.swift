@@ -194,6 +194,13 @@ enum StatusText {
             guard let result = StorageModel.shared.result else { return "" }
             return "\(Format.bytes(result.root.size)) · \(result.root.fileCount.formatted()) files scanned"
         case .s3:
+            if model.s3.isSearching {
+                let count = model.s3.searchRows.count
+                var text = "\(count.formatted())\(count >= S3Browser.searchLimit ? "+" : "") \(count == 1 ? "result" : "results")"
+                if model.s3.isSearchRunning { text += " · \(model.s3.searchChecked.formatted()) names read" }
+                if !model.s3.selection.isEmpty { text += " · \(model.s3.selection.count.formatted()) selected" }
+                return text
+            }
             let (folders, files) = model.s3.counts
             var text = "\(folders.formatted()) \(folders == 1 ? "folder" : "folders") · \(files.formatted()) \(files == 1 ? "file" : "files")"
             if model.s3.hasMore { text += "+" }

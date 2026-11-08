@@ -22,6 +22,23 @@ final class S3Browser {
     var selection: Set<URL> = []
     var sort = SortSpec(key: .name, ascending: true) { didSet { rebuild() } }
 
+    // Find. S3 has no search, so the bucket's names are read once into an S3KeyIndex (in every
+    // bucket, from a connection's top level) and each keystroke searches what's been read.
+    private(set) var query = ""
+    private(set) var searchRows: [ListRow] = []
+    /// Names read from S3 so far for this search, and whether it's still reading or matching.
+    private(set) var searchChecked = 0
+    private(set) var isSearchRunning = false
+    /// Whether `searchRows` are this search's (or a refinement's) yet. Until then the view shows
+    /// the folder's own matching items, so the list never goes blank on the first key.
+    private(set) var searchReady = false
+    @ObservationIgnored private var searchTask: Task<Void, Never>?
+    /// The search was paused by a key typed since; the same text searched again restarts it.
+    @ObservationIgnored private var interrupted = false
+    /// Stops collecting past this many matches.
+    static let searchLimit = 2_000
+    var isSearching: Bool { !query.isEmpty }
+
     @ObservationIgnored private var buckets: [S3Bucket] = []
     @ObservationIgnored private var listing = S3Listing()
     @ObservationIgnored private var loadTask: Task<Void, Never>?
@@ -52,7 +69,111 @@ final class S3Browser {
         self.location = location
         selection = []
         rows = []
+        search("")
         reload()
+    }
+
+    /// Stops the running search where it is (a key was typed; its search starts a moment later),
+    /// so a result for what was typed before doesn't land after it.
+    func pauseSearch() {
+        guard isSearchRunning, let task = searchTask else { return }
+        task.cancel()
+        searchTask = nil
+        interrupted = true
+    }
+
+    /// Searches the names below the folder (or in every bucket) for all of `text`'s words.
+    /// The rows showing stay until the new search's first results are ready, so refining what's
+    /// typed never flashes an empty list, and matches join as more names are read.
+    func search(_ text: String) {
+        let text = text.trimmingCharacters(in: .whitespaces)
+        guard text != query || interrupted else { return }
+        interrupted = false
+        searchTask?.cancel()
+        let fresh = query.isEmpty
+        query = text
+        guard !text.isEmpty, let location, let client else {
+            searchRows = []
+            searchChecked = 0
+            searchReady = false
+            isSearchRunning = false
+            return
+        }
+        if fresh { searchReady = false }
+        isSearchRunning = true
+        let terms = S3KeyMatcher.terms(text)
+        let knownBuckets = buckets
+        let limit = Self.searchLimit
+        searchTask = Task {
+            var found: [ListRow] = []
+            var targets: [(bucket: String, prefix: String)] = []
+            if let bucket = location.bucket {
+                targets = [(bucket, location.prefix)]
+            } else {
+                guard let buckets = try? await (knownBuckets.isEmpty ? client.listBuckets() : knownBuckets),
+                      !Task.isCancelled, self.query == text else { return }
+                targets = buckets.map { ($0.name, "") }
+                let lowered = terms.map { String(decoding: $0, as: UTF8.self) }
+                found = buckets.filter { bucket in lowered.allSatisfy { bucket.name.lowercased().contains($0) } }.map { bucket in
+                    ListRow(item: FileItem(url: S3Location.url(connectionID: location.connectionID, bucket: bucket.name, key: ""),
+                                           name: bucket.name, isDirectory: true, contentType: .folder), date: bucket.created)
+                }
+            }
+            let indexes = targets.map {
+                S3IndexStore.shared.index(connectionID: location.connectionID, bucket: $0.bucket, prefix: $0.prefix, client: client)
+            }
+            var matched = Array(repeating: 0, count: indexes.count)
+            var folders = Set<String>()
+            var published = false
+            while !Task.isCancelled {
+                var changed = false
+                for (number, index) in indexes.enumerated() where index.pages.count > matched[number] && found.count < limit {
+                    let pages = index.pages[matched[number]...]
+                    matched[number] = index.pages.count
+                    let target = targets[number]
+                    let room = limit - found.count
+                    let seen = folders
+                    #if DEBUG
+                    let started = ProcessInfo.processInfo.systemUptime
+                    #endif
+                    let (rows, nowSeen) = await Task.detached(priority: .userInitiated) {
+                        var seen = seen
+                        let rows = S3KeyMatcher.matches(pages, connectionID: location.connectionID, bucket: target.bucket,
+                                                        prefix: target.prefix, terms: terms, limit: room, folders: &seen)
+                        return (rows, seen)
+                    }.value
+                    #if DEBUG
+                    if pages.count > 100 {
+                        let keys = pages.reduce(0) { $0 + $1.count }
+                        let ms = Int((ProcessInfo.processInfo.systemUptime - started) * 1000)
+                        FileHandle.standardError.write(Data("[snapshot] s3 match \"\(text)\": \(keys) keys in \(ms)ms, \(rows.count) found\n".utf8))
+                    }
+                    #endif
+                    guard !Task.isCancelled, self.query == text else { return }
+                    folders = nowSeen
+                    found += rows
+                    changed = true
+                }
+                let read = zip(indexes, matched).allSatisfy { $0.isComplete && $0.pages.count == $1 }
+                // Shown once there's something found, or nothing left to look at: never an empty
+                // list just because no names have been read yet.
+                if changed && !found.isEmpty || read && !published {
+                    searchRows = RowSorter.sorted(found, by: sort, foldersFirst: true)
+                    searchReady = true
+                    selection = selection.intersection(searchRows.map(\.id))
+                    published = true
+                } else if changed && published {
+                    searchRows = RowSorter.sorted(found, by: sort, foldersFirst: true)
+                }
+                searchChecked = indexes.reduce(0) { $0 + $1.count }
+                indexes.forEach { $0.touch() }
+                if read || found.count >= limit { break }
+                try? await Task.sleep(for: .milliseconds(150))
+            }
+            guard !Task.isCancelled, self.query == text else { return }
+            if indexes.count == 1, let failed = indexes.first?.error { error = failed }
+            isSearchRunning = false
+        }
     }
 
     func reload(keepSelection: Bool = false) {

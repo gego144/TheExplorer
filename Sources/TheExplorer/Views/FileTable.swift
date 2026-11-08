@@ -229,6 +229,8 @@ final class FileTableController: NSObject, NSTableViewDataSource, NSTableViewDel
         #endif
         let oldConfig = config
         config = newConfig
+        // The footer is a snapshot ("Looking through 2,343 items…"); the one on screen takes each new one.
+        if let footer = newConfig.footer, let footerHost { footerHost.rootView = footer }
         let rowsChanged = !Self.same(rows, newRows) || (oldConfig.footer == nil) != (newConfig.footer == nil)
         if rowsChanged {
             #if DEBUG

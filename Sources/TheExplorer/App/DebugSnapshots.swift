@@ -89,6 +89,41 @@ enum DebugSnapshots {
                         log("\(scene): \(String(format: "%.2fs", result.duration)), \(Format.bytes(result.root.size)), \(result.root.fileCount) files, \(result.unreadableFolders) unreadable")
                     }
                 }
+            case "typewatch":
+                // typewatch:<text>[|<seconds>] types into whatever has focus at a person's pace
+                // (a key every 250ms) and logs every change in how many results the list shows,
+                // with what was typed by then, then keeps watching for <seconds> (3). A count that
+                // drops and comes back is the list flickering.
+                let pieces = (parts.count > 1 ? parts[1] : "").components(separatedBy: "|")
+                let settle = pieces.count > 1 ? Double(pieces[1]) ?? 3 : 3
+                let start = Date()
+                var last = -1
+                var typed = ""
+                var changes: [String] = []
+                // What the list on screen shows (the table updated last).
+                func shown() -> Int { FileTableController.debugLast?.rows.count ?? -1 }
+                func sample() {
+                    let count = shown()
+                    guard count != last else { return }
+                    last = count
+                    changes.append(String(format: "%.2fs \"%@\"=%d", Date().timeIntervalSince(start), typed, count))
+                }
+                for character in pieces[0] {
+                    await InputDriver.type(String(character))
+                    typed.append(character)
+                    for _ in 0..<25 {
+                        sample()
+                        try? await Task.sleep(for: .milliseconds(10))
+                    }
+                }
+                let typedAt = Date()
+                while Date().timeIntervalSince(typedAt) < settle {
+                    sample()
+                    try? await Task.sleep(for: .milliseconds(10))
+                }
+                log("\(parts[0]): \(changes.joined(separator: "  "))")
+                if model.destination == .s3 { log("\(parts[0]): s3 names read \(model.s3.searchChecked), still running \(model.s3.isSearchRunning)") }
+                wait = 0
             case "rowcounts":
                 // rowcounts:<seconds> logs every change in how many rows the list shows.
                 if model.destination == .storage { model.show(.recents) }

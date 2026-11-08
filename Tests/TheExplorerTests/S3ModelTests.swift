@@ -96,4 +96,67 @@ struct S3ItemNameTests {
         // A connection's top level (no bucket) can't be dropped as a file.
         #expect(RemoteFilePromise(S3Location.url(connectionID: id, bucket: nil, key: "")) == nil)
     }
+
+    /// Find in S3 searches the names read from the bucket: files at any depth, and folders on the
+    /// way, by name, under the folder searched from.
+    @Test func searchMatchesNamesAtAnyDepth() {
+        let page = S3KeyPage([
+            S3Object(key: "trips/", size: 0),
+            S3Object(key: "trips/Receipts.pdf", size: 10),
+            S3Object(key: "trips/2026/rome/receipts-rome.pdf", size: 20),
+            S3Object(key: "trips/2026/receipts/taxi.jpg", size: 30),
+            S3Object(key: "trips/2026/receipts/hotel.jpg", size: 40),
+            S3Object(key: "trips/2026/photos/beach.jpg", size: 50),
+            S3Object(key: "other/receipts-elsewhere.pdf", size: 60),
+        ])
+        let id = UUID()
+        var folders = Set<String>()
+        let rows = S3KeyMatcher.matches([page][...], connectionID: id, bucket: "media", prefix: "trips/",
+                                        terms: S3KeyMatcher.terms("receipts"), limit: 100, folders: &folders)
+        // Case doesn't matter; the folder is listed once though two files are in it; "other/" is outside.
+        #expect(rows.map(\.item.name) == ["Receipts.pdf", "receipts-rome.pdf", "receipts"])
+        #expect(rows.last?.item.isFolder == true)
+        #expect(rows.map(\.location) == ["media/trips", "media/trips/2026/rome", "media/trips/2026"])
+        #expect(rows[1].size == 20)
+        // Every word has to match.
+        var none = Set<String>()
+        let rome = S3KeyMatcher.matches([page][...], connectionID: id, bucket: "media", prefix: "",
+                                        terms: S3KeyMatcher.terms("receipts rome"), limit: 100, folders: &none)
+        #expect(rome.map(\.item.name) == ["receipts-rome.pdf"])
+        // It stops at the limit.
+        var limited = Set<String>()
+        #expect(S3KeyMatcher.matches([page][...], connectionID: id, bucket: "media", prefix: "",
+                                     terms: S3KeyMatcher.terms("receipts"), limit: 2, folders: &limited).count == 2)
+    }
+
+    /// The bucket is read in ranges split at a key between two others; the split must fall
+    /// strictly between them (so no key is read twice or missed), whatever the keys look like.
+    @Test @MainActor func rangesSplitBetweenTheirEnds() {
+        let pairs = [("", "\u{7F}"), ("photos/", "photos/\u{7F}"), ("jestr/creators/0a1b", "jestr/d"),
+                     ("a", "b"), ("instagram-thumbnails/3f", "instagram-thumbnails/9"), ("x/a", "x/a0")]
+        for (low, high) in pairs {
+            guard let middle = S3KeyIndex.midpoint(low, high) else { continue }
+            #expect(middle > low && middle < high, "\(low) < \(middle) < \(high)")
+        }
+        // Wide ranges always split; neighbours don't.
+        #expect(S3KeyIndex.midpoint("photos/", "photos/\u{7F}") != nil)
+        #expect(S3KeyIndex.midpoint("a", "a ") == nil)
+        #expect(S3KeyIndex.width("a", "z") > S3KeyIndex.width("a", "c"))
+    }
+
+    /// S3's dates are read straight from their digits; they must match the formatter exactly.
+    @Test func listingDatesMatchTheFormatter() {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let plain = ISO8601DateFormatter()
+        for text in ["2024-05-01T12:34:56.000Z", "2026-02-28T23:59:59.999Z", "2024-02-29T00:00:00.500Z",
+                     "1999-12-31T23:59:59.000Z", "1969-07-20T20:17:40.000Z", "2100-03-01T01:02:03.250Z"] {
+            #expect(S3Client.fastDate(text) == formatter.date(from: text), "\(text)")
+        }
+        #expect(S3Client.fastDate("2024-05-01T12:34:56Z") == plain.date(from: "2024-05-01T12:34:56Z"))
+        // Anything else is left to the formatter.
+        #expect(S3Client.fastDate("2024-05-01 12:34:56") == nil)
+        #expect(S3Client.fastDate("2024-13-01T00:00:00.000Z") == nil)
+        #expect(S3Client.date("2024-05-01T12:34:56+02:00") == plain.date(from: "2024-05-01T12:34:56+02:00"))
+    }
 }
