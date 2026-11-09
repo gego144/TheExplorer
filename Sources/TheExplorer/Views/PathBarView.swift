@@ -5,10 +5,18 @@ import SwiftUI
 /// The row above the list: back and forward, where you are ("~ › Dev › TheExplorer"), and the
 /// repository's branch when there is one. Find (⌘F, or a click on its empty part) turns it into
 /// a search field that filters the list right there, with where it searches beside it.
+///
+/// A split tab has one per pane, side by side above the two lists: each goes back, shows the
+/// path and finds in its own pane, the active pane's on a raised field. A click anywhere on one
+/// makes its pane the active one, so Back always goes back where you're looking.
 final class PathBarView: NSView, NSTextFieldDelegate {
     static let height: CGFloat = 36
 
+    /// Which pane the bar is for: the tab's first (the whole tab, when it isn't split) or its second.
+    enum Side { case first, second }
+
     private let workspace: Workspace
+    private let side: Side
     private let values: RegionValues
     private let theme = TableTheme()
     private let back: BarButton
@@ -34,17 +42,29 @@ final class PathBarView: NSView, NSTextFieldDelegate {
     private var finding = false
     private var lastFindFocus: [ObjectIdentifier: Int] = [:]
 
-    init(workspace: Workspace, values: RegionValues) {
+    // Split.
+    private let close: BarButton
+    private var isSplit = false
+    private var isActive = true
+    private let activeFill = NSColor(Theme.raised)
+
+    init(workspace: Workspace, values: RegionValues, side: Side = .first) {
         self.workspace = workspace
         self.values = values
+        self.side = side
         back = BarButton("chevron.left", style: .ghost, size: 11, weight: .semibold, help: "Back (⌘[)", theme: theme)
         forward = BarButton("chevron.right", style: .ghost, size: 11, weight: .semibold, help: "Forward (⌘])", theme: theme)
         scopeButton = QuietButton("", help: "Where Find searches", theme: theme)
         clearButton = BarButton("xmark", style: .ghost, size: 9, weight: .bold, help: "Clear (esc)", theme: theme)
+        close = BarButton("xmark", style: .ghost, size: 9, weight: .bold, help: "Close Pane", theme: theme)
         super.init(frame: .zero)
-        back.action = { [weak workspace] in workspace?.selected.goBack() }
-        forward.action = { [weak workspace] in workspace?.selected.goForward() }
+        back.action = { [weak self] in self?.pane?.goBack() }
+        forward.action = { [weak self] in self?.pane?.goForward() }
         clearButton.action = { [weak self] in self?.endFind() }
+        close.action = { [weak self] in
+            guard let self, let pane = self.pane else { return }
+            self.workspace.close(pane: pane)
+        }
         findField.delegate = self
         findField.isBordered = false
         findField.isBezeled = false
@@ -54,13 +74,32 @@ final class PathBarView: NSView, NSTextFieldDelegate {
         findField.textColor = theme.text
         findField.cell?.isScrollable = true
         findField.cell?.wraps = false
-        for view in [back, forward, crumbs, findField, scopeButton, clearButton] as [NSView] { addSubview(view) }
+        for view in [back, forward, crumbs, findField, scopeButton, clearButton, close] as [NSView] { addSubview(view) }
+        // Any click on the bar (back, a crumb, Find) makes its pane the active one. The
+        // recogniser sees clicks on the bar's parts without taking them.
+        let click = NSClickGestureRecognizer(target: self, action: #selector(activatePane))
+        click.delaysPrimaryMouseButtonEvents = false
+        addGestureRecognizer(click)
         refresh()
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
     override var isFlipped: Bool { true }
+
+    /// The pane this bar is for; nil for a second bar while the tab isn't split.
+    private var pane: BrowserModel? {
+        switch side {
+        case .first: workspace.currentTab
+        case .second: workspace.secondPane(of: workspace.currentTab)
+        }
+    }
+
+    @objc private func activatePane() {
+        guard isSplit, !isActive, let pane else { return }
+        workspace.activate(pane)
+        if !finding { pane.listFocusRequest += 1 }
+    }
 
     private func refresh() {
         generation += 1
@@ -74,7 +113,15 @@ final class PathBarView: NSView, NSTextFieldDelegate {
     }
 
     private func apply() {
-        let model = workspace.selected
+        guard let model = pane else {
+            crumbs.model = nil
+            return
+        }
+        isSplit = workspace.isSplit
+        isActive = !isSplit || workspace.selected === model
+        // The other pane's path reads, but quieter.
+        for view in [back, forward, crumbs] as [NSView] { view.alphaValue = isActive ? 1 : 0.55 }
+        remoteCrumbs?.alphaValue = isActive ? 1 : 0.55
         back.isEnabled = !model.backStack.isEmpty
         forward.isEnabled = !model.forwardStack.isEmpty
         destination = model.isSearching ? .folder : model.destination
@@ -103,7 +150,7 @@ final class PathBarView: NSView, NSTextFieldDelegate {
         ])
         // On your Mac you choose here or everywhere; Drive searches the whole account, S3 the folder.
         let choosable = model.destination == .folder
-        scopeButton.title = "in " + scope + (choosable ? " ▾" : "")
+        scopeButton.title = "in " + scope
         scopeButton.popUpMenu = choosable ? { [weak self] in self?.scopeMenu() ?? NSMenu() } : nil
         // Only a choice looks like a button; Drive's and S3's scope just says where.
         scopeButton.isInteractive = choosable
@@ -131,7 +178,7 @@ final class PathBarView: NSView, NSTextFieldDelegate {
     }
 
     private func scopeMenu() -> NSMenu {
-        let model = workspace.selected
+        guard let model = pane else { return NSMenu() }
         let menu = NSMenu()
         let here = ActionMenuItem("In \(Format.displayName(model.currentURL.path))") { model.searchScope = .folder }
         here.state = model.searchScope == .folder ? .on : .off
@@ -143,18 +190,18 @@ final class PathBarView: NSView, NSTextFieldDelegate {
     }
 
     private func endFind() {
-        let model = workspace.selected
+        guard let model = pane else { return }
         model.endFind()
         model.listFocusRequest += 1
     }
 
     func controlTextDidChange(_ notification: Notification) {
-        let model = workspace.selected
+        guard let model = pane else { return }
         if model.searchText != findField.stringValue { model.searchText = findField.stringValue }
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
-        let model = workspace.selected
+        guard let model = pane else { return false }
         switch selector {
         case #selector(NSResponder.cancelOperation(_:)):
             endFind()
@@ -202,7 +249,8 @@ final class PathBarView: NSView, NSTextFieldDelegate {
             remoteCrumbs.rootView = root
         } else {
             let view = RegionHostingView(rootView: root)
-            addSubview(view)
+            view.alphaValue = isActive ? 1 : 0.55
+            addSubview(view, positioned: .below, relativeTo: close)
             remoteCrumbs = view
         }
     }
@@ -224,17 +272,28 @@ final class PathBarView: NSView, NSTextFieldDelegate {
     }
 
     private var navEnd: CGFloat { 12 + 24 + 2 + 24 + 8 }
+    /// Whether there's room for the branch beside the path.
+    private var showsGit = true
+    /// Where the row's content ends: before the close button in a split tab.
+    private var contentEnd: CGFloat { bounds.width - (isSplit && !finding ? 34 : 0) }
 
     override func layout() {
         super.layout()
         back.frame = NSRect(x: 12, y: (bounds.height - 24) / 2, width: 24, height: 24)
         forward.frame = NSRect(x: 12 + 26, y: (bounds.height - 24) / 2, width: 24, height: 24)
-        let gitWidth = gitText.map { text in
+        close.frame = NSRect(x: bounds.width - 12 - 20, y: (bounds.height - 20) / 2, width: 20, height: 20)
+        // While finding, the field's own × is the one to press (esc too); the pane's would sit
+        // right beside it.
+        close.isHidden = !isSplit || finding
+        var gitWidth = gitText.map { text in
             ceil(TextLines.shared.line(text, font: gitFont, color: theme.textSecondary).width)
                 + (gitChanges.map { ceil(TextLines.shared.line(" · " + $0, font: gitFont, color: warning).width) } ?? 0) + 16
         } ?? 0
+        // The branch goes before the path does: in a narrow pane the path needs the room.
+        showsGit = gitWidth > 0 && contentEnd - navEnd - gitWidth >= 200
+        if !showsGit { gitWidth = 0 }
         let frame = NSRect(x: navEnd - 6, y: (bounds.height - Theme.smallControlHeight) / 2,
-                           width: max(0, bounds.width - navEnd + 6 - 16 - gitWidth), height: Theme.smallControlHeight)
+                           width: max(0, contentEnd - navEnd + 6 - 16 - gitWidth), height: Theme.smallControlHeight)
         crumbs.isHidden = destination != .folder || finding
         remoteCrumbs?.isHidden = finding
         crumbs.frame = frame
@@ -249,13 +308,19 @@ final class PathBarView: NSView, NSTextFieldDelegate {
 
     /// The field's rounded box, across the row after back and forward.
     private var findBox: NSRect {
-        NSRect(x: navEnd - 2, y: (bounds.height - 28) / 2, width: max(0, bounds.width - navEnd + 2 - 12), height: 28)
+        NSRect(x: navEnd - 2, y: (bounds.height - 28) / 2, width: max(0, contentEnd - navEnd + 2 - (isSplit ? 4 : 12)), height: 28)
     }
 
     override func draw(_ dirtyRect: NSRect) {
         theme.border.setFill()
         NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1).fill()
         let midY = bounds.midY
+        // In a split tab, the active pane's row sits on a raised field, back button to close.
+        if isSplit && isActive {
+            activeFill.setFill()
+            let field = NSRect(x: 6, y: (bounds.height - 28) / 2, width: max(0, bounds.width - 12), height: 28)
+            NSBezierPath(roundedRect: field, xRadius: Theme.controlRadius + 1, yRadius: Theme.controlRadius + 1).fill()
+        }
         if finding {
             let box = findBox
             findFill.setFill()
@@ -266,26 +331,31 @@ final class PathBarView: NSView, NSTextFieldDelegate {
         }
         // A place that isn't a folder ("Recents") shows its name.
         if destination != .folder && !destination.isRemote {
-            FileCellView.drawText(placeTitle, font: titleFont, color: theme.text, x: navEnd, midY: midY, width: bounds.width - navEnd - 16)
+            FileCellView.drawText(placeTitle, font: titleFont, color: isActive ? theme.text : theme.textTertiary,
+                                  x: navEnd, midY: midY, width: contentEnd - navEnd - 16)
         }
         // The repository's branch, and how many files changed.
-        guard let text = gitText else { return }
+        guard showsGit, let text = gitText else { return }
         let changes = gitChanges.map { " · " + $0 }
         let changesWidth = changes.map { ceil(TextLines.shared.line($0, font: gitFont, color: warning).width) } ?? 0
         let textWidth = ceil(TextLines.shared.line(text, font: gitFont, color: theme.textSecondary).width)
-        let x = bounds.width - 16 - changesWidth - textWidth
-        FileCellView.drawText(text, font: gitFont, color: theme.textSecondary, x: x, midY: midY, width: textWidth + 2)
+        let x = contentEnd - 16 - changesWidth - textWidth
+        FileCellView.drawText(text, font: gitFont, color: isActive ? theme.textSecondary : theme.textTertiary, x: x, midY: midY, width: textWidth + 2)
         if let changes {
-            FileCellView.drawText(changes, font: gitFont, color: warning, x: x + textWidth, midY: midY, width: changesWidth + 2)
+            FileCellView.drawText(changes, font: gitFont, color: isActive ? warning : warning.withAlphaComponent(0.6),
+                                  x: x + textWidth, midY: midY, width: changesWidth + 2)
         }
     }
 
     /// The empty part of the row opens Find; while finding, a click anywhere in the box types there.
     override func mouseDown(with event: NSEvent) {
+        guard let pane else { return }
         if finding {
+            workspace.activate(pane)
             window?.makeFirstResponder(findField)
         } else {
-            workspace.selected.openFind()
+            workspace.activate(pane)
+            pane.openFind()
         }
     }
 
@@ -297,29 +367,31 @@ final class PathBarView: NSView, NSTextFieldDelegate {
 /// The find field in the path row.
 final class FindField: NSTextField {}
 
-/// The view controls at the right of the tab bar: the sort (with the other view options in its
-/// menu), list or gallery, and the details panel.
+/// The view controls at the right of the tab bar, as three kinds of control so each reads as
+/// what it is: the sort, a menu (with a chevron, the other view options inside); list or
+/// gallery, one choice on a shared track; and the details panel, a switch set apart by a rule.
 final class ViewControlsView: NSView {
     private let workspace: Workspace
     private let theme = TableTheme()
     private let options: QuietButton
-    private let list: QuietButton
-    private let gallery: QuietButton
+    private let layoutChoice: BarSegmented
+    private let rule = NSView()
     private let details: QuietButton
     private var generation = 0
 
     init(workspace: Workspace) {
         self.workspace = workspace
         options = QuietButton("Options", help: "Sort and view options", theme: theme)
-        list = QuietButton("List", help: "As List (⌥⌘1)", theme: theme)
-        gallery = QuietButton("Gallery", help: "As Gallery (⌥⌘2)", theme: theme)
+        layoutChoice = BarSegmented(["List", "Gallery"], theme: theme)
         details = QuietButton("Details", help: "Details (⌘I)", theme: theme)
         super.init(frame: .zero)
         options.popUpMenu = { [weak self] in self?.optionsMenu() ?? NSMenu() }
-        list.action = { [weak workspace] in workspace?.selected.layout = .list }
-        gallery.action = { [weak workspace] in workspace?.selected.layout = .gallery }
+        layoutChoice.toolTip = "As List (⌥⌘1) or Gallery (⌥⌘2)"
+        layoutChoice.onSelect = { [weak workspace] index in workspace?.selected.layout = index == 0 ? .list : .gallery }
+        rule.wantsLayer = true
+        rule.layer?.backgroundColor = NSColor(Theme.colors.borderHover).cgColor
         details.action = { Prefs.shared.showInspector.toggle() }
-        for view in [options, list, gallery, details] { addSubview(view) }
+        for view in [options, layoutChoice, rule, details] { addSubview(view) }
         refresh()
     }
 
@@ -344,10 +416,8 @@ final class ViewControlsView: NSView {
         let sortable = model.destination == .folder && !model.isSearching
         options.title = sortable ? Self.sortTitle(model.sort) : "Options"
         let hasLayout = model.layoutPlace != nil
-        list.isHidden = !hasLayout
-        gallery.isHidden = !hasLayout
-        list.isOn = hasLayout && model.layout == .list
-        gallery.isOn = hasLayout && model.layout == .gallery
+        layoutChoice.isHidden = !hasLayout
+        layoutChoice.selected = model.layout == .gallery ? 1 : 0
         details.isOn = Prefs.shared.showInspector
         needsLayout = true
         superview?.needsLayout = true
@@ -364,18 +434,30 @@ final class ViewControlsView: NSView {
         return name + (sort.ascending ? " ↑" : " ↓")
     }
 
+    /// Gaps: a wide one, with the rule in it, before Details; a smaller one between the others.
+    private static let ruleGap: CGFloat = 17
+    private static let gap: CGFloat = 8
+
     var width: CGFloat {
-        [options, list, gallery, details].filter { !$0.isHidden }.reduce(0) { $0 + $1.width + 2 } + 10
+        10 + options.width + Self.gap + (layoutChoice.isHidden ? 0 : layoutChoice.width + Self.ruleGap) + details.width + 2
     }
 
     override func layout() {
         super.layout()
-        var x = bounds.width - 10
-        for button in [details, gallery, list, options] where !button.isHidden {
-            x -= button.width
-            button.frame = NSRect(x: x, y: (bounds.height - 26) / 2, width: button.width, height: 26)
-            x -= 2
+        let height: CGFloat = 26
+        let y = (bounds.height - height) / 2
+        var x = bounds.width - 10 - details.width
+        details.frame = NSRect(x: x, y: y, width: details.width, height: height)
+        if !layoutChoice.isHidden {
+            rule.isHidden = false
+            rule.frame = NSRect(x: x - (Self.ruleGap + 1) / 2, y: bounds.midY - 7, width: 1, height: 14)
+            x -= Self.ruleGap + layoutChoice.width
+            layoutChoice.frame = NSRect(x: x, y: y, width: layoutChoice.width, height: height)
+        } else {
+            rule.isHidden = true
         }
+        x -= Self.gap + options.width
+        options.frame = NSRect(x: x, y: y, width: options.width, height: height)
     }
 
     private func optionsMenu() -> NSMenu {

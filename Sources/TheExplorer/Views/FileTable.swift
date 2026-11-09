@@ -858,7 +858,7 @@ final class FileRowView: NSTableRowView {
         let path = NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5)
         if isSelected {
             // A plain fill, a shade lighter while the list has the keyboard.
-            (table.isFocused ? theme.accentSoft : theme.accentSoft.withAlphaComponent(0.6)).setFill()
+            (table.isFocused ? theme.selection : theme.selectionQuiet).setFill()
             path.fill()
         } else if table.hoveredLine == line || HoverPreview.on {
             theme.hoverFill.setFill()
@@ -889,7 +889,7 @@ struct FileTableLayout {
     static let inset: CGFloat = 10
     static let spacing: CGFloat = 10
     static let marker: CGFloat = 10
-    static let typeWidth: CGFloat = 140
+    static let typeWidth: CGFloat = 104
     static let sizeWidth: CGFloat = 76
     static let dateWidth: CGFloat = 110
     /// The type icon before each name.
@@ -1053,7 +1053,7 @@ final class FileCellView: NSView {
         }
 
         // Kind, in words.
-        let kind = self.kind ?? (item.isFolder ? "Folder" : item.kindDescription)
+        let kind = self.kind ?? item.shortKind
         self.kind = kind
         if let type = layout.type {
             Self.drawText(kind, font: theme.meta, color: theme.textSecondary, x: type.lowerBound, midY: midY,
@@ -1315,6 +1315,9 @@ final class TextLines {
 final class TableTheme {
     let background, border, text, textSecondary, textTertiary, body: NSColor
     let accent, accentSoft, hoverFill, raisedHover: NSColor
+    /// The selection: clearly lighter than a hovered row while the list has the keyboard, and
+    /// a step quieter in the other pane, or when the keyboard is elsewhere.
+    let selection, selectionQuiet: NSColor
     private let warning, hot: NSColor
     let name = NSFont.systemFont(ofSize: 12.5)
     let nameBold = NSFont.systemFont(ofSize: 12.5, weight: .medium)
@@ -1345,6 +1348,9 @@ final class TableTheme {
         accentSoft = NSColor(Theme.accentSoft)
         hoverFill = NSColor(Theme.colors.hoverFill)
         raisedHover = NSColor(Theme.colors.raisedHover)
+        let strong = NSColor(Theme.colors.accentStrong)
+        selection = accentSoft.usingColorSpace(.sRGB)?.blended(withFraction: 0.45, of: strong.usingColorSpace(.sRGB) ?? strong) ?? accentSoft
+        selectionQuiet = accentSoft
         warning = NSColor(Theme.warning)
         hot = NSColor(Theme.hot)
     }

@@ -138,7 +138,7 @@ final class BarSegmented: NSView {
     var onSelect: (Int) -> Void = { _ in }
 
     private let theme: TableTheme
-    private let font = NSFont.systemFont(ofSize: 11, weight: .medium)
+    private let font = NSFont.systemFont(ofSize: 12)
     private let track = NSColor(Theme.track)
     private let trackSelected = NSColor(Theme.trackSelected)
     private let control = NSColor(Theme.control)
@@ -160,7 +160,7 @@ final class BarSegmented: NSView {
     override var mouseDownCanMoveWindow: Bool { false }
 
     private var segmentWidths: [CGFloat] {
-        options.map { ceil(TextLines.shared.line($0, font: font, color: theme.text).width) + 16 }
+        options.map { ceil(TextLines.shared.line($0, font: font, color: theme.text).width) + 18 }
     }
 
     var width: CGFloat { segmentWidths.reduce(0, +) + CGFloat(max(0, options.count - 1)) * 2 + 4 }
@@ -169,7 +169,7 @@ final class BarSegmented: NSView {
     private func segmentRects() -> [NSRect] {
         var x: CGFloat = 2
         return segmentWidths.map { width in
-            let rect = NSRect(x: x, y: 2, width: width, height: Self.height - 4)
+            let rect = NSRect(x: x, y: 2, width: width, height: bounds.height - 4)
             x += width + 2
             return rect
         }
@@ -370,7 +370,13 @@ final class QuietButton: NSView {
     /// view would otherwise count as a drag handle and the window server could keep the release).
     override var mouseDownCanMoveWindow: Bool { false }
 
-    var width: CGFloat { ceil(TextLines.shared.line(title, font: font, color: theme.text).width) + 20 }
+    /// A menu's button ends in a small chevron, so it reads as a menu and not a switch.
+    private var showsChevron: Bool { popUpMenu != nil && isInteractive }
+    private static let chevronSpace: CGFloat = 13
+
+    var width: CGFloat {
+        ceil(TextLines.shared.line(title, font: font, color: theme.text).width) + 20 + (showsChevron ? Self.chevronSpace - 4 : 0)
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         guard isInteractive else {
@@ -381,8 +387,22 @@ final class QuietButton: NSView {
             (pressed ? pressedFill : (hovering ? theme.raisedHover : raised)).setFill()
             NSBezierPath(roundedRect: bounds, xRadius: Theme.controlRadius, yRadius: Theme.controlRadius).fill()
         }
-        FileCellView.drawText(title, font: font, color: isOn || hovering ? theme.text : theme.textSecondary,
-                              x: 0, midY: bounds.midY, width: bounds.width, alignment: .center)
+        let color = isOn || hovering ? theme.text : theme.textSecondary
+        guard showsChevron else {
+            FileCellView.drawText(title, font: font, color: color, x: 0, midY: bounds.midY, width: bounds.width, alignment: .center)
+            return
+        }
+        FileCellView.drawText(title, font: font, color: color, x: 10, midY: bounds.midY, width: bounds.width - 10 - Self.chevronSpace)
+        let chevron = NSBezierPath()
+        let x = bounds.maxX - Self.chevronSpace + 1, y = bounds.midY - 1.5
+        chevron.move(to: NSPoint(x: x, y: y))
+        chevron.line(to: NSPoint(x: x + 3.5, y: y + 3.5))
+        chevron.line(to: NSPoint(x: x + 7, y: y))
+        chevron.lineWidth = 1.4
+        chevron.lineCapStyle = .round
+        chevron.lineJoinStyle = .round
+        (hovering ? theme.text : theme.textTertiary).setStroke()
+        chevron.stroke()
     }
 
     override func updateTrackingAreas() {

@@ -424,10 +424,9 @@ private final class ItemCardView: NSView {
             y += height
         }
 
-        // Open, Copy path and more, at the foot of the column when there's room.
+        // Open, Copy path and more, right under what they act on.
         let buttonHeight: CGFloat = 28
-        let visible = superview?.bounds.height ?? bounds.height
-        let buttonsY = max(y + 20, visible - Self.padding - buttonHeight)
+        let buttonsY = y + 20
         var buttonX = x
         open.isHidden = isCurrentFolder
         for button in [open, copyPath, more] where !button.isHidden {

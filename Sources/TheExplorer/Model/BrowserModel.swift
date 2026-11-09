@@ -68,7 +68,7 @@ enum RowSorter {
         case .name:
             return sort(rows, keys: rows.map(\.item.name), spec, foldersFirst) { $0.localizedStandardCompare($1) }
         case .kind:
-            return sort(rows, keys: rows.map { TypeChip.style(for: $0.item).label }, spec, foldersFirst) { $0.compare($1) }
+            return sort(rows, keys: rows.map(\.item.shortKind), spec, foldersFirst) { $0.localizedStandardCompare($1) }
         case .size:
             let keys = rows.map { row in row.size ?? (row.item.isFolder ? folderSize(row.item.path) : nil) ?? -1 }
             return sort(rows, keys: keys, spec, foldersFirst) { $0 == $1 ? .orderedSame : ($0 < $1 ? .orderedAscending : .orderedDescending) }

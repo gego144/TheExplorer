@@ -129,10 +129,7 @@ struct PanesRegion: View {
         if let second = workspace.secondPane(of: tab) {
             GeometryReader { proxy in
                 let width = proxy.size.width - 1
-                // Neither pane gets narrower than the list's columns need (with room for names),
-                // however the divider was dragged or the window resized.
-                let minimum = min(380, width / 2)
-                let first = min(max(width * workspace.splitFraction(of: tab), minimum), width - minimum)
+                let first = Self.firstWidth(of: proxy.size.width, fraction: workspace.splitFraction(of: tab))
                 HStack(spacing: 0) {
                     SplitPane(model: tab, workspace: workspace, isActive: active === tab) { PaneContent(model: tab) }
                         .frame(width: first)
@@ -152,6 +149,15 @@ struct PanesRegion: View {
         } else {
             PaneContent(model: active)
         }
+    }
+
+    /// The first pane's width in a split `total` wide (the divider takes 1pt). Neither pane gets
+    /// narrower than the list's columns need (with room for names), however the divider was
+    /// dragged or the window resized. The path rows above use it too, to meet where the panes do.
+    static func firstWidth(of total: CGFloat, fraction: Double) -> CGFloat {
+        let width = total - 1
+        let minimum = min(380, width / 2)
+        return min(max(width * fraction, minimum), width - minimum)
     }
 }
 
@@ -284,9 +290,8 @@ private struct DividerGrip: NSViewRepresentable {
     }
 }
 
-/// One side of a split tab: a slim header saying where it is, then the pane's own list. The
-/// active pane's header is raised like the selected tab; the other pane's list is dimmed, so
-/// which side you're working in reads at a glance.
+/// One side of a split tab: the pane's own list (its path row is above it, in the shell). The
+/// other pane's list is dimmed, so which side you're working in reads at a glance.
 private struct SplitPane<Content: View>: View {
     let model: BrowserModel
     let workspace: Workspace
@@ -294,24 +299,16 @@ private struct SplitPane<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        VStack(spacing: 0) {
-            SplitPaneHeader(model: model, isActive: isActive, onActivate: { activate() }, onClose: { workspace.close(pane: model) })
-            content()
-                .overlay(InactivePaneDim(isActive: isActive))
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .environment(\.isActivePane, isActive)
-        .environment(\.activatePane) { workspace.activate(model) }
-        .environment(\.switchPane) { workspace.switchPane() }
-        .environment(\.splitWorkspace, workspace)
-        #if DEBUG
-        .debugRowFrame(named: "pane-\(workspace.currentTab === model ? 1 : 2)")
-        #endif
-    }
-
-    private func activate() {
-        workspace.activate(model)
-        model.listFocusRequest += 1
+        content()
+            .overlay(InactivePaneDim(isActive: isActive))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .environment(\.isActivePane, isActive)
+            .environment(\.activatePane) { workspace.activate(model) }
+            .environment(\.switchPane) { workspace.switchPane() }
+            .environment(\.splitWorkspace, workspace)
+            #if DEBUG
+            .debugRowFrame(named: "pane-\(workspace.currentTab === model ? 1 : 2)")
+            #endif
     }
 }
 
@@ -324,60 +321,6 @@ private struct InactivePaneDim: View {
         Rectangle()
             .fill(Theme.background.opacity(isActive ? 0 : 0.38))
             .allowsHitTesting(false)
-    }
-}
-
-private struct SplitPaneHeader: View {
-    let model: BrowserModel
-    let isActive: Bool
-    let onActivate: () -> Void
-    let onClose: () -> Void
-    @State private var hovering = HoverPreview.on
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: symbol)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(isActive ? Theme.text : Theme.textTertiary)
-            Text(model.title)
-                .font(.system(size: 11.5, weight: .semibold))
-                .foregroundStyle(isActive ? Theme.text : Theme.textTertiary)
-                .lineLimit(1)
-            if model.destination == .folder && !model.isSearching {
-                Text(Format.path(model.currentURL.deletingLastPathComponent().path))
-                    .font(Theme.monoSmall)
-                    .foregroundStyle(Theme.textTertiary)
-                    .lineLimit(1)
-                    .truncationMode(.head)
-            }
-            Spacer(minLength: 4)
-            Button(action: onClose) {
-                Image(systemName: "xmark").font(.system(size: 8.5, weight: .bold)).frame(width: 14, height: 14)
-            }
-            .buttonStyle(GhostButtonStyle(padding: 2, tint: Theme.textTertiary))
-            .opacity(hovering || isActive ? 1 : 0)
-            .help("Close Pane")
-        }
-        .padding(.horizontal, 12)
-        .frame(height: 26)
-        .background(isActive ? Theme.raised : Theme.background)
-        .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
-        .contentShape(.rect)
-        .onTapGesture(perform: onActivate)
-        .hoverTracking { hovering = $0 }
-        .animation(Theme.hoverAnimation, value: hovering)
-    }
-
-    private var symbol: String {
-        if model.isSearching { return "magnifyingglass" }
-        switch model.destination {
-        case .folder: return "folder"
-        case .recents: return "clock"
-        case .newFiles: return "sparkles"
-        case .storage: return "chart.pie"
-        case .s3: return "cloud"
-        case .drive: return "externaldrive.connected.to.line.below"
-        }
     }
 }
 

@@ -385,7 +385,7 @@ final class GalleryGridView: NSView, NSDraggingSource {
         let chipWidth = min(tileWidth, ceil(fitted.width) + 12)
         let chip = NSRect(x: frame.midX - chipWidth / 2, y: frame.maxY + 6, width: chipWidth, height: Self.nameHeight)
         if isSelected {
-            (isFocused ? theme.accentSoft : theme.accentSoft.withAlphaComponent(0.6)).setFill()
+            (isFocused ? theme.selection : theme.selectionQuiet).setFill()
             NSBezierPath(roundedRect: chip, xRadius: 4, yRadius: 4).fill()
         }
         FileCellView.drawText(item.name, font: font, color: color, x: chip.minX + 6, midY: chip.midY, width: chip.width - 12,

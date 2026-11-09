@@ -87,6 +87,8 @@ final class WorkspaceShellView: NSView {
     private var tabs: NSView!
     private var controls: ViewControlsView!
     private var pathBar: NSView!
+    /// The second pane's path row, beside the first's while the tab is split.
+    private var pathBar2: NSView!
     private var palette: CommandPaletteView!
     private var sidebar: NSView!
     private var panes: RegionHostingView!
@@ -96,6 +98,7 @@ final class WorkspaceShellView: NSView {
     /// What decides the layout, read under Observation tracking so a change re-lays it out.
     private var showsSidebar = true
     private var showsInspector = true
+    private var splitFraction: Double?
     private var tracking = false
 
     static let statusHeight: CGFloat = 28
@@ -126,6 +129,8 @@ final class WorkspaceShellView: NSView {
         addSubview(controls)
         pathBar = PathBarView(workspace: workspace, values: values)
         addSubview(pathBar)
+        pathBar2 = PathBarView(workspace: workspace, values: values, side: .second)
+        addSubview(pathBar2)
         sidebar = SidebarPanel(workspace: workspace, values: values)
         addSubview(sidebar)
         panes = host(PanesRegion(workspace: workspace), name: "list")
@@ -161,11 +166,13 @@ final class WorkspaceShellView: NSView {
             let prefs = Prefs.shared
             showsSidebar = prefs.showSidebar
             showsInspector = prefs.showInspector && InspectorView.hasContent(workspace.selected)
+            splitFraction = workspace.isSplit ? workspace.splitFraction(of: workspace.currentTab) : nil
         } onChange: { [weak self] in
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.trackLayout()
                 self.needsLayout = true
+                self.needsDisplay = true
             }
         }
     }
@@ -179,7 +186,7 @@ final class WorkspaceShellView: NSView {
     override func layout() {
         super.layout()
         #if DEBUG
-        for (name, view) in [("tabs", tabs), ("command", pathBar), ("list", panes), ("status", status)] where Self.hidden.contains(name) {
+        for (name, view) in [("tabs", tabs), ("command", pathBar), ("command", pathBar2), ("list", panes), ("status", status)] where Self.hidden.contains(name) {
             view?.isHidden = true
         }
         if Self.hidden.contains("sidebar") { showsSidebar = false }
@@ -201,16 +208,34 @@ final class WorkspaceShellView: NSView {
         sidebar.isHidden = !showsSidebar
         inspector.isHidden = !showsInspector
         sidebar.frame = NSRect(x: 0, y: top, width: left, height: bodyHeight)
-        pathBar.frame = NSRect(x: left, y: top, width: middle, height: PathBarView.height)
+        // Split, each pane has its own path row, the two meeting where the panes do.
+        if let splitFraction {
+            let first = PanesRegion.firstWidth(of: middle, fraction: splitFraction)
+            pathBar.frame = NSRect(x: left, y: top, width: first, height: PathBarView.height)
+            pathBar2.frame = NSRect(x: left + first + 1, y: top, width: max(0, middle - first - 1), height: PathBarView.height)
+            pathBar2.isHidden = false
+            dividerX = left + first
+        } else {
+            pathBar.frame = NSRect(x: left, y: top, width: middle, height: PathBarView.height)
+            pathBar2.isHidden = true
+            dividerX = nil
+        }
         panes.frame = NSRect(x: left, y: top + PathBarView.height, width: middle, height: max(0, bodyHeight - PathBarView.height))
         inspector.frame = NSRect(x: width - right, y: top, width: right, height: bodyHeight)
         status.frame = NSRect(x: 0, y: height - Self.statusHeight, width: width, height: Self.statusHeight)
         palette.frame = bounds
     }
 
-    /// The line under the top bar.
+    /// Where the split panes meet, so the line between them runs up through the path rows.
+    private var dividerX: CGFloat?
+
+    /// The line under the top bar, and the split's divider beside the path rows.
     override func draw(_ dirtyRect: NSRect) {
         NSColor(Theme.border).setFill()
         NSRect(x: 0, y: TabStripView.height - 1, width: bounds.width, height: 1).fill()
+        if let dividerX {
+            NSColor(Theme.fieldBorder).setFill()
+            NSRect(x: dividerX, y: TabStripView.height, width: 1, height: PathBarView.height).fill()
+        }
     }
 }
