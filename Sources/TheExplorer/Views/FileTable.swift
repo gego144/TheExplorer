@@ -577,12 +577,16 @@ final class FileTableController: NSObject, NSTableViewDataSource, NSTableViewDel
         let point = tableView.convert(info.draggingLocation, from: nil)
         let line = tableView.row(at: point)
         var target: Int?
-        if config.onDropInto != nil, let item = self.row(atLine: line), item.item.isFolder {
-            // A folder can't go into itself.
-            let dragged = Self.urls(from: info.draggingPasteboard)
-            if !dragged.contains(item.id) { target = line }
+        let dragged = Self.urls(from: info.draggingPasteboard)
+        let copying = NSEvent.modifierFlags.contains(.option)
+        if config.onDropInto != nil, let item = self.row(atLine: line), item.item.isFolder,
+           Self.dropChangesSomething(dragged, into: item.id, copying: copying) {
+            target = line
         }
+        // The list's own folder, when it's one folder's list (search results come from many).
+        let listFolder = config.showLocation ? nil : rows.first { $0.depth == 0 }?.id.deletingLastPathComponent()
         let background = target == nil && config.onDropBackground != nil
+            && listFolder.map { Self.dropChangesSomething(dragged, into: $0, copying: copying) } ?? true
         setDropTarget(line: target, background: background)
         guard target != nil || background else { return [] }
         if let target { tableView.setDropRow(target, dropOperation: .on) } else { tableView.setDropRow(-1, dropOperation: .on) }
@@ -614,6 +618,15 @@ final class FileTableController: NSObject, NSTableViewDataSource, NSTableViewDel
             dropOnBackground = background
             scrollView.showsDropOutline = background
         }
+    }
+
+    /// Whether dropping `dragged` into `folder` would move or copy anything: not a folder into
+    /// itself or inside itself, and not files into the folder they're already in (unless ⌥
+    /// copies them). S3 and Drive items always can; their side decides.
+    static func dropChangesSomething(_ dragged: [URL], into folder: URL, copying: Bool) -> Bool {
+        guard folder.isFileURL else { return !dragged.contains(folder) }
+        let files = dragged.filter(\.isFileURL)
+        return files.count < dragged.count || !FileTransfer.validSources(files, into: folder, duplicating: copying).isEmpty
     }
 
     /// Files, and S3 or Drive items (plain URLs), in the order they were dragged.
@@ -833,8 +846,10 @@ final class FileTableView: NSTableView {
         controller?.draggingEnded()
     }
 
+    /// No super: NSTableView doesn't implement draggingEnded, and calling it threw inside
+    /// AppKit's end of the drag, which then never finished. The first drag out of the list
+    /// worked; every later one couldn't start and turned into a row selection instead.
     override func draggingEnded(_ sender: NSDraggingInfo) {
-        super.draggingEnded(sender)
         controller?.draggingEnded()
     }
 }

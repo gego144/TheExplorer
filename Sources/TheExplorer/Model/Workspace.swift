@@ -6,12 +6,39 @@ import SwiftUI
 /// open unique (SwiftUI otherwise reuses a window already showing an equal value).
 struct WindowState: Codable, Hashable {
     var id = UUID()
+    /// Each tab's place: a folder's path, or the address of an S3 or Google Drive folder.
     var paths: [String]
     var selected: Int
     /// Each tab's second pane, when it's split.
     var splits: [String?]?
     /// Where each split tab's divider is, as a fraction of the width.
     var splitFractions: [Double?]?
+
+    /// A pane's place as it's saved: where it is in S3 or Drive when it's showing one,
+    /// otherwise its folder.
+    @MainActor static func place(of pane: BrowserModel) -> String {
+        pane.destination.isRemote ? pane.historyURL.absoluteString : pane.currentURL.path
+    }
+
+    /// The S3 or Drive address a saved place is, if it's one.
+    static func cloudURL(_ place: String) -> URL? {
+        guard place.hasPrefix(S3Location.scheme + ":") || place.hasPrefix(DriveLocation.scheme + ":") else { return nil }
+        return URL(string: place)
+    }
+
+    /// Whether a saved place can be opened again: a folder that's still there, or any S3 or
+    /// Drive address (if it's gone, that pane says so, as it would on going there).
+    static func canRestore(_ place: String) -> Bool {
+        cloudURL(place) != nil || FileManager.default.fileExists(atPath: place)
+    }
+
+    /// A pane showing a saved place.
+    @MainActor static func pane(at place: String) -> BrowserModel {
+        guard let url = cloudURL(place) else { return BrowserModel(url: URL(fileURLWithPath: place)) }
+        let pane = BrowserModel()
+        pane.navigate(to: url, recordHistory: false)
+        return pane
+    }
 }
 
 /// One window: an ordered set of tabs, each a full browser with its own folder and history.
@@ -46,17 +73,16 @@ final class Workspace {
     }
 
     init(state: WindowState?) {
-        let exists = { (path: String) in FileManager.default.fileExists(atPath: path) }
-        let kept = (state?.paths ?? []).enumerated().filter { exists($0.element) }
+        let kept = (state?.paths ?? []).enumerated().filter { WindowState.canRestore($0.element) }
         if kept.isEmpty {
             tabs = [BrowserModel()]
             selectedIndex = 0
         } else {
-            tabs = kept.map { BrowserModel(url: URL(fileURLWithPath: $0.element)) }
+            tabs = kept.map { WindowState.pane(at: $0.element) }
             selectedIndex = min(max(0, state?.selected ?? 0), kept.count - 1)
             for (tab, (index, _)) in zip(tabs, kept) {
-                if let splits = state?.splits, splits.indices.contains(index), let path = splits[index], exists(path) {
-                    self.splits[ObjectIdentifier(tab)] = BrowserModel(url: URL(fileURLWithPath: path))
+                if let splits = state?.splits, splits.indices.contains(index), let place = splits[index], WindowState.canRestore(place) {
+                    self.splits[ObjectIdentifier(tab)] = WindowState.pane(at: place)
                     if let fractions = state?.splitFractions, fractions.indices.contains(index), let fraction = fractions[index] {
                         self.fractions[ObjectIdentifier(tab)] = Self.clamped(fraction)
                     }
@@ -66,9 +92,9 @@ final class Workspace {
     }
 
     var state: WindowState {
-        let splits = tabs.map { secondPane(of: $0).map { pane in pane.currentURL.path } }
+        let splits = tabs.map { secondPane(of: $0).map(WindowState.place(of:)) }
         let fractions = tabs.map { self.fractions[ObjectIdentifier($0)] }
-        return WindowState(paths: tabs.map(\.currentURL.path), selected: selectedIndex,
+        return WindowState(paths: tabs.map(WindowState.place(of:)), selected: selectedIndex,
                            splits: splits.contains { $0 != nil } ? splits : nil,
                            splitFractions: fractions.contains { $0 != nil } ? fractions : nil)
     }
@@ -80,11 +106,23 @@ final class Workspace {
     }
 
     @ObservationIgnored private var occlusionObserver: NSObjectProtocol?
+    @ObservationIgnored private var closeObserver: NSObjectProtocol?
 
     /// Follows whether the window is on screen.
     func observeOcclusion(of window: NSWindow?) {
         if let occlusionObserver { NotificationCenter.default.removeObserver(occlusionObserver) }
         occlusionObserver = nil
+        if let closeObserver { NotificationCenter.default.removeObserver(closeObserver) }
+        closeObserver = nil
+        // The last window to close keeps its tabs for the next one.
+        if let window {
+            closeObserver = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    Session.windowClosed(self)
+                }
+            }
+        }
         // Scripted runs' windows sit behind whatever you're doing, which would count as hidden.
         guard !Session.isScripted else { return }
         // A closed window's panes stop following their folders.
@@ -477,7 +515,20 @@ enum Session {
     static func save() {
         guard !isScripted else { return }
         let states = live.compactMap(\.workspace).map(\.state)
+        // No windows open: what the last one to close kept stays (see windowClosed).
+        guard !states.isEmpty else { return }
         UserDefaults.standard.set(try? JSONEncoder().encode(states), forKey: key)
+    }
+
+    /// A window closed. The last one keeps its tabs: the next window (from the Dock, or the
+    /// next launch) opens them again, rather than the last folder on your Mac. Before, closing
+    /// the window and then quitting saved no windows at all.
+    static func windowClosed(_ workspace: Workspace) {
+        live.removeAll { $0.workspace == nil || $0.workspace === workspace }
+        if lastActive === workspace { lastActive = nil }
+        guard live.isEmpty, !isScripted else { return }
+        UserDefaults.standard.set(try? JSONEncoder().encode([workspace.state]), forKey: key)
+        restored = false
     }
 
     /// The saved windows, once per launch, for the first window to restore.
@@ -486,7 +537,7 @@ enum Session {
         restored = true
         guard let data = UserDefaults.standard.data(forKey: key),
               let states = try? JSONDecoder().decode([WindowState].self, from: data) else { return [] }
-        return states.filter { state in state.paths.contains { FileManager.default.fileExists(atPath: $0) } }
+        return states.filter { state in state.paths.contains(where: WindowState.canRestore) }
     }
 
     /// Called by a window that opened without saved state; later windows don't restore.

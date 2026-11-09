@@ -102,8 +102,10 @@ final class FolderSizeStore {
         guard let url = Self.fileURL else { return }
         let heard = FileIndex.shared.heardThrough()
         drainInbox()
-        // Folders that are gone aren't worth keeping.
-        let entries = sizes.filter { Darwin.access($0.key, F_OK) == 0 }.mapValues {
+        // Everything, as it is: checking each folder still exists here made quitting take 11s
+        // with 140,000 sizes (and over 100s with a cold disk). Gone ones are let go in the
+        // background after the next launch (forgetGone).
+        let entries = sizes.mapValues {
             Saved.Entry(bytes: $0.bytes, files: $0.files, complete: $0.complete, measuredAt: $0.measuredAt, cost: $0.cost,
                         eventID: $0.eventID, addedUp: $0.addedUp)
         }
@@ -131,6 +133,26 @@ final class FolderSizeStore {
                 shared.sizes.merge(sizes) { current, _ in current }
                 shared.changed.merge(changed.filter { sizes[$0.key] != nil }) { max($0, $1) }
                 NotificationCenter.default.post(name: didChange, object: shared)
+            }
+        }
+        forgetGone(Array(sizes.keys))
+    }
+
+    /// Lets go of saved sizes for folders that no longer exist: a while after launch, at
+    /// background priority (one lookup per folder, ~12s for 140,000 on a warm disk), off the
+    /// main thread so neither launching nor quitting waits for it.
+    nonisolated private static func forgetGone(_ paths: [String]) {
+        guard !paths.isEmpty else { return }
+        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 30) {
+            let gone = paths.filter { Darwin.access($0, F_OK) != 0 && errno == ENOENT }
+            guard !gone.isEmpty else { return }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    for path in gone where Darwin.access(path, F_OK) != 0 {
+                        shared.sizes[path] = nil
+                        shared.changed[path] = nil
+                    }
+                }
             }
         }
     }

@@ -172,12 +172,26 @@ struct FileTableTests {
         #expect(background == dragged)
         #expect(!table.dropOnBackground)
 
-        // A folder dragged over itself goes to the folder shown instead, never into itself.
+        // A folder dragged over itself goes nowhere: not into itself, and not into the folder
+        // shown, where it already is.
         let ownFolder = FakeDrag(urls: [rows[0].id], at: point(onLine: 0))
-        _ = table.tableView(table.table, validateDrop: ownFolder, proposedRow: 0, proposedDropOperation: .on)
-        #expect(table.dropLine == nil && table.dropOnBackground)
+        #expect(table.tableView(table.table, validateDrop: ownFolder, proposedRow: 0, proposedDropOperation: .on) == [])
+        #expect(table.dropLine == nil && !table.dropOnBackground)
+
+        // Files from this list: into a folder beside them, yes; dropped back among themselves, no.
+        let siblings = [rows[1].id, rows[2].id]
+        let siblingsOverFolder = FakeDrag(urls: siblings, at: point(onLine: 0))
+        #expect(table.tableView(table.table, validateDrop: siblingsOverFolder, proposedRow: 0, proposedDropOperation: .on) == .move)
+        #expect(table.dropLine == 0)
+        let siblingsOverFile = FakeDrag(urls: siblings, at: point(onLine: 2))
+        #expect(table.tableView(table.table, validateDrop: siblingsOverFile, proposedRow: 2, proposedDropOperation: .on) == [])
+        #expect(table.dropLine == nil && !table.dropOnBackground)
         table.draggingEnded()
         #expect(!table.dropOnBackground)
+
+        // The end of a drag reaches the list as AppKit sends it. Passing it on to NSTableView,
+        // which has no such method, threw and left every later drag unable to start.
+        (table.table as! FileTableView).draggingEnded(overFolder)
     }
 
     @Test func columnsNeverOverlap() {
@@ -208,3 +222,4 @@ struct FileTableTests {
         #expect(narrowRecents.location == nil && narrowRecents.type != nil)
     }
 }
+
