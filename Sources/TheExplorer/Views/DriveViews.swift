@@ -216,21 +216,11 @@ struct DriveBreadcrumbs: View {
 
     var body: some View {
         let drive = model.drive
-        HStack(spacing: 4) {
-            ForEach(Array(drive.trail.enumerated()), id: \.offset) { index, location in
-                if index > 0 { Text("/").foregroundStyle(Theme.textTertiary) }
-                DriveChip(location: location, isCurrent: index == drive.trail.count - 1 && !drive.isSearching, model: model)
-            }
-            if drive.isSearching {
-                Text("/").foregroundStyle(Theme.textTertiary)
-                Text("Search “\(drive.query)”")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.text)
-                    .lineLimit(1)
-            }
+        let trail = drive.trail
+        FoldingCrumbs(titles: trail.map(DriveChip.title(of:)), open: { model.showDrive(trail[$0]) },
+                      suffix: drive.isSearching ? "Search “\(drive.query)”" : nil) { index in
+            DriveChip(location: trail[index], isCurrent: index == trail.count - 1 && !drive.isSearching, model: model)
         }
-        .fixedSize()
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -242,7 +232,7 @@ private struct DriveChip: View {
 
     var body: some View {
         Button { model.showDrive(location) } label: {
-            Text(title)
+            Text(Self.title(of: location))
         }
         .buttonStyle(CrumbStyle(isCurrent: isCurrent, highlighted: targeted))
         .dropDestination(for: URL.self) { urls, _ in
@@ -250,7 +240,7 @@ private struct DriveChip: View {
         } isTargeted: { targeted = $0 && !location.isVirtual }
     }
 
-    private var title: String {
+    static func title(of location: DriveLocation) -> String {
         guard location.id == DriveLocation.homeID else { return location.name }
         return DriveStore.shared.account(location.accountID).map(DriveStore.shared.title) ?? "Google Drive"
     }

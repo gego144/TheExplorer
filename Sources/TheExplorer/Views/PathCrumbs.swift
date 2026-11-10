@@ -314,3 +314,82 @@ final class ActionMenuItem: NSMenuItem {
 
     @objc private func runAction() { run() }
 }
+
+/// S3's and Google Drive's paths, as chips that fold like the local path's: when they don't
+/// fit, the middle folders go into a "…" menu, keeping the first and as many of the last as
+/// fit, and at the narrowest just "…" and the current folder, cut short. They never run past
+/// their row (over Back, or into the other pane's path).
+struct FoldingCrumbs<Chip: View>: View {
+    let titles: [String]
+    let open: (Int) -> Void
+    /// What follows the path, after a "/" ("Search “receipts”").
+    var suffix: String?
+    @ViewBuilder let chip: (Int) -> Chip
+
+    private enum Part: Hashable {
+        case step(Int)
+        case fold([Int])
+    }
+
+    /// From the whole path to the shortest, the first that fits is shown.
+    private var variants: [[Part]] {
+        let count = titles.count
+        guard count > 2 else { return [(0..<count).map(Part.step)] }
+        var variants: [[Part]] = [(0..<count).map(Part.step)]
+        for kept in stride(from: count - 2, through: 1, by: -1) {
+            variants.append([.step(0), .fold(Array(1..<(count - kept)))] + ((count - kept)..<count).map(Part.step))
+        }
+        return variants
+    }
+
+    private var narrowest: [Part] {
+        let count = titles.count
+        return count > 1 ? [.fold(Array(0..<(count - 1))), .step(count - 1)] : (0..<count).map(Part.step)
+    }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            ForEach(Array(variants.enumerated()), id: \.offset) { _, parts in
+                row(parts).fixedSize()
+            }
+            row(narrowest)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func row(_ parts: [Part]) -> some View {
+        HStack(spacing: 4) {
+            ForEach(Array(parts.enumerated()), id: \.offset) { index, part in
+                if index > 0 { slash }
+                switch part {
+                case .step(let step): chip(step)
+                case .fold(let hidden): fold(hidden)
+                }
+            }
+            if let suffix {
+                slash
+                Text(suffix)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.text)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    private var slash: some View { Text("/").foregroundStyle(Theme.textTertiary) }
+
+    private func fold(_ hidden: [Int]) -> some View {
+        Menu {
+            ForEach(hidden, id: \.self) { step in
+                Button(titles[step]) { open(step) }
+            }
+        } label: {
+            Text("…")
+        }
+        .menuStyle(.button)
+        .menuIndicator(.hidden)
+        .buttonStyle(CrumbStyle(isCurrent: false))
+        .fixedSize()
+        .help(hidden.map { titles[$0] }.joined(separator: " / "))
+    }
+}

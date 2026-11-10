@@ -249,6 +249,8 @@ final class PathBarView: NSView, NSTextFieldDelegate {
             remoteCrumbs.rootView = root
         } else {
             let view = RegionHostingView(rootView: root)
+            // Kept to its own part of the row: never over Back, or across into the other pane.
+            view.clipsToBounds = true
             view.alphaValue = isActive ? 1 : 0.55
             addSubview(view, positioned: .below, relativeTo: close)
             remoteCrumbs = view

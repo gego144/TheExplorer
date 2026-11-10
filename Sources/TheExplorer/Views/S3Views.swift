@@ -218,14 +218,10 @@ struct S3Breadcrumbs: View {
 
     var body: some View {
         if let location = model.s3.location {
-            HStack(spacing: 4) {
-                ForEach(Array(trail(location).enumerated()), id: \.element.url) { index, step in
-                    if index > 0 { Text("/").foregroundStyle(Theme.textTertiary) }
-                    S3Chip(title: step.title, location: step.location, isCurrent: step.location == location, model: model)
-                }
+            let steps = trail(location)
+            FoldingCrumbs(titles: steps.map(\.title), open: { model.showS3(steps[$0].location) }) { index in
+                S3Chip(title: steps[index].title, location: steps[index].location, isCurrent: steps[index].location == location, model: model)
             }
-            .fixedSize()
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

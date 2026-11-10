@@ -91,6 +91,11 @@ def seed():
     add("notes", "notes.txt", "text/plain", ["root-id"], b"Remember the milk.\n", modified="2026-10-10T12:00:00.000Z")
     add("readme", "README.md", "text/markdown", ["projects"], b"# Projects\n\nEverything for **2026**.\n")
     add("data", "data.csv", "text/csv", ["y2026"], b"name,amount\nAda,12\nGrace,30\n")
+    # A deep path with long names, for paths that have to fold.
+    add("marketing", "Marketing Materials", FOLDER, ["y2026"])
+    add("merch", "Merch Pics", FOLDER, ["marketing"])
+    add("graded", "MERCH COLOUR GRADED", FOLDER, ["merch"])
+    add("hoodie", "JESTR HOODIE.png", "image/png", ["graded"], png(64, 64, 3))
     add("report", "Report Q3.pdf", "application/pdf", ["projects"], tiny_pdf("Q3 report"))
     add("budget", "Budget", GOOGLE + "spreadsheet", ["root-id"])
     add("plan", "Launch plan", GOOGLE + "document", ["projects"])
